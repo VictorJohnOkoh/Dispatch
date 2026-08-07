@@ -100,7 +100,7 @@ be designed against it):
 {"type":"message_start","message":{"role":"assistant","content":[],...}}
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
 {"type":"message_end","message":{...}}
-{"type":"turn_end","message":{...}:,"toolResults":[]}
+{"type":"turn_end","message":{...},"toolResults":[]}
 {"type":"agent_end","messages":[...]}
 ```
 
