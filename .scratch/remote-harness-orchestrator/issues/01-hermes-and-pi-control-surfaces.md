@@ -23,6 +23,105 @@ Capture findings as a Markdown file in the repo and link it from the Answer.
 
 ## Answer
 
+> **Corrected 2026-08-14 against a live Hermes v0.19.0.** The original answer below picked the wrong
+> Hermes surface, and the surface it picked does not exist. See the **CORRECTION** section at the top
+> of [the research doc](../../../docs/research/harness-control-surfaces.md) for evidence; the revision
+> is summarised immediately below.
+
+### Revision (2026-08-14, empirical)
+
+**The two Harnesses have the same integration shape, not incompatible ones.** Both are
+subprocess-with-structured-stdio: `hermes acp` speaks JSON-RPC 2.0 over newline-delimited JSON, `pi
+--mode rpc` speaks LF-delimited JSONL. The Harness adapter does not have to span "HTTP server" and
+"subprocess".
+
+**Hermes' HTTP+SSE run API does not exist.** `POST /v1/runs`, `GET /v1/runs/{id}/events` and
+`GET /v1/capabilities` are documented but absent from v0.19.0 — they 404. The whole API is under
+`/api/*`, and the one WebSocket event channel is dashboard plumbing with receive-only subscribers.
+Consequence for this ticket's method: `[docs]`-only claims about this vendor are now suspect by default.
+
+**ACP is the better surface anyway** — an open standard with published schemas, no server, no port, no
+token.
+
+**Approval, session lifecycle and model selection are already in-protocol.** `initialize` advertises
+`sessionCapabilities: {fork, list, resume}`; `session/new` returns three approval modes (`default`,
+`accept_edits`, `dont_ask`, switchable via `session/set_mode`) and a 43-entry model catalog (switchable
+via `session/set_model`). These are not things to build on top of an opaque harness.
+
+**Empirically confirmed:** event vocabulary, including the non-standard `usage_update` kind that is not
+in the ACP schema; `stopReason: end_turn`; the `usage` object; the `tool_call` payload; `hermes -z`
+exits 0; `base_url` (not `OPENAI_BASE_URL`) is the config key, settling old item 7.
+
+**Approval interception is real, and its payload is the richest control-plane data on either harness.**
+`session/request_permission` carries the full diff (`oldText`/`newText`) before the write, so a
+supervisor can show exactly what will change. Two options only — `allow_once` / `deny`. Beware: its
+`toolCallId` (`edit-approval-1`) does **not** match the streamed `tool_call` id (`tc-…`) for the same
+edit, so approvals cannot be correlated to tool calls by id.
+
+**Two defects found**, both in the research doc as C7 and C9:
+
+- Hermes deadlocks on the **first tool call of any kind** — `terminal`, `search_files` and `patch` all
+  hang, because they share one lazily-created execution environment whose child inherits the ACP stdin
+  pipe. Seven runs, duration always within ~6s of the client's own timeout (118.8/120, 237.7/240,
+  272.7/280, 294.2/300, 414.4/420, 418.8/420, 898.6/900) versus 1.18s with stdin closed up front. The
+  original write-up blamed the terminal tool specifically; that was too narrow, and "avoid the terminal
+  tool" is not a workaround.
+- Hermes can report an edit as `"denied by ACP client"` in 0.00s **without ever asking the client** —
+  three occurrences, all when `patch` followed another tool in the same turn. It fails closed, which is
+  the safe direction, but it means **a denial is not evidence of a decision**. Approval Policy must not
+  render "denied" as a user choice.
+
+**Closed off:** advertising the ACP `terminal` capability would achieve nothing. `initialize` accepts
+`client_capabilities` and never reads it, and Hermes-as-agent calls exactly one client method,
+`request_permission` — no `fs/*`, no `terminal/*` anywhere in the implementation. So C6's "delegates
+nothing" is by construction, and an orchestrator cannot observe file effects through ACP with this
+harness at all.
+
+**`tool_call_update` is emitted but not capturable on Windows** — closed as an impossibility rather than
+left open. It is sent on the step *after* a tool returns, and the two escapes from the deadlock exclude
+each other: hold stdin open and the tool never returns before the client's timeout; close stdin and the
+tool returns in 3.08s and the turn completes internally, but Hermes tears down its writer too and the
+client receives nothing after the approval response. Read the payload off `build_tool_complete` in the
+source, or retest on POSIX. This does not block the Event model — the tool-completion shape is known,
+just not observed.
+
+### Pi, captured 2026-08-15
+
+**Pi's event stream is the better of the two, and the Event model should be shaped against it.** Its
+tool lifecycle is complete — `tool_execution_start` / `_update` / `_end`, full args before execution,
+streaming partial output, explicit `isError`, and **one stable `toolCallId` across all three** plus the
+`toolResult` message. Hermes offers a start event, no incremental output, an unreachable completion, and
+an approval id that does not match its own tool-call id. Designing against Hermes and extending for Pi
+would discard information Pi provides for free; do the reverse.
+
+**Usage accounting and Vendor identity come free.** Every assistant turn carries `api`, `provider`,
+`model` and a `usage` object (input/output/cacheRead/cacheWrite/reasoning/total, plus a `cost`
+breakdown). Per *turn*, not per session. The Control Plane stream names the Data Plane endpoint the
+Daemon routed to — a correlation that would otherwise have to be reconstructed.
+
+**Pointing Pi at a local Vendor is a config write, not code.** `~/.pi/agent/models.json` registers an
+arbitrary OpenAI-compatible endpoint with no extension, and autodetects context window and max output.
+This overturns old item 4's "extension only". Trap: the key is `baseUrl`, camelCase.
+
+**Both harnesses trap on stdin, in opposite directions.** Pi's `-p` reads stdin to EOF even with the
+prompt as an argument, so it hangs forever at a terminal; `--mode rpc` is a session, not a pipe, and
+`cat cmds | pi` truncates the run mid-turn (5 events vs 54). Hermes hangs because a *child* inherited
+the stdin pipe (C7). **The Daemon must own stdin explicitly for every Harness** rather than inherit it —
+that is now a supervision requirement, not a detail.
+
+**Confirmed:** nothing is gated in Pi (no approval event for `bash: ls -la`), so Approval Policy cannot
+be uniform; all Pi modes exit 0 on success.
+
+**Still open:** whether `pre_tool_call` fails open (note the ACP edit path fails *closed*, so the two
+cannot be assumed to match); whether Pi's `ctx.ui.confirm` routes over RPC — still untested, since the
+capture used no extension and that hook only exists inside one; whether C7 and C9 reproduce on POSIX.
+
+Captures: `docs/research/captures/hermes/`. Tooling: `scripts/capture-hermes.sh`, `scripts/acp-capture.py`.
+
+---
+
+### Original answer (2026-08-07, from documentation and published source)
+
 Full findings: [docs/research/harness-control-surfaces.md](../../../docs/research/harness-control-surfaces.md).
 
 Harnesses identified: **Hermes Agent** (`NousResearch/hermes-agent`, Python — the harness, not the model
