@@ -1,0 +1,39 @@
+2026-08-14 11:09:17 [INFO] acp_adapter.entry: Loaded env from C:\Users\Victor\AppData\Local\hermes\.env
+2026-08-14 11:09:17 [INFO] acp_adapter.entry: Starting hermes-agent ACP adapter
+2026-08-14 11:09:17 [INFO] acp_adapter.server: ACP client connected
+2026-08-14 11:09:17 [INFO] acp_adapter.server: Initialize from acp-capture (protocol v1)
+2026-08-14 11:09:17 [INFO] run_agent: Loaded environment variables from C:\Users\Victor\AppData\Local\hermes\.env
+2026-08-14 11:09:18 [WARNING] hermes_state: state.db (async_delegation): linked SQLite 3.50.4 is vulnerable to the WAL-reset corruption bug (https://sqlite.org/wal.html#walresetbug) — using journal_mode=DELETE instead of enabling WAL. Upgrade to SQLite 3.51.3+ (or backports 3.50.7 / 3.44.6); Hermes-managed installs can repair the embedded runtime with `hermes update`. See `hermes doctor`. This warning fires once per process per database.
+2026-08-14 11:09:18 [WARNING] hermes_state: state.db: linked SQLite 3.50.4 is vulnerable to the WAL-reset corruption bug (https://sqlite.org/wal.html#walresetbug) — using journal_mode=DELETE instead of enabling WAL. Upgrade to SQLite 3.51.3+ (or backports 3.50.7 / 3.44.6); Hermes-managed installs can repair the embedded runtime with `hermes update`. See `hermes doctor`. This warning fires once per process per database.
+2026-08-14 11:09:18 [INFO] run_agent: OpenAI client created (agent_init, shared=True) thread=MainThread:23724 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:09:18 [WARNING] tools.registry: check_fn _browser_cdp_check returned False; dependent tools will be unavailable this turn
+2026-08-14 11:09:18 [WARNING] tools.registry: check_fn _browser_dialog_check returned False; dependent tools will be unavailable this turn
+2026-08-14 11:09:18 [INFO] agent.auxiliary_client: Vision auto-detect: using main provider lmstudio (gpt-oss-20b)
+2026-08-14 11:09:18 [INFO] agent.auxiliary_client: Vision auto-detect: using main provider lmstudio (gpt-oss-20b)
+2026-08-14 11:09:18 [INFO] acp_adapter.session: Created ACP session 9eb7c239-90e7-40f7-93c8-e16558ad6301 (cwd=C:\Users\Victor\hermes-capture-20260814-110708\workdir)
+2026-08-14 11:09:18 [INFO] acp_adapter.server: New session 9eb7c239-90e7-40f7-93c8-e16558ad6301 (cwd=C:\Users\Victor\hermes-capture-20260814-110708\workdir)
+2026-08-14 11:09:20 [INFO] hermes_cli.auth: Nous inference auth: using NAS invoke JWT
+2026-08-14 11:09:21 [INFO] acp_adapter.server: Prompt on session 9eb7c239-90e7-40f7-93c8-e16558ad6301: Use your terminal tool to list the files in the current directory, then tell me how many there are.
+2026-08-14 11:09:21 [INFO] agent.turn_context: conversation turn: session=9eb7c239-90e7-40f7-93c8-e16558ad6301 model=gpt-oss-20b provider=lmstudio platform=acp history=0 msg='Use your terminal tool to list the files in the current directory, then tell me ...'
+2026-08-14 11:09:21 [INFO] run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-10 (_call):27540 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:09:25 [INFO] run_agent: OpenAI client closed (stream_request_complete, shared=False, tcp_force_closed=0) thread=Thread-10 (_call):27540 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:09:25 [INFO] agent.conversation_loop: API call #1: model=gpt-oss-20b provider=lmstudio in=14260 out=83 total=14343 latency=3.8s
+2026-08-14 11:09:25 [INFO] tools.terminal_tool: Creating new local environment for task default...
+2026-08-14 11:24:22 [WARNING] tools.environments.local: HERMES_GIT_BASH_PATH=C:/Program Files/Git/usr/bin/bash.exe fails to start; using C:\Program Files\Git\usr\bin\bash.EXE instead
+2026-08-14 11:24:22 [WARNING] tools.environments.local: HERMES_GIT_BASH_PATH=C:/Program Files/Git/usr/bin/bash.exe fails to start; using C:\Program Files\Git\usr\bin\bash.EXE instead
+2026-08-14 11:24:23 [INFO] tools.environments.base: Session snapshot created (session=eb64ac9c3e13, cwd=C:\Users\Victor\hermes-capture-20260814-110708\workdir)
+2026-08-14 11:24:23 [INFO] tools.terminal_tool: local environment ready for task default
+2026-08-14 11:24:23 [WARNING] tools.environments.local: HERMES_GIT_BASH_PATH=C:/Program Files/Git/usr/bin/bash.exe fails to start; using C:\Program Files\Git\usr\bin\bash.EXE instead
+2026-08-14 11:24:23 [INFO] agent.tool_executor: tool terminal completed (897.88s, 46 chars)
+2026-08-14 11:24:23 [INFO] run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-20 (_call):11412 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:24:28 [INFO] run_agent: OpenAI client closed (stream_request_complete, shared=False, tcp_force_closed=0) thread=Thread-20 (_call):11412 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:24:28 [INFO] agent.conversation_loop: API call #2: model=gpt-oss-20b provider=lmstudio in=14318 out=103 total=14421 latency=4.6s
+2026-08-14 11:24:28 [WARNING] tools.environments.local: HERMES_GIT_BASH_PATH=C:/Program Files/Git/usr/bin/bash.exe fails to start; using C:\Program Files\Git\usr\bin\bash.EXE instead
+2026-08-14 11:24:28 [INFO] agent.tool_executor: tool terminal completed (0.26s, 200 chars)
+2026-08-14 11:24:28 [INFO] run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-22 (_call):28216 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:24:34 [INFO] run_agent: OpenAI client closed (stream_request_complete, shared=False, tcp_force_closed=0) thread=Thread-22 (_call):28216 provider=lmstudio base_url=http://127.0.0.1:1234/v1 model=gpt-oss-20b
+2026-08-14 11:24:34 [INFO] agent.conversation_loop: API call #3: model=gpt-oss-20b provider=lmstudio in=14447 out=168 total=14615 latency=6.5s
+2026-08-14 11:24:34 [INFO] agent.conversation_loop: Turn ended: reason=text_response(finish_reason=stop) model=gpt-oss-20b api_calls=3/500 budget=3/500 tool_turns=2 last_msg_role=assistant response_len=114 session=9eb7c239-90e7-40f7-93c8-e16558ad6301
+2026-08-14 11:24:35 [INFO] tools.terminal_tool: Shutting down 1 remaining sandbox(es)...
+2026-08-14 11:24:35 [INFO] tools.terminal_tool: Manually cleaned up environment for task: default
+2026-08-14 11:24:35 [INFO] tools.terminal_tool: Cleaned 1 environments

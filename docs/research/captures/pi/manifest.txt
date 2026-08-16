@@ -1,0 +1,20 @@
+=== Pi capture run: 2026-08-15T22:56:47+01:00 ===
+OS: Windows (Git Bash) — MINGW64_NT-10.0-26200 ZenitoBurrito 3.4.10-87d57229.x86_64 2024-02-14 20:17 UTC x86_64 Msys
+node: stdout is not a tty
+pi invocation: pi
+capture dir: /c/Users/Victor/pi-capture-20260815-225644
+
+GET http://127.0.0.1:1234/api/v1/models -> HTTP 200000 -> lmstudio-models.json
+GET http://127.0.0.1:1234/api/v0/models -> HTTP 200000 -> lmstudio-models-v0.json
+LM Studio URL: http://127.0.0.1:1234
+Model: qwen/qwen3.5-9b (ctx 72000)
+extension: lmstudio-provider.ts; --list-models exit 0
+pi -p exit code: 0
+plain exit code: 0
+tool exit code: 0
+rpc exit code: 0
+agent_settled in rpc: no
+agent_settled in json: yes
+session files captured: 3
+
+Finished: 2026-08-15T22:58:50+01:00

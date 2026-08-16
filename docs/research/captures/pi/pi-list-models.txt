@@ -1,0 +1,2 @@
+provider  model            context  max-out  thinking  images
+lmstudio  qwen/qwen3.5-9b  72K      4.1K     no        no    

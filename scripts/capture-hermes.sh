@@ -184,55 +184,103 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=8
+TOTAL_STAGES=6
 
-# Git Bash mangles arguments that look like POSIX paths when handing them to
-# native Windows executables (curl.exe). Turn that off for the whole run.
-export MSYS_NO_PATHCONV=1
-export MSYS2_ARG_CONV_EXCL='*'
+# ──────────────────────────────────────────────────────────────────────────
+# Hermes is driven here over ACP (Agent Client Protocol) — `hermes acp` —
+# NOT over `hermes serve`.
+#
+# An earlier version of this wizard targeted `POST /v1/runs` and
+# `GET /v1/runs/{id}/events`. Those endpoints do not exist. Hermes v0.19.0's
+# HTTP API is mounted entirely under /api/*, /openapi.json enumerates it, and
+# the only WebSocket event channel (/api/events) is dashboard plumbing: it is
+# gated behind _DASHBOARD_EMBEDDED_CHAT_ENABLED, its subscribers are
+# receive-only, and it is fed by the PTY sidecar. There is no run-control
+# REST surface at all.
+#
+# `hermes acp` is the real structured surface, and it is an open standard
+# (JSON-RPC 2.0 over newline-delimited JSON on stdio) rather than something
+# to reverse-engineer. That makes Hermes and Pi the same integration SHAPE —
+# subprocess with structured stdio — which is a finding in its own right.
+# ──────────────────────────────────────────────────────────────────────────
 
-# Hermes reads its config from ~/.hermes/.env — so that IS our env file. The
-# library's write_env preserves every other line, and re-runs offer the
-# current value back as the default.
-mkdir -p "$HOME/.hermes"
-ENV_FILE="$HOME/.hermes/.env"
+# This file is the WIZARD's own bookkeeping, so re-runs can offer your previous
+# answers back as defaults. Hermes never reads it.
+#
+# Hermes' real config lives at %LOCALAPPDATA%\hermes\config.yaml (+ .env), which
+# `GET /api/status` reports as hermes_home. This wizard READS that config and
+# records it. It deliberately never writes it: the previous version wrote
+# OPENAI_BASE_URL into ~/.hermes/.env, which Hermes does not read, and the
+# resulting captures were silently meaningless.
+ENV_FILE="$HOME/.hermes-capture.env"
 
-# Everything captured lands here. WORKDIR is the Harness's cwd, kept separate
-# so stray files (Hermes writes trajectory_samples.jsonl into cwd) are
-# obvious rather than mixed into your real work.
 CAPTURE_DIR="$HOME/hermes-capture-$(date +%Y%m%d-%H%M%S)"
 WORKDIR="$CAPTURE_DIR/workdir"
 mkdir -p "$WORKDIR"
 MANIFEST="$CAPTURE_DIR/manifest.txt"
 
-PY=""
-SERVE_PID=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ACP_CLIENT="$SCRIPT_DIR/acp-capture.py"
 
-# note_manifest "..." — append a line to the run manifest.
+PY=""
+GIT_BASH_WIN=""
+
 note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 
-# capture_get NAME URL [auth] — GET a URL, save the raw body, report status.
-capture_get() {
-  local name="$1" url="$2" auth="${3:-}" code
-  local out="$CAPTURE_DIR/$name"
-  if [[ -n "$auth" ]]; then
-    code=$(curl -sS -o "$out" -w '%{http_code}' -H "Authorization: Bearer $auth" "$url" 2>>"$CAPTURE_DIR/curl-errors.log" || echo "000")
-  else
-    code=$(curl -sS -o "$out" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log" || echo "000")
-  fi
-  if [[ "$code" == "200" ]]; then
-    printf '  %s✓%s %s → %s (%s bytes)\n' "$GREEN" "$RESET" "$url" "$name" "$(wc -c < "$out" | tr -d ' ')"
-  else
-    warn "$url returned HTTP $code — saved anyway as $name"
-  fi
-  note_manifest "GET $url -> HTTP $code -> $name"
+# winpath PATH — a POSIX path as Windows sees it. Native programs (python.exe,
+# hermes.exe) cannot open /c/Users/... — they read it as drive-relative and
+# silently land somewhere else.
+winpath() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
 
-banner "Hermes → LM Studio: capture raw output"
+# fetch URL OUTFILE — GET a URL, writing the body with the SHELL rather than
+# curl's -o. curl here is a native Windows build: hand it a POSIX path and it
+# fails with "Failure writing output to destination, passed N returned -1".
+# Redirection sidesteps the question entirely.
+fetch() {
+  local url="$1" out="$2" body code
+  body=$(curl -sS -w $'\n%{http_code}' --max-time 15 "$url" 2>>"$CAPTURE_DIR/curl-errors.log") || body=$'\n000'
+  code=$(printf '%s' "$body" | tail -n1)
+  printf '%s' "$body" | sed '$d' > "$out"
+  if [[ "$code" == "200" ]]; then
+    printf '  %s✓%s %s → %s (%s bytes)\n' "$GREEN" "$RESET" "$url" "$(basename "$out")" "$(wc -c < "$out" | tr -d ' ')"
+  else
+    warn "$url returned HTTP $code — saved anyway as $(basename "$out")"
+  fi
+  note_manifest "GET $url -> HTTP $code -> $(basename "$out")"
+}
+
+# capture_acp LABEL TIMEOUT PROMPT [EXTRA...] — one recorded ACP conversation.
+capture_acp() {
+  local label="$1" timeout="$2" prompt="$3" rc
+  shift 3
+  local -a extra=("$@")
+  # An array, not ${VAR:+...}: the bash path contains spaces ("Program Files"),
+  # and an unquoted conditional expansion would split it into two arguments.
+  local -a envargs=()
+  [[ -n "$GIT_BASH_WIN" ]] && envargs=(--env "HERMES_GIT_BASH_PATH=$GIT_BASH_WIN")
+  set +e
+  "$PY" "$(winpath "$ACP_CLIENT")" \
+    --agent-cmd "hermes acp" \
+    --cwd "$(winpath "$WORKDIR")" \
+    --outdir "$(winpath "$CAPTURE_DIR")" \
+    --label "$label" \
+    --timeout "$timeout" \
+    "${envargs[@]}" \
+    "${extra[@]}" \
+    --prompt "$prompt"
+  rc=$?
+  set -e
+  note_manifest "acp capture '$label' -> exit $rc"
+  return $rc
+}
+
+banner "Hermes → ACP: capture raw protocol frames"
 
 # ── Stage 1 ────────────────────────────────────────────────────────────────
-stage "Preflight — tools and versions"
-say "Checking everything this needs before we touch any config."
+stage "Preflight — hermes, ACP mode, and the capture client"
+say "Checking everything this needs before touching anything."
 printf '\n'
 
 for c in python python3 py; do
@@ -240,37 +288,60 @@ for c in python python3 py; do
 done
 if [[ -z "$PY" ]]; then
   warn "No python on PATH. Hermes is a Python program, so this is surprising."
-  say "This wizard needs it to read JSON (jq isn't assumed on Windows)."
   exit 1
 fi
 say "python:  $PY ($($PY --version 2>&1))"
 
 command -v curl >/dev/null 2>&1 || { warn "curl not found — unexpected in Git Bash."; exit 1; }
-say "curl:    $(curl --version 2>&1 | head -n1)"
 
 if ! command -v hermes >/dev/null 2>&1; then
   warn "hermes is not on PATH in this shell."
-  say "If you installed it with pipx/uv, open the shell where 'hermes --version' works."
+  say "Open the shell where 'hermes --version' works, then re-run."
   exit 1
 fi
 say "hermes:  $(hermes --version 2>&1 | head -n1)"
 
-printf '\n'
-say "Checking that the API server extra is installed..."
-if hermes serve --help >/dev/null 2>&1; then
-  say "  'hermes serve' is available."
-else
-  warn "'hermes serve' failed. It needs the [web] extra."
-  say "Install it, then re-run:  pip install -e '.[web]'   (or your installer's equivalent)"
+if [[ ! -f "$ACP_CLIENT" ]]; then
+  warn "Can't find the ACP capture client next to this script:"
+  say "  $ACP_CLIENT"
+  say "It lives at scripts/acp-capture.py in the repo. Run this wizard from there."
   exit 1
 fi
-note "The [pty] extra is POSIX-only. On Windows its embedded chat socket may not"
-note "work — that's fine, we only use the HTTP+SSE API, which does not need it."
+say "client:  $ACP_CLIENT"
 
-note_manifest "=== Hermes capture run: $(date -Iseconds) ==="
+printf '\n'
+say "Verifying ACP mode is installed (adapter imports + dependencies)..."
+set +e
+hermes acp --check > "$CAPTURE_DIR/acp-check.txt" 2>&1
+ACP_CHECK_RC=$?
+set -e
+if [[ $ACP_CHECK_RC -eq 0 ]]; then
+  say "  'hermes acp --check' passed."
+else
+  warn "'hermes acp --check' exited $ACP_CHECK_RC. Output:"
+  head -n 12 "$CAPTURE_DIR/acp-check.txt" | sed 's/^/    /'
+  confirm "Continue anyway?" || exit 1
+fi
+note_manifest "hermes acp --check exit: $ACP_CHECK_RC"
+
+# Hermes shells out through Git Bash for its terminal tool. On this machine it
+# inherits HERMES_GIT_BASH_PATH=...\Git\bin\bash.exe, fails to start it from
+# inside an MSYS shell, and burns minutes before falling back to
+# ...\Git\usr\bin\bash.EXE. Hand it the working path up front.
+for b in "/c/Program Files/Git/usr/bin/bash.exe" "/usr/bin/bash.exe"; do
+  if [[ -x "$b" ]]; then GIT_BASH_WIN="$(winpath "$b")"; break; fi
+done
+if [[ -n "$GIT_BASH_WIN" ]]; then
+  say "git bash for Hermes' terminal tool: $GIT_BASH_WIN"
+else
+  warn "Couldn't find Git's usr/bin/bash.exe — the first tool call may be slow."
+fi
+
+note_manifest "=== Hermes ACP capture run: $(date -Iseconds) ==="
 note_manifest "OS: Windows (Git Bash) — $(uname -a 2>/dev/null || echo unknown)"
 note_manifest "python: $($PY --version 2>&1)"
 note_manifest "hermes: $(hermes --version 2>&1 | head -n1)"
+note_manifest "hermes acp --version: $(hermes acp --version 2>&1 | head -n1)"
 note_manifest "capture dir: $CAPTURE_DIR"
 note_manifest ""
 
@@ -279,80 +350,66 @@ say "Capturing into: $CAPTURE_DIR"
 pause "Looks right?"
 
 # ── Stage 2 ────────────────────────────────────────────────────────────────
-stage "LM Studio — confirm it's serving, capture its model list"
-say "LM Studio must have its local server running (Developer tab → Start Server)."
-say "Default port is 1234."
-printf '\n'
-note "Using 127.0.0.1 rather than localhost: on Windows, localhost can resolve to"
-note "::1 first and miss a server bound only to IPv4."
-ask LMSTUDIO_URL "LM Studio base URL [http://127.0.0.1:1234]:"
-[[ -z "$LMSTUDIO_URL" ]] && LMSTUDIO_URL="http://127.0.0.1:1234"
+stage "Record the wiring — Hermes' own config, and the Vendor"
+say "Reading Hermes' real configuration. Nothing here is written."
 printf '\n'
 
-capture_get "lmstudio-models.json" "$LMSTUDIO_URL/api/v1/models"
-if [[ ! -s "$CAPTURE_DIR/lmstudio-models.json" ]]; then
-  warn "Nothing came back. Is the LM Studio server started?"
-  say "Older LM Studio (<0.4.0) uses /api/v0/models — trying that too."
-  capture_get "lmstudio-models-v0.json" "$LMSTUDIO_URL/api/v0/models"
+HERMES_HOME="${LOCALAPPDATA:-$HOME/AppData/Local}/hermes"
+HERMES_CONFIG="$HERMES_HOME/config.yaml"
+if [[ -f "$HERMES_CONFIG" ]]; then
+  say "config: $HERMES_CONFIG"
+  printf '\n'
+  sed -n '1,12p' "$HERMES_CONFIG" | sed 's/^/    /'
+  # The model block is the wiring that matters; keep a verbatim copy.
+  sed -n '1,12p' "$HERMES_CONFIG" > "$CAPTURE_DIR/hermes-config-model-block.yaml"
+  LM_BASE=$(grep -E '^\s*base_url:' "$HERMES_CONFIG" | head -n1 | sed 's/.*base_url:[[:space:]]*//')
+  note_manifest "hermes config: $HERMES_CONFIG"
+  note_manifest "hermes base_url: $LM_BASE"
+else
+  warn "No config.yaml at $HERMES_CONFIG"
+  ask LM_BASE "Vendor base URL [http://127.0.0.1:1234/v1]:"
+  [[ -z "$LM_BASE" ]] && LM_BASE="http://127.0.0.1:1234/v1"
 fi
 
 printf '\n'
-say "Model ids found:"
-$PY - "$CAPTURE_DIR/lmstudio-models.json" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — open the file and read the ids yourself)"
+note "Note the key is 'base_url' in config.yaml — not OPENAI_BASE_URL. That"
+note "naming question was item 7 on the harness research list; this settles it."
+
+printf '\n'
+LM_ROOT="${LM_BASE%/v1}"
+say "Checking the Vendor is actually serving at $LM_ROOT ..."
+fetch "$LM_ROOT/api/v1/models" "$CAPTURE_DIR/lmstudio-models.json"
+if [[ ! -s "$CAPTURE_DIR/lmstudio-models.json" ]]; then
+  say "Trying the pre-0.4.0 path..."
+  fetch "$LM_ROOT/api/v0/models" "$CAPTURE_DIR/lmstudio-models-v0.json"
+fi
+
+printf '\n'
+say "Models the Vendor is offering:"
+$PY - "$(winpath "$CAPTURE_DIR/lmstudio-models.json")" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
-items = d.get("models") or d.get("data") or []
-for m in items:
-    print("   ", m.get("id") or m.get("modelKey") or m.get("path"))
+for m in (d.get("models") or d.get("data") or []):
+    caps = m.get("capabilities") or {}
+    tools = "tools" if caps.get("trained_for_tool_use") else "NO TOOLS"
+    ident = m.get("key") or m.get("id") or m.get("modelKey") or m.get("path")
+    print(f"    {ident:<45} ctx {m.get('max_context_length') or '?':<8} {tools}")
 PYEOF
 
 printf '\n'
-step "Pick one that is loaded (or that LM Studio will JIT-load) and paste its id."
-ask HERMES_INFERENCE_MODEL "Model id:"
-note_manifest "LM Studio URL: $LMSTUDIO_URL"
-note_manifest "Model: $HERMES_INFERENCE_MODEL"
+warn "Hermes uses whichever model its own config names. If that model is not"
+warn "tool-capable, stage 5 will produce no tool_call and the capture is wasted."
+pause "Checked?"
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────
-stage "Wire Hermes to LM Studio"
-say "Writing to $ENV_FILE. Other lines in that file are preserved."
-printf '\n'
-
-write_env OPENAI_BASE_URL "$LMSTUDIO_URL/v1"
-write_env OPENAI_API_KEY "lm-studio"
-write_env HERMES_INFERENCE_MODEL "$HERMES_INFERENCE_MODEL"
-
-printf '\n'
-say "Now the API server. It needs a bearer token — any non-empty string."
-ask_secret API_SERVER_KEY "API server key [Enter to generate one]:"
-if [[ -z "$API_SERVER_KEY" ]]; then
-  API_SERVER_KEY="capture-$(date +%s)-$RANDOM"
-  say "Generated: $API_SERVER_KEY"
-fi
-write_env API_SERVER_ENABLED "true"
-write_env API_SERVER_KEY "$API_SERVER_KEY"
-
-printf '\n'
-ask HERMES_PORT "Port for hermes serve [8080]:"
-[[ -z "$HERMES_PORT" ]] && HERMES_PORT="8080"
-HERMES_BASE="http://127.0.0.1:$HERMES_PORT"
-note_manifest "hermes serve: $HERMES_BASE"
-
-printf '\n'
-warn "If the docs on this version use 'base_url' rather than 'api'/OPENAI_BASE_URL,"
-warn "the next stage will fail loudly — that mismatch is itself a finding worth"
-warn "recording (it's item 7 on the research doc's empirical list)."
-pause "Continue?"
-
-# ── Stage 4 ────────────────────────────────────────────────────────────────
-stage "Baseline — one-shot plain text, before any server"
-say "'hermes -z' prints the final response and nothing else. If this works, the"
-say "model wiring is correct, and we learn the exit code (undocumented — item 4)."
+stage "Baseline — one-shot plain text, no protocol involved"
+say "'hermes -z' prints the final response and nothing else. Cheapest possible"
+say "proof the model wiring works, and it gives us the exit code (undocumented)."
 printf '\n'
 
 cd "$WORKDIR"
 set +e
 hermes -z "Reply with exactly the word: hello. Do not use any tools." \
-  --usage-file "$CAPTURE_DIR/baseline-usage.json" \
   > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
 BASELINE_EXIT=$?
 set -e
@@ -364,169 +421,78 @@ say "stdout was:"
 sed 's/^/    /' "$CAPTURE_DIR/baseline-stdout.txt" | head -n 10
 printf '\n'
 if [[ "$BASELINE_EXIT" -ne 0 ]]; then
-  warn "Non-zero exit. Check baseline-stderr.txt before going on."
+  warn "Non-zero exit. Check baseline-stderr.txt before going on:"
   say "  $CAPTURE_DIR/baseline-stderr.txt"
   confirm "Continue anyway?" || exit 1
 fi
-pause "Ready to start the server?"
+pause "Ready for the first ACP capture?"
 
-# ── Stage 5 ────────────────────────────────────────────────────────────────
-stage "Start hermes serve, capture the static surfaces"
-say "Starting in the background, cwd = $WORKDIR"
+# ── Stage 4 ────────────────────────────────────────────────────────────────
+stage "Capture the PLAIN exchange over ACP"
+say "This is the primary artefact: every JSON-RPC frame in both directions,"
+say "recorded as sent and received."
+printf '\n'
+note "The capture client is a real ACP client, not a pipe. ACP is bidirectional —"
+note "the agent calls back for permission decisions and file reads, so a plain"
+note "'cat cmds.jsonl | hermes acp' would hang. It answers those and logs them."
+printf '\n'
+say "Expect roughly a minute. No tools should be involved."
+pause "Run it?"
 printf '\n'
 
-cd "$WORKDIR"
-hermes serve --host 127.0.0.1 --port "$HERMES_PORT" \
-  > "$CAPTURE_DIR/serve-stdout.log" 2> "$CAPTURE_DIR/serve-stderr.log" &
-SERVE_PID=$!
-say "pid $SERVE_PID — logs in serve-stdout.log / serve-stderr.log"
+capture_acp "plain" 600 "Reply with exactly the word: hello. Do not use any tools." || true
 
 printf '\n'
-say "Waiting for /health..."
-READY=""
-for i in $(seq 1 45); do
-  if curl -sS -o /dev/null --max-time 2 "$HERMES_BASE/health" 2>/dev/null; then READY="yes"; break; fi
-  sleep 2
-done
-if [[ -z "$READY" ]]; then
-  warn "Server didn't come up in 90s. Read serve-stderr.log — first run may be building."
-  confirm "Keep waiting / continue anyway?" || { kill "$SERVE_PID" 2>/dev/null || true; exit 1; }
-fi
-
-printf '\n'
-capture_get "hermes-capabilities.json" "$HERMES_BASE/v1/capabilities" "$API_SERVER_KEY"
-capture_get "hermes-models.json"       "$HERMES_BASE/v1/models"       "$API_SERVER_KEY"
-capture_get "hermes-health.json"       "$HERMES_BASE/health/detailed" "$API_SERVER_KEY"
-
-printf '\n'
-say "/v1/capabilities is the machine-readable description of the stable surface."
-say "It is the best available evidence for what POST /v1/runs expects — the"
-say "request body shape is NOT documented anywhere, so read it now:"
-printf '\n'
-$PY -m json.tool "$CAPTURE_DIR/hermes-capabilities.json" 2>/dev/null | head -n 40 || head -c 2000 "$CAPTURE_DIR/hermes-capabilities.json"
-printf '\n'
-pause "Read it — full copy is in hermes-capabilities.json. Press Enter."
-
-# ── Stage 6 ────────────────────────────────────────────────────────────────
-stage "Capture the PLAIN exchange (no tools)"
-say "This is the primary artefact. Raw SSE bytes, unparsed."
-printf '\n'
-
-cat > "$CAPTURE_DIR/run-plain.json" <<'JSONEOF'
-{
-  "prompt": "Reply with exactly the word: hello. Do not use any tools."
-}
-JSONEOF
-
-say "Request body written to run-plain.json:"
-sed 's/^/    /' "$CAPTURE_DIR/run-plain.json"
-printf '\n'
-warn "This body is a best guess — the schema is undocumented."
-step "If /v1/capabilities showed a different shape, edit that file now, then continue."
-pause "Edited (or happy as-is)?"
-
-printf '\n'
-RUN_RESP="$CAPTURE_DIR/run-plain-response.json"
-RUN_CODE=$(curl -sS -o "$RUN_RESP" -w '%{http_code}' \
-  -H "Authorization: Bearer $API_SERVER_KEY" \
-  -H "Content-Type: application/json" \
-  --data @"$CAPTURE_DIR/run-plain.json" \
-  "$HERMES_BASE/v1/runs" 2>>"$CAPTURE_DIR/curl-errors.log" || echo "000")
-say "POST /v1/runs → HTTP $RUN_CODE"
-note_manifest "POST /v1/runs (plain) -> HTTP $RUN_CODE"
-
-if [[ "$RUN_CODE" != "200" && "$RUN_CODE" != "201" && "$RUN_CODE" != "202" ]]; then
-  warn "Rejected. The response body tells you the real schema:"
-  sed 's/^/    /' "$RUN_RESP" | head -n 20
-  say "Fix run-plain.json to match and re-run this wizard."
-  confirm "Continue to shutdown?" || true
-else
-  RUN_ID=$($PY -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("id") or d.get("run_id") or d.get("runId") or "")' "$RUN_RESP" 2>/dev/null || echo "")
-  if [[ -z "$RUN_ID" ]]; then
-    say "Response was:"; sed 's/^/    /' "$RUN_RESP" | head -n 20
-    ask RUN_ID "Couldn't find the run id — paste it:"
-  fi
-  say "run id: $RUN_ID"
-  note_manifest "plain run id: $RUN_ID"
-
-  printf '\n'
-  warn "Note for the design: we POST first, then attach to /events. If the early"
-  warn "events are missing from the capture, that means the stream does NOT replay"
-  warn "from the start — which is a real finding for the replay-semantics ticket."
-  printf '\n'
-  say "Attaching to the SSE stream (up to 300s)..."
-  curl -sS -N --max-time 300 \
-    -H "Authorization: Bearer $API_SERVER_KEY" \
-    "$HERMES_BASE/v1/runs/$RUN_ID/events" \
-    > "$CAPTURE_DIR/plain-events.sse" 2>>"$CAPTURE_DIR/curl-errors.log" || true
-
-  say "captured $(wc -l < "$CAPTURE_DIR/plain-events.sse" | tr -d ' ') lines → plain-events.sse"
-  capture_get "plain-run-final.json" "$HERMES_BASE/v1/runs/$RUN_ID" "$API_SERVER_KEY"
-  printf '\n'
-  say "First 20 lines:"
-  head -n 20 "$CAPTURE_DIR/plain-events.sse" | sed 's/^/    /'
-fi
+say "Written: plain-raw.log, plain-frames.jsonl, plain-summary.json"
+note "Watch for session/update kinds that are NOT in the ACP 0.9.0 schema —"
+note "'usage_update' is one. Vendor extensions to a standard protocol are"
+note "exactly what the Event model has to survive."
 printf '\n'
 pause "Press Enter for the tool-call capture."
 
-# ── Stage 7 ────────────────────────────────────────────────────────────────
-stage "Capture the TOOL-CALL exchange"
-say "Same again, but with a prompt that forces a tool. This gives you the"
-say "tool.start / tool.progress / tool.complete payloads — item 1 on the"
-say "empirical list, and the thing the whole Event model is blocked on."
+# ── Stage 5 ────────────────────────────────────────────────────────────────
+stage "Capture the TOOL-CALL exchange over ACP"
+say "Same again, but with a prompt that forces a tool. This yields the"
+say "tool_call / tool_call_update payloads the Event model is blocked on."
 printf '\n'
 
 printf 'alpha\nbeta\ngamma\n' > "$WORKDIR/sample.txt"
-say "Created $WORKDIR/sample.txt for it to read."
-
-cat > "$CAPTURE_DIR/run-tool.json" <<'JSONEOF'
-{
-  "prompt": "Use your terminal tool to list the files in the current directory, then tell me how many there are."
-}
-JSONEOF
+say "Created $WORKDIR/sample.txt for it to find."
 printf '\n'
-say "Body: run-tool.json (same shape as the plain one — edit if you changed that)."
-pause "Ready?"
+
+warn "KNOWN DEFECT — Hermes v0.19.0 deadlocks its terminal tool in ACP mode on"
+warn "Windows until the client closes stdin. The spawned sandbox shell appears to"
+warn "inherit the ACP stdin pipe and block reading it."
+printf '\n'
+say "Measured: the tool's duration tracked the client's timeout exactly —"
+say "  272.7s of 280   418.8s of 420   898.6s of 900   118.8s of 120"
+say "and with stdin closed up front the same setup took 1.18s. It is a deadlock,"
+say "not a slow sandbox."
+printf '\n'
+say "So this stage runs with --close-stdin-on-tool-call: stdin is held open until"
+say "the first tool_call notification arrives, then closed to release the tool."
+printf '\n'
+warn "The trade: Hermes stops emitting once stdin closes, so this capture ends at"
+warn "tool_call. tool_call_update and the session/prompt response are NOT captured."
+warn "Record that as a gap — it is a Hermes defect, not a capture failure."
+printf '\n'
+note "Approvals: whether a session/request_permission arrives at all depends on"
+note "Hermes' approval config. The client auto-allows and logs the full payload."
+note "Absence of one is a finding, not a failure."
+printf '\n'
+say "Expect roughly 20 seconds."
+pause "Start it?"
+printf '\n'
+
+capture_acp "tool" 300 "Use your terminal tool to list the files in the current directory, then tell me how many there are." --close-stdin-on-tool-call || true
 
 printf '\n'
-TOOL_RESP="$CAPTURE_DIR/run-tool-response.json"
-TOOL_CODE=$(curl -sS -o "$TOOL_RESP" -w '%{http_code}' \
-  -H "Authorization: Bearer $API_SERVER_KEY" \
-  -H "Content-Type: application/json" \
-  --data @"$CAPTURE_DIR/run-tool.json" \
-  "$HERMES_BASE/v1/runs" 2>>"$CAPTURE_DIR/curl-errors.log" || echo "000")
-say "POST /v1/runs → HTTP $TOOL_CODE"
-note_manifest "POST /v1/runs (tool) -> HTTP $TOOL_CODE"
-
-if [[ "$TOOL_CODE" == "200" || "$TOOL_CODE" == "201" || "$TOOL_CODE" == "202" ]]; then
-  TOOL_RUN_ID=$($PY -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print(d.get("id") or d.get("run_id") or d.get("runId") or "")' "$TOOL_RESP" 2>/dev/null || echo "")
-  [[ -z "$TOOL_RUN_ID" ]] && ask TOOL_RUN_ID "Paste the run id:"
-  note_manifest "tool run id: $TOOL_RUN_ID"
-
-  printf '\n'
-  warn "Hermes only gates DANGEROUS commands by default (approvals.mode: smart),"
-  warn "so 'ls' will very likely NOT produce an approval.request. Absence of one"
-  warn "here is expected, not a failure."
-  printf '\n'
-  say "Attaching to the SSE stream (up to 300s)..."
-  curl -sS -N --max-time 300 \
-    -H "Authorization: Bearer $API_SERVER_KEY" \
-    "$HERMES_BASE/v1/runs/$TOOL_RUN_ID/events" \
-    > "$CAPTURE_DIR/tool-events.sse" 2>>"$CAPTURE_DIR/curl-errors.log" || true
-
-  say "captured $(wc -l < "$CAPTURE_DIR/tool-events.sse" | tr -d ' ') lines → tool-events.sse"
-  capture_get "tool-run-final.json" "$HERMES_BASE/v1/runs/$TOOL_RUN_ID" "$API_SERVER_KEY"
-  printf '\n'
-  say "Event types seen:"
-  grep -oE '"(type|event)"[[:space:]]*:[[:space:]]*"[^"]+"' "$CAPTURE_DIR/tool-events.sse" 2>/dev/null | sort -u | sed 's/^/    /' | head -n 30 || say "    (none matched — inspect the file by hand)"
-else
-  warn "Rejected — see run-tool-response.json"
-fi
+say "Written: tool-raw.log, tool-frames.jsonl, tool-summary.json"
 printf '\n'
 pause "Press Enter to wrap up."
 
-# ── Stage 8 ────────────────────────────────────────────────────────────────
-stage "Stray files, shutdown, and bundle"
+# ── Stage 6 ────────────────────────────────────────────────────────────────
+stage "Stray files and bundle"
 
 say "Checking whether Hermes littered its working directory..."
 printf '\n'
@@ -545,14 +511,26 @@ if [[ -z "$FOUND_STRAY" ]]; then
 fi
 
 printf '\n'
-say "Stopping the server..."
-hermes serve --stop >/dev/null 2>&1 || true
-if [[ -n "$SERVE_PID" ]] && kill -0 "$SERVE_PID" 2>/dev/null; then
-  kill "$SERVE_PID" 2>/dev/null || true
-  sleep 2
-  kill -0 "$SERVE_PID" 2>/dev/null && warn "Still running as pid $SERVE_PID — use Task Manager or: taskkill //PID $SERVE_PID //F"
-fi
-say "  stopped."
+say "Everything else Hermes left in the workdir:"
+find "$WORKDIR" -type f ! -name 'sample.txt' 2>/dev/null | sed 's/^/    /' | head -n 20 || true
+
+printf '\n'
+say "Event kinds across both captures:"
+for s in "$CAPTURE_DIR/plain-summary.json" "$CAPTURE_DIR/tool-summary.json"; do
+  [[ -f "$s" ]] || continue
+  printf '\n'
+  say "  $(basename "$s"):"
+  $PY - "$(winpath "$s")" <<'PYEOF' 2>/dev/null || say "    (couldn't parse)"
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+print("     stopReason:", d.get("stop_reason"), " agent exit:", d.get("agent_exit_code"))
+for k, n in sorted((d.get("session_update_kinds") or {}).items(), key=lambda kv: -kv[1]):
+    print(f"     {n:5}  {k}")
+if d.get("permission_request_count"):
+    print("     permission requests:", d["permission_request_count"])
+PYEOF
+  note_manifest "$(basename "$s"): captured"
+done
 
 note_manifest ""
 note_manifest "Finished: $(date -Iseconds)"
@@ -564,14 +542,15 @@ printf '\n'
 ls -1 "$CAPTURE_DIR" | sed 's/^/    /'
 
 printf '\n'
-say "The two files that matter most:"
-say "  plain-events.sse         ← the plain exchange"
-say "  tool-events.sse          ← the tool-call payloads"
-say "  hermes-capabilities.json ← the stable-surface description"
+say "The files that matter most:"
+say "  plain-raw.log / plain-frames.jsonl   ← the plain exchange"
+say "  tool-raw.log  / tool-frames.jsonl    ← the tool-call payloads"
+say "  *-summary.json                       ← stopReason, usage, event tallies"
 printf '\n'
-step "Copy the whole folder back to the CapStone repo as docs/research/captures/"
+step "Copy the whole folder into the repo as docs/research/captures/hermes/"
 step "Then resolve ticket 03 with the manifest contents."
 printf '\n'
-warn "Redact API_SERVER_KEY from manifest.txt if you commit this anywhere."
+note "Nothing secret is captured here — ACP mode needs no API key, and the"
+note "Vendor is local."
 
 finish
