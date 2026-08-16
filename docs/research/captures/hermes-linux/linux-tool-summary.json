@@ -1,0 +1,118 @@
+{
+  "label": "linux-tool",
+  "captured_at": "2026-08-16T20:18:03.096167+00:00",
+  "agent_cmd": "hermes acp",
+  "cwd": "/home/victor/c7test/workdir",
+  "prompt": "Use your terminal tool to run exactly: ls -1 | wc -l",
+  "client_capabilities": {
+    "fs": true,
+    "terminal": false
+  },
+  "permission_policy": "allow",
+  "close_stdin_after_prompt": false,
+  "close_stdin_on_tool_call": false,
+  "close_stdin_on_permission": false,
+  "capture_exit_code": 0,
+  "agent_exit_code": 0,
+  "session_id": "1ed63c3e-5170-4d20-bb9f-ea3289eb3570",
+  "stop_reason": "end_turn",
+  "usage": {
+    "cachedReadTokens": 0,
+    "inputTokens": 32796,
+    "outputTokens": 151,
+    "thoughtTokens": 101,
+    "totalTokens": 32947
+  },
+  "initialize_result": {
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {
+        "image": true
+      },
+      "sessionCapabilities": {
+        "fork": {},
+        "list": {},
+        "resume": {}
+      }
+    },
+    "agentInfo": {
+      "name": "hermes-agent",
+      "version": "0.19.0"
+    },
+    "authMethods": [
+      {
+        "description": "Authenticate Hermes using the currently configured lmstudio runtime credentials.",
+        "id": "lmstudio",
+        "name": "lmstudio runtime credentials"
+      },
+      {
+        "args": [
+          "--setup"
+        ],
+        "description": "Open Hermes' interactive model/provider setup in a terminal. Use this when Hermes has not been configured on this machine yet.",
+        "id": "hermes-setup",
+        "name": "Configure Hermes provider",
+        "type": "terminal"
+      }
+    ],
+    "protocolVersion": 1
+  },
+  "new_session_result": {
+    "_meta": {
+      "hermes": {
+        "sessionProvenance": {
+          "acpSessionId": "1ed63c3e-5170-4d20-bb9f-ea3289eb3570",
+          "currentHermesSessionId": "1ed63c3e-5170-4d20-bb9f-ea3289eb3570",
+          "rootHermesSessionId": "1ed63c3e-5170-4d20-bb9f-ea3289eb3570",
+          "parentHermesSessionId": null,
+          "sessionKind": "root",
+          "compressionDepth": 0
+        }
+      }
+    },
+    "models": {
+      "availableModels": [
+        {
+          "description": "Provider: LM Studio • current",
+          "modelId": "lmstudio:qwen/qwen3.5-9b",
+          "name": "LM Studio · qwen/qwen3.5-9b"
+        }
+      ],
+      "currentModelId": "lmstudio:qwen/qwen3.5-9b"
+    },
+    "modes": {
+      "availableModes": [
+        {
+          "description": "Ask before edits.",
+          "id": "default",
+          "name": "Default"
+        },
+        {
+          "description": "Auto-allow workspace and /tmp edits; still asks for sensitive paths.",
+          "id": "accept_edits",
+          "name": "Accept Edits"
+        },
+        {
+          "description": "Auto-allow file edits for this session except sensitive paths.",
+          "id": "dont_ask",
+          "name": "Don't Ask"
+        }
+      ],
+      "currentModeId": "default"
+    },
+    "sessionId": "1ed63c3e-5170-4d20-bb9f-ea3289eb3570"
+  },
+  "session_update_kinds": {
+    "available_commands_update": 1,
+    "usage_update": 2,
+    "agent_thought_chunk": 101,
+    "tool_call": 1,
+    "tool_call_update": 1,
+    "agent_message_chunk": 12
+  },
+  "agent_methods": {
+    "session/update": 118
+  },
+  "permission_request_count": 0,
+  "permission_requests": []
+}

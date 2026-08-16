@@ -1,0 +1,156 @@
+{
+  "label": "linux-edit",
+  "captured_at": "2026-08-16T20:18:43.380346+00:00",
+  "agent_cmd": "hermes acp",
+  "cwd": "/home/victor/c7test/workdir",
+  "prompt": "First read the file notes.txt to see its contents. Then use the patch tool to change the word beta to BETA in that same file.",
+  "client_capabilities": {
+    "fs": true,
+    "terminal": false
+  },
+  "permission_policy": "allow",
+  "close_stdin_after_prompt": false,
+  "close_stdin_on_tool_call": false,
+  "close_stdin_on_permission": false,
+  "capture_exit_code": 0,
+  "agent_exit_code": 0,
+  "session_id": "4d7a9c7e-30e9-4500-9ce8-80530e0089b0",
+  "stop_reason": "end_turn",
+  "usage": {
+    "cachedReadTokens": 0,
+    "inputTokens": 55353,
+    "outputTokens": 405,
+    "thoughtTokens": 274,
+    "totalTokens": 55758
+  },
+  "initialize_result": {
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {
+        "image": true
+      },
+      "sessionCapabilities": {
+        "fork": {},
+        "list": {},
+        "resume": {}
+      }
+    },
+    "agentInfo": {
+      "name": "hermes-agent",
+      "version": "0.19.0"
+    },
+    "authMethods": [
+      {
+        "description": "Authenticate Hermes using the currently configured lmstudio runtime credentials.",
+        "id": "lmstudio",
+        "name": "lmstudio runtime credentials"
+      },
+      {
+        "args": [
+          "--setup"
+        ],
+        "description": "Open Hermes' interactive model/provider setup in a terminal. Use this when Hermes has not been configured on this machine yet.",
+        "id": "hermes-setup",
+        "name": "Configure Hermes provider",
+        "type": "terminal"
+      }
+    ],
+    "protocolVersion": 1
+  },
+  "new_session_result": {
+    "_meta": {
+      "hermes": {
+        "sessionProvenance": {
+          "acpSessionId": "4d7a9c7e-30e9-4500-9ce8-80530e0089b0",
+          "currentHermesSessionId": "4d7a9c7e-30e9-4500-9ce8-80530e0089b0",
+          "rootHermesSessionId": "4d7a9c7e-30e9-4500-9ce8-80530e0089b0",
+          "parentHermesSessionId": null,
+          "sessionKind": "root",
+          "compressionDepth": 0
+        }
+      }
+    },
+    "models": {
+      "availableModels": [
+        {
+          "description": "Provider: LM Studio • current",
+          "modelId": "lmstudio:qwen/qwen3.5-9b",
+          "name": "LM Studio · qwen/qwen3.5-9b"
+        }
+      ],
+      "currentModelId": "lmstudio:qwen/qwen3.5-9b"
+    },
+    "modes": {
+      "availableModes": [
+        {
+          "description": "Ask before edits.",
+          "id": "default",
+          "name": "Default"
+        },
+        {
+          "description": "Auto-allow workspace and /tmp edits; still asks for sensitive paths.",
+          "id": "accept_edits",
+          "name": "Accept Edits"
+        },
+        {
+          "description": "Auto-allow file edits for this session except sensitive paths.",
+          "id": "dont_ask",
+          "name": "Don't Ask"
+        }
+      ],
+      "currentModeId": "default"
+    },
+    "sessionId": "4d7a9c7e-30e9-4500-9ce8-80530e0089b0"
+  },
+  "session_update_kinds": {
+    "available_commands_update": 1,
+    "usage_update": 2,
+    "agent_thought_chunk": 271,
+    "tool_call": 2,
+    "agent_message_chunk": 40
+  },
+  "agent_methods": {
+    "session/update": 316,
+    "session/request_permission": 1
+  },
+  "permission_request_count": 1,
+  "permission_requests": [
+    {
+      "options": [
+        {
+          "kind": "allow_once",
+          "name": "Allow edit",
+          "optionId": "allow_once"
+        },
+        {
+          "kind": "reject_once",
+          "name": "Deny",
+          "optionId": "deny"
+        }
+      ],
+      "sessionId": "4d7a9c7e-30e9-4500-9ce8-80530e0089b0",
+      "toolCall": {
+        "content": [
+          {
+            "newText": "alpha\n2|BETA\ngamma\n",
+            "oldText": "alpha\nbeta\ngamma\n",
+            "path": "notes.txt",
+            "type": "diff"
+          }
+        ],
+        "kind": "edit",
+        "rawInput": {
+          "tool": "patch",
+          "arguments": {
+            "path": "notes.txt",
+            "old_string": "2|beta",
+            "new_string": "2|BETA"
+          }
+        },
+        "status": "pending",
+        "title": "Approve edit: notes.txt",
+        "toolCallId": "edit-approval-1"
+      }
+    }
+  ]
+}

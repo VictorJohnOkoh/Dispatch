@@ -1,0 +1,28 @@
+# Default: let Git normalise text so the repo stays LF-canonical regardless of
+# which platform a contributor is on.
+* text=auto
+
+# ── Captured wire recordings ────────────────────────────────────────────────
+# These are evidence, not source. They are byte-for-byte records of what a
+# Harness actually put on a pipe, and several findings turn on the exact
+# framing — ACP and Pi RPC are both newline-delimited JSON, so the line
+# terminator IS part of the protocol under test.
+#
+# '-text' disables all end-of-line conversion in both directions: the bytes
+# checked in are the bytes checked out, on every platform. Note these files
+# are currently CRLF because that is genuinely what the Harnesses emitted on
+# Windows; that is data worth preserving, not a defect to normalise away.
+docs/research/captures/** -text
+
+# ── Executables ─────────────────────────────────────────────────────────────
+# Run under bash (Git Bash on Windows, sh on Linux/WSL) and by python3 on
+# Linux. A CRLF shebang line makes a POSIX kernel look for an interpreter
+# named "bash\r", so these must stay LF wherever they are checked out.
+*.sh text eol=lf
+*.py text eol=lf
+
+# ── Go ──────────────────────────────────────────────────────────────────────
+# gofmt emits LF; keep it that way so diffs stay clean.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

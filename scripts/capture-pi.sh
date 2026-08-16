@@ -225,17 +225,24 @@ capture_get() {
 }
 
 # run_pi_capture LABEL OUTFILE PROMPT — one-shot --mode json run, timed out.
+#
+# '< /dev/null' is load-bearing, not tidiness. Pi reads stdin to EOF even when
+# the prompt is passed as an argument, so at a terminal it blocks forever with
+# both streams redirected and nothing on screen. Measured: instant with stdin
+# closed, still hung after 60s with stdin open and silent. Every one-shot pi
+# call in this wizard needs it. The --mode rpc calls must NOT have it: there
+# stdin is the input channel.
 run_pi_capture() {
   local label="$1" outfile="$2" prompt="$3" rc
   set +e
   if command -v timeout >/dev/null 2>&1; then
     timeout 300 $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
-      > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
+      < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   else
     $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
-      > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
+      < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   fi
   rc=$?
   set -e
@@ -324,7 +331,11 @@ import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
     ctx = m.get("max_context_length") or m.get("context_length") or "?"
-    print("   ", m.get("id") or m.get("modelKey") or m.get("path"), " ctx:", ctx)
+    caps = m.get("capabilities") or {}
+    tools = "tools" if caps.get("trained_for_tool_use") else "NO TOOLS"
+    # LM Studio >=0.4.0 keys this "key"; older builds use "id".
+    print("   ", m.get("key") or m.get("id") or m.get("modelKey") or m.get("path"),
+          " ctx:", ctx, " ", tools)
 PYEOF
 
 printf '\n'
@@ -336,7 +347,7 @@ CTX=$($PY - "$CAPTURE_DIR/lmstudio-models.json" "$PI_MODEL" <<'PYEOF' 2>/dev/nul
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
-    if (m.get("id") or m.get("modelKey")) == sys.argv[2]:
+    if (m.get("key") or m.get("id") or m.get("modelKey")) == sys.argv[2]:
         print(m.get("max_context_length") or m.get("context_length") or "")
         break
 PYEOF
@@ -388,14 +399,31 @@ note "renaming it to .js and re-running."
 printf '\n'
 say "Verifying Pi can see the provider..."
 set +e
-$PI_CMD -e "$EXT_FILE" --list-models > "$CAPTURE_DIR/pi-list-models.txt" 2>&1
+$PI_CMD -e "$EXT_FILE" --list-models < /dev/null > "$CAPTURE_DIR/pi-list-models.txt" 2>&1
 LIST_RC=$?
 set -e
-if [[ $LIST_RC -eq 0 ]] && grep -qi "lmstudio\|$PI_MODEL" "$CAPTURE_DIR/pi-list-models.txt"; then
+# Do NOT grep for the provider name alone: Pi prints it inside its own error
+# text ('Provider "lmstudio": ... is required'), so a substring match reports
+# success on the exact failure it is meant to catch. Require a real table row
+# — provider and model on one line — and treat Pi's warnings as fatal.
+# --list-models also exits 0 with no models at all, so LIST_RC proves nothing.
+# Field comparison, not a regex: model ids contain '/' and '.', which turn a
+# hand-escaped pattern into a debugging exercise of its own.
+if [[ $LIST_RC -eq 0 ]] \
+   && awk -v m="$PI_MODEL" '$1=="lmstudio" && $2==m {found=1} END{exit !found}' \
+        "$CAPTURE_DIR/pi-list-models.txt" \
+   && ! grep -qi "no models available\|errors loading models.json" "$CAPTURE_DIR/pi-list-models.txt"; then
   say "  provider registered."
 else
-  warn "--list-models didn't show it (exit $LIST_RC). Output:"
+  warn "Provider did NOT register (exit $LIST_RC). Output:"
   head -n 15 "$CAPTURE_DIR/pi-list-models.txt" | sed 's/^/    /'
+  printf '\n'
+  note "Most common cause: ~/.pi/agent/models.json exists and is invalid. Its"
+  note "errors also break -e extension loading when both define the same"
+  note "provider name. The key is 'baseUrl' — camelCase. 'baseURL' is rejected."
+  note "Fix or remove that file before continuing; stage 4 will otherwise hang"
+  note "with both output streams redirected and nothing to show you."
+  printf '\n'
   confirm "Continue anyway?" || exit 1
 fi
 note_manifest "extension: $(basename "$EXT_FILE"); --list-models exit $LIST_RC"
@@ -408,12 +436,26 @@ printf '\n'
 
 cd "$WORKDIR"
 set +e
-$PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
-  --session-dir "$SESSION_DIR" \
-  -p "Reply with exactly the word: hello." \
-  > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
+# '< /dev/null' and the timeout are both required — see run_pi_capture. Without
+# the redirect this call blocks on the terminal forever; without the timeout a
+# genuine model stall looks identical to that hang.
+if command -v timeout >/dev/null 2>&1; then
+  timeout 120 $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+    --session-dir "$SESSION_DIR" \
+    -p "Reply with exactly the word: hello." \
+    < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
+else
+  $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+    --session-dir "$SESSION_DIR" \
+    -p "Reply with exactly the word: hello." \
+    < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
+fi
 BASE_RC=$?
 set -e
+if [[ $BASE_RC -eq 124 ]]; then
+  warn "Timed out after 120s. LM Studio is probably loading the model, or is busy."
+  warn "Check its Developer tab, then re-run this wizard."
+fi
 say "exit code: $BASE_RC   ← undocumented; record it"
 note_manifest "pi -p exit code: $BASE_RC"
 printf '\n'
@@ -485,29 +527,41 @@ step "does -e (extension loading) work in RPC mode at all?"
 step "does agent_settled appear here but not in --mode json?"
 printf '\n'
 
+# The field is 'message'. It is NOT 'prompt': that yields
+# {"success":false,"error":"Cannot read properties of undefined (reading
+# 'startsWith')"} — an undefined-property crash rather than a schema error, so
+# the response does not tell you what the right shape was. Confirmed against
+# the installed docs/rpc.md, which the local install ships in full.
 cat > "$CAPTURE_DIR/rpc-command.jsonl" <<'RPCEOF'
-{"type":"prompt","prompt":"Reply with exactly the word: hello."}
+{"id":"req-1","type":"prompt","message":"Reply with exactly the word: hello."}
 RPCEOF
 
 say "Command to send on stdin:"
 sed 's/^/    /' "$CAPTURE_DIR/rpc-command.jsonl"
 printf '\n'
-warn "The RPC command SCHEMA is only partly documented — the command names are"
-warn "listed (prompt, steer, follow_up, abort, new_session) but not their exact"
-warn "fields. This line is a best guess."
-step "If it's rejected, the response on stdout states the real shape — edit"
-step "rpc-command.jsonl and re-run this stage."
+note "'id' is optional but echoed back on the response, which is how a"
+note "supervisor correlates a reply to the command that caused it."
 pause "Send it?"
 
 printf '\n'
 cd "$WORKDIR"
 set +e
+# 'cat cmd | pi' is NOT enough: EOF on stdin makes Pi exit mid-turn. Measured
+# 5 events that way (stopping at message_start) versus 54 through
+# agent_settled with stdin held open. RPC is a session, not a pipe — the same
+# lesson the Hermes ACP capture learned. Hold stdin open, then let the trailing
+# sleep close it once the turn has settled.
+#
+# The sleep is a capture-harness shortcut. A real supervisor watches stdout for
+# agent_settled and closes stdin on that, rather than guessing a duration.
+RPC_HOLD=90
 if command -v timeout >/dev/null 2>&1; then
-  timeout 240 bash -c "cat '$CAPTURE_DIR/rpc-command.jsonl' | $PI_CMD -e '$EXT_FILE' --provider lmstudio --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
+  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD -e '$EXT_FILE' --provider lmstudio --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 else
-  cat "$CAPTURE_DIR/rpc-command.jsonl" | $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
-    --session-dir "$SESSION_DIR" --mode rpc \
+  { cat "$CAPTURE_DIR/rpc-command.jsonl"; sleep $RPC_HOLD; } \
+    | $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+      --session-dir "$SESSION_DIR" --mode rpc \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 fi
 RPC_RC=$?

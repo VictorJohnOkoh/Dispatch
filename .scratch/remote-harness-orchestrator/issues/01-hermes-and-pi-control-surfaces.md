@@ -109,12 +109,60 @@ prompt as an argument, so it hangs forever at a terminal; `--mode rpc` is a sess
 the stdin pipe (C7). **The Daemon must own stdin explicitly for every Harness** rather than inherit it —
 that is now a supervision requirement, not a detail.
 
+**`--mode rpc` is a superset of `--mode json`** — same event stream plus an inbound command channel,
+including the full tool lifecycle. Extension loading works there, `agent_settled` is present, and a
+command's optional `id` is echoed back on its response, which is the correlation handle the Daemon
+needs. So the Daemon builds against RPC and loses nothing, and one event adapter serves both modes.
+
 **Confirmed:** nothing is gated in Pi (no approval event for `bash: ls -la`), so Approval Policy cannot
 be uniform; all Pi modes exit 0 on success.
 
-**Still open:** whether `pre_tool_call` fails open (note the ACP edit path fails *closed*, so the two
-cannot be assumed to match); whether Pi's `ctx.ui.confirm` routes over RPC — still untested, since the
-capture used no extension and that hook only exists inside one; whether C7 and C9 reproduce on POSIX.
+### Approval, settled on both Harnesses (2026-08-16)
+
+**Both can gate. Neither reports a refusal the orchestrator can trust structurally.** This is the
+load-bearing conclusion for Approval Policy, and it is the same on both:
+
+- Hermes cannot distinguish a human's refusal from an internal failure — it reports both as
+  `"denied by ACP client"` (C9).
+- Pi does not mark refusal as anything but a tool error: `isError: true` with free text chosen by the
+  extension author, not by the protocol (P7).
+
+**So the Approval Policy must record its own decisions and treat Harness output as corroboration, not
+as the source of truth.** It cannot reconstruct what the user chose by reading Events.
+
+**Hermes fails in both directions at once.** `pre_tool_call` fails **open** — every failure path in
+`agent/shell_hooks.py` (crash, missing, non-executable, timeout, non-zero exit) returns "no block", so
+a broken hook silently permits (C11). The ACP edit path fails **closed** (C9). Same product, opposite
+defaults, so a guarantee proven for one does not transfer to the other. Shell hooks additionally need
+first-use consent recorded in an allowlist; a non-TTY caller — which the Daemon is — must pass
+`--accept-hooks` or the hook never registers at all.
+
+**Pi's gate works over RPC**, via `extension_ui_request` / `extension_ui_response` (P7). Verified both
+ways against the filesystem with Pi's bundled `permission-gate.ts`. Two structural traps: the UI request
+carries **no `toolCallId`** (correlation is by ordering; the command is embedded in a display string),
+and **`tool_execution_start` fires before the gate resolves** — a start event is not evidence that
+anything ran. Pi also supports a dialog `timeout` with agent-side auto-resolve, which Hermes has no
+equivalent of.
+
+### Platform, settled 2026-08-16 (WSL2 Ubuntu, identical build)
+
+**Both Hermes defects are Windows-specific.** The stdin deadlock (C7) vanished: the same terminal
+prompt at the same 120s timeout finished in **1.73s** instead of 118.83s, and `session/prompt` returned
+`end_turn`. The phantom denial (C9) did not occur once in three runs of the exact condition that
+produced it 3/3 on Windows — including one run with 12 tool calls and 4 real approvals. My earlier
+prediction that C9 was platform-independent was wrong.
+
+**`tool_call_update` is captured** (C12). Its `toolCallId` **matches** its `tool_call`, so C8's id
+mismatch is specific to the approval request, not to the lifecycle. Its result is prose rather than
+structure — the exit code is embedded in a markdown string, so reading it means parsing display text.
+
+**But a real gap survives the platform change, and it is what now constrains the Event model:** Hermes
+emits `tool_call_update` **only for `kind: "execute"`**. Never for `read` or `edit` — 12/12 consistent
+across the Linux runs. A Client that renders a `tool_call` as "running" and waits for its completion
+will **hang forever on every file operation**. The Event model must synthesise a terminal state for
+those kinds, or treat them as fire-and-forget. Choosing a different host does not fix it.
+
+**Nothing from the original open list remains.** The one live constraint is the completion gap above.
 
 Captures: `docs/research/captures/hermes/`. Tooling: `scripts/capture-hermes.sh`, `scripts/acp-capture.py`.
 
