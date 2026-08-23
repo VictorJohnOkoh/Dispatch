@@ -205,11 +205,48 @@ note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 # "manual Daemon install" decision in ticket 12. Measured, not estimated.
 SSH_SETUP_SECONDS=0
 
+_TOP_PID=$$
+
+# _unreachable — abort the whole run. Reached only when SSH itself fails, never
+# when a remote command merely returns non-zero.
+_unreachable() {
+  printf '\n'
+  warn "Lost the SSH connection to $HOST_USER@$HOST_ADDR:${SSH_PORT:-22}."
+  note "    ssh -vvv ${SSH_KEY_PATH:+-i $SSH_KEY_PATH} -p ${SSH_PORT:-22} $HOST_USER@$HOST_ADDR"
+  note "Common causes: the Host slept, DHCP moved its address, or Wi-Fi dropped."
+  printf '\n'
+  say "Stopping here on purpose. Re-run when the Host answers — the wizard"
+  say "remembers your answers and picks up from the start."
+  note_manifest "ABORTED: SSH unreachable at $(date -Iseconds)"
+  exit 1
+}
+trap _unreachable TERM
+
 # rsh "command" — run a command on the Host, non-interactively.
+#
+# Aborts the run if SSH cannot connect, rather than letting the failure look
+# like a result. Without this, a Host that sleeps mid-run writes "NOT INSTALLED"
+# into harness-versions.txt and "no Vendor serving" into the manifest — a
+# dropped connection entering the record as a research finding.
+#
+# ssh reserves 255 for its own errors; a remote command's own exit code passes
+# through untouched, because those codes ARE findings (Hermes exiting 1 on a
+# tool call is in the existing captures). A remote command that genuinely
+# returns 255 is indistinguishable, and rare enough to accept.
+#
+# The kill is not decoration: half these calls sit inside $(...), and an exit
+# there would only leave the subshell and be swallowed by the '|| echo 000'
+# that follows. Signalling the top-level PID stops the run for real.
 rsh() {
+  local rc=0
   ssh -o BatchMode=yes -o ConnectTimeout=10 \
       ${SSH_KEY_PATH:+-i "$SSH_KEY_PATH"} -p "${SSH_PORT:-22}" \
-      "$HOST_USER@$HOST_ADDR" "$1"
+      "$HOST_USER@$HOST_ADDR" "$1" || rc=$?
+  if (( rc == 255 )); then
+    kill -s TERM "$_TOP_PID" 2>/dev/null
+    exit 255
+  fi
+  return $rc
 }
 
 banner "Stand up a remote Host — issue #4"
@@ -309,7 +346,10 @@ printf '\n'
 pause "Key is in place on the Host?"
 printf '\n'
 say "Verifying key-only auth (BatchMode refuses to fall back to a password)..."
-if rsh "echo ok" 2>/dev/null | grep -q ok; then
+# Raw ssh, not rsh: a rejected key exits 255 exactly like an unreachable Host,
+# and here the cause is almost certainly the key, so say that instead.
+if ssh -o BatchMode=yes -o ConnectTimeout=10 -i "$SSH_KEY_PATH" \
+     -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "echo ok" 2>/dev/null | grep -q ok; then
   printf '  %s+%s key auth works — no password prompt\n' "$GREEN" "$RESET"
   note_manifest "SSH key auth: VERIFIED (BatchMode, no password fallback)"
 else
