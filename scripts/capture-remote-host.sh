@@ -303,13 +303,22 @@ have_remote() {
 # launcher stub that spawns the real interpreter through a chain of paths; the
 # stub sits on PATH and answers `command -v` while the spawn fails. The two
 # have different remedies, so they need different verdicts.
+#
+# Two details are load-bearing. Do not pipe the remote command into `head`: a
+# pipeline returns the LAST command's status, so `head` reports 0 and the real
+# exit code is lost. And keep stderr off the success path: every one of these
+# tools prints its version to stdout, so a stub that dies writes to stderr and
+# leaves stdout empty. Merge the two and a failure message becomes the version.
 PROBE_OUT=""
 remote_probe() {
   local rc=0
   PROBE_OUT=""
   have_remote "$1" || return 127
-  PROBE_OUT=$(rsh "$1 --version 2>&1 | head -3" 2>/dev/null | tr -d '\r') || rc=$?
+  PROBE_OUT=$(rsh "$1 --version 2>/dev/null" 2>/dev/null | tr -d '\r' | head -3) || rc=$?
   (( rc == 0 )) && [[ -z "$PROBE_OUT" ]] && rc=1
+  # Only worth a second round trip once we know it failed, and only to quote
+  # the Host's own words back rather than guessing at them.
+  (( rc != 0 )) && PROBE_OUT=$(rsh "$1 --version 2>&1" 2>/dev/null | tr -d '\r' | head -3)
   return $rc
 }
 
