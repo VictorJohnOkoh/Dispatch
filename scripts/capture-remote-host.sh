@@ -259,11 +259,18 @@ fi
 
 # --- Runtimes on the Host ---
 
+# missing "$output" — did the Host fail to find the command? bash says "command
+# not found"; cmd.exe says "is not recognized". Both must be caught, or a Host
+# still running cmd.exe reports every missing tool as present.
+missing() {
+  [[ -z "$1" || "$1" == *"not found"* || "$1" == *"not recognized"* ]]
+}
+
 check_remote_cmd() {
   local cmd="$1" label="$2"; shift 2
   local out
   out=$(rsh "$cmd" 2>/dev/null); require_live
-  if [[ -n "$out" && "$out" != *"not found"* && "$out" != *"not recognized"* ]]; then
+  if ! missing "$out"; then
     pass "$label — $(printf '%s' "$out" | head -1 | tr -d '\r')"
   else
     fail "$label missing on the Host" "$@"
@@ -314,13 +321,13 @@ fi
 
 HERMES_V=$(rsh "hermes --version" 2>/dev/null); require_live
 PI_V=$(rsh "pi --version" 2>/dev/null); require_live
-[[ -n "$HERMES_V" && "$HERMES_V" != *"not found"* ]] \
+! missing "$HERMES_V" \
   && pass "Hermes — $(printf '%s' "$HERMES_V" | head -1 | tr -d '\r')" \
   || fail "Hermes not installed on the Host" \
        "Needs its source tree there: pip install -e '.[acp]'" \
        "Cannot be installed remotely. If it will not install, that is a" \
        "RECORDED FINDING for issue #4, not a blocker — carry on with Pi."
-[[ -n "$PI_V" && "$PI_V" != *"not found"* ]] \
+! missing "$PI_V" \
   && pass "Pi — $(printf '%s' "$PI_V" | head -1 | tr -d '\r')" \
   || fail "Pi not installed on the Host" \
        "The real run offers to install it: npm i -g @earendil-works/pi-coding-agent"
@@ -416,7 +423,7 @@ if [[ -n "$VENDOR_KIND" ]]; then
 fi
 
 head2 "Install Pi, if missing"
-if [[ -z "$PI_V" || "$PI_V" == *"not found"* ]]; then
+if missing "$PI_V"; then
   if confirm "Install Pi on the Host over SSH now?"; then
     rsh "npm install -g @earendil-works/pi-coding-agent" | tail -5
     require_live
