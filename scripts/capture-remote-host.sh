@@ -294,20 +294,45 @@ have_remote() {
   rsh "command -v $1 >/dev/null 2>&1" >/dev/null
 }
 
-# remote_version CMD — CMD's first line of --version output, or empty. Only
-# meaningful once have_remote says the command exists.
-remote_version() {
-  rsh "$1 --version 2>&1 | head -1" 2>/dev/null | tr -d '\r'
+# remote_probe CMD — run `CMD --version` on the Host. Sets PROBE_OUT to what it
+# said and returns 0 if it ran, 127 if CMD is not on the PATH at all, or its
+# own exit code if it is there and fails.
+#
+# On PATH and runnable are two different questions, and a check that asks only
+# the first passes a binary that cannot start. A uv-installed Python is a
+# launcher stub that spawns the real interpreter through a chain of paths; the
+# stub sits on PATH and answers `command -v` while the spawn fails. The two
+# have different remedies, so they need different verdicts.
+PROBE_OUT=""
+remote_probe() {
+  local rc=0
+  PROBE_OUT=""
+  have_remote "$1" || return 127
+  PROBE_OUT=$(rsh "$1 --version 2>&1 | head -3" 2>/dev/null | tr -d '\r') || rc=$?
+  (( rc == 0 )) && [[ -z "$PROBE_OUT" ]] && rc=1
+  return $rc
 }
 
-# check_remote_cmd CMD LABEL REMEDY... — one PATH check, decided by exit code.
+# broken_remedy CMD RC — the remedy lines for a command that is present but dead.
+broken_remedy() {
+  printf '%s\n' \
+    "It is found and then fails to start, so this is not a PATH problem." \
+    "The Host reported:" \
+    "  ${PROBE_OUT:-(no output)}" \
+    "Record this before fixing it — a tool that runs at the Host's desktop" \
+    "but not over SSH is a finding for issue #4."
+}
+
+# check_remote_cmd CMD LABEL REMEDY... — one PATH check.
 check_remote_cmd() {
-  local cmd="$1" label="$2"; shift 2
-  if have_remote "$cmd"; then
-    pass "$label — $(remote_version "$cmd")"
-  else
-    fail "$label missing from the Host's PATH" "$@"
-  fi
+  local cmd="$1" label="$2" rc=0; shift 2
+  remote_probe "$cmd" || rc=$?
+  case $rc in
+    0)   pass "$label — $(printf '%s' "$PROBE_OUT" | head -1)" ;;
+    127) fail "$label missing from the Host's PATH" "$@" ;;
+    *)   local -a m; mapfile -t m < <(broken_remedy)
+         fail "$label is on the Host's PATH but will not run (exit $rc)" "${m[@]}" ;;
+  esac
 }
 
 # A Windows SSH session inherits only the MACHINE PATH. Anything installed with
@@ -363,24 +388,27 @@ fi
 # --- Harnesses ---
 
 HERMES_V=""; PI_V=""
-if have_remote hermes; then
-  HERMES_V=$(remote_version hermes)
-  pass "Hermes — $HERMES_V"
-else
-  fail "Hermes not on the Host's PATH" \
-    "Needs its source tree there: pip install -e '.[acp]'" \
-    "Cannot be installed remotely. If it will not install, that is a" \
-    "RECORDED FINDING for issue #4, not a blocker — carry on with Pi." \
-    "${PATH_REMEDY[@]}"
-fi
-if have_remote pi; then
-  PI_V=$(remote_version pi)
-  pass "Pi — $PI_V"
-else
-  fail "Pi not on the Host's PATH" \
-    "The real run offers to install it: npm i -g @earendil-works/pi-coding-agent" \
-    "${PATH_REMEDY[@]}"
-fi
+_hrc=0; remote_probe hermes || _hrc=$?
+case $_hrc in
+  0)   HERMES_V="$(printf '%s' "$PROBE_OUT" | head -1)"; pass "Hermes — $HERMES_V" ;;
+  127) fail "Hermes not on the Host's PATH" \
+         "Needs its source tree there: pip install -e '.[acp]'" \
+         "Cannot be installed remotely. If it will not install, that is a" \
+         "RECORDED FINDING for issue #4, not a blocker — carry on with Pi." \
+         "${PATH_REMEDY[@]}" ;;
+  *)   mapfile -t _m < <(broken_remedy)
+       fail "Hermes is on the Host's PATH but will not run (exit $_hrc)" "${_m[@]}" ;;
+esac
+
+_prc=0; remote_probe pi || _prc=$?
+case $_prc in
+  0)   PI_V="$(printf '%s' "$PROBE_OUT" | head -1)"; pass "Pi — $PI_V" ;;
+  127) fail "Pi not on the Host's PATH" \
+         "The real run offers to install it: npm i -g @earendil-works/pi-coding-agent" \
+         "${PATH_REMEDY[@]}" ;;
+  *)   mapfile -t _m < <(broken_remedy)
+       fail "Pi is on the Host's PATH but will not run (exit $_prc)" "${_m[@]}" ;;
+esac
 
 # --- Verdict ---
 
