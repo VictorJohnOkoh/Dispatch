@@ -388,7 +388,11 @@ say "same box. A second physical machine gives a real NIC. This is the question"
 say "one machine could never answer."
 printf '\n'
 if [[ "$HOST_OS" == "windows" ]]; then
-  IFACE=$(rsh "ipconfig | grep -A1 'IPv4' | head -1" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  # The adapter carrying the default route, not simply the first one ipconfig
+  # prints. A dev box has several virtual adapters — WSL, VMware, Bluetooth —
+  # and picking one of those would test a virtual interface all over again,
+  # which is the exact flaw in the WSL2 run this stage exists to correct.
+  IFACE=$(rsh "powershell -NoProfile -Command \"(Get-NetIPConfiguration | Where-Object { \\\$_.IPv4DefaultGateway -ne \\\$null } | Select-Object -First 1).IPv4Address.IPAddress\"" 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
 else
   IFACE=$(rsh "ipconfig getifaddr en0 || ipconfig getifaddr en1" 2>/dev/null | tr -d '\r' | head -1)
 fi
