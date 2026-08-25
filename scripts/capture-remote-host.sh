@@ -375,26 +375,44 @@ check_remote_cmd "curl" "curl" \
 
 # --- Vendor ---
 
-OLLAMA=$(rsh "curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:11434/api/tags" 2>/dev/null); require_live
-LMS=$(rsh "curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:1234/api/v1/models" 2>/dev/null); require_live
+# All three are probed and all three results are reported. A Vendor that is not
+# running is a recorded observation, not a crash: this run exists to find out
+# what querying a Host over SSH actually reports.
+VENDOR_KIND=""; VENDOR_URL=""; VENDOR_PATH=""
+for v in "ollama|http://127.0.0.1:11434|/api/tags" \
+         "lmstudio|http://127.0.0.1:1234|/api/v1/models" \
+         "llamacpp|http://127.0.0.1:8080|/v1/models"; do
+  IFS='|' read -r vk vu vp <<< "$v"
+  code=$(rsh "curl -sS -m 5 -o /dev/null -w '%{http_code}' $vu$vp" 2>/dev/null); require_live
+  if [[ "$code" == *200* ]]; then
+    note "  $vk at $vu$vp — HTTP $code"
+    # First one to answer wins; the order puts the headless Vendors first
+    # because LM Studio cannot be started over SSH at all.
+    [[ -z "$VENDOR_KIND" ]] && { VENDOR_KIND="$vk"; VENDOR_URL="$vu"; VENDOR_PATH="$vp"; }
+  else
+    note "  $vk at $vu$vp — HTTP ${code:-000} (not serving)"
+  fi
+done
 
-if [[ "$OLLAMA" == *200* ]]; then
-  VENDOR_KIND=ollama; VENDOR_URL="http://127.0.0.1:11434"; VENDOR_PATH="/api/tags"
-  pass "Vendor serving — Ollama on 11434"
-elif [[ "$LMS" == *200* ]]; then
-  VENDOR_KIND=lmstudio; VENDOR_URL="http://127.0.0.1:1234"; VENDOR_PATH="/api/v1/models"
-  pass "Vendor serving — LM Studio on 1234"
+if [[ -n "$VENDOR_KIND" ]]; then
+  pass "Vendor serving — $VENDOR_KIND at $VENDOR_URL"
 else
-  VENDOR_KIND=""; VENDOR_PATH=""
   fail "no Vendor serving on the Host" \
-    "Prerequisite 9. Ollama is easier over SSH:" \
+    "Prerequisite 9. Ollama is easiest over SSH:" \
     "  install from https://ollama.com/download, then: ollama pull qwen3:8b" \
+    "llama.cpp:  llama-server -m <model.gguf> --port 8080" \
     "LM Studio needs a desktop session and Developer -> Start Server."
 fi
 
 if [[ "$VENDOR_KIND" == "ollama" ]]; then
   MODELS=$(rsh "ollama list" 2>/dev/null); require_live
-  if [[ $(printf '%s' "$MODELS" | wc -l) -gt 1 ]]; then
+  # Count the rows under the header, not the newlines. Command substitution
+  # strips the trailing newline, so `wc -l` on the whole output returns one
+  # less than the line count — and a Host with exactly one model pulled was
+  # reported as having none.
+  MODEL_ROWS=$(printf '%s
+' "$MODELS" | tail -n +2 | grep -c '[^[:space:]]')
+  if (( MODEL_ROWS > 0 )); then
     pass "Vendor has models"
     note "$(printf '%s' "$MODELS" | tail -n +2 | head -5 | sed 's/^/         /')"
   else

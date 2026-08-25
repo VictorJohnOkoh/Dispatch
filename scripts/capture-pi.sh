@@ -318,26 +318,77 @@ say "Capturing into: $CAPTURE_DIR"
 pause "Ready?"
 
 # ── Stage 2 ────────────────────────────────────────────────────────────────
-stage "Vendor — find one serving, pick a model"
-say "Either Vendor works. Pi reaches both the same way, through a provider"
-say "declared in ~/.pi/agent/models.json — no extension, no --base-url flag."
+stage "Vendor — probe all three, pick one that answered"
+say "Any of the three works. Pi reaches all of them the same way, through a"
+say "provider declared in ~/.pi/agent/models.json — no extension, no flag."
 note "Using 127.0.0.1 rather than localhost: on Windows, localhost can resolve to"
 note "::1 first and miss a server bound only to IPv4."
 printf '\n'
+note "A Vendor that is not running is not an error here. This wizard exists to"
+note "find out what querying a Harness over SSH actually reports, so a refused"
+note "connection is a result: it gets recorded and the run carries on."
+printf '\n'
 
-# Probe both rather than asking first. On a Host reached over SSH the operator
-# cannot see which one is running, and a wrong guess costs a whole stage.
-probe_vendor() {
-  # curl writes the code AND exits non-zero when it cannot connect, so a plain
-  # `|| echo 000` appends a second 000 and yields "000000".
-  local c
-  c=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null) || true
-  printf '%s' "${c:-000}"
+# Three known Vendors, so three case arms rather than a lookup table. The
+# defaults are the ports each ships with, and the model listing differs:
+# LM Studio serves its own under /api/v1, the other two are OpenAI-compatible.
+VENDOR_KINDS="lmstudio ollama llamacpp"
+vendor_label() {
+  case "$1" in
+    lmstudio) printf 'LM Studio' ;;
+    ollama)   printf 'Ollama' ;;
+    llamacpp) printf 'llama.cpp' ;;
+  esac
 }
-LMS_CODE=$(probe_vendor "http://127.0.0.1:1234/api/v1/models")
-OLL_CODE=$(probe_vendor "http://127.0.0.1:11434/v1/models")
-say "LM Studio on 1234:  HTTP $LMS_CODE"
-say "Ollama on 11434:    HTTP $OLL_CODE"
+vendor_default_url() {
+  case "$1" in
+    lmstudio) printf 'http://127.0.0.1:1234' ;;
+    ollama)   printf 'http://127.0.0.1:11434' ;;
+    llamacpp) printf 'http://127.0.0.1:8080' ;;
+  esac
+}
+vendor_models_path() {
+  case "$1" in
+    lmstudio) printf '/api/v1/models' ;;
+    *)        printf '/v1/models' ;;
+  esac
+}
+
+# probe_vendor URL — sets PROBE_CODE to the HTTP status, or 000 when the
+# connection never happened, and PROBE_ERR to curl's own words. "000" alone
+# never says why, and the reason is the whole point of this stage.
+#
+# Results come back in globals, NOT on stdout, because `code=$(probe_vendor
+# ...)` would run the function in a subshell and discard PROBE_ERR — the same
+# trap that made the SSH preflight report tools as installed without running
+# them. curl also writes the code AND exits non-zero when it cannot connect, so
+# a plain `|| echo 000` appends a second 000 and yields "000000".
+PROBE_CODE=""
+PROBE_ERR=""
+probe_vendor() {
+  local errf="$CAPTURE_DIR/.probe-err"
+  PROBE_CODE=""; PROBE_ERR=""
+  PROBE_CODE=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>"$errf") || true
+  [[ -z "$PROBE_CODE" ]] && PROBE_CODE=000
+  [[ -s "$errf" ]] && PROBE_ERR=$(head -1 "$errf")
+  return 0
+}
+
+REACHABLE=""
+for k in $VENDOR_KINDS; do
+  url="$(vendor_default_url "$k")$(vendor_models_path "$k")"
+  probe_vendor "$url"; code="$PROBE_CODE"
+  if [[ "$code" == 200 ]]; then
+    REACHABLE="$REACHABLE $k"
+    printf '  %s✓%s  %-10s %-34s HTTP %s\n' "$GREEN" "$RESET" "$(vendor_label "$k")" "$url" "$code"
+  else
+    printf '  %s·%s  %-10s %-34s HTTP %s\n' "$DIM" "$RESET" "$(vendor_label "$k")" "$url" "$code"
+    [[ -n "$PROBE_ERR" ]] && printf '     %s%s%s\n' "$DIM" "$PROBE_ERR" "$RESET"
+  fi
+  note_manifest "probe $k $url -> HTTP $code${PROBE_ERR:+ ($PROBE_ERR)}"
+done
+REACHABLE="${REACHABLE# }"
+rm -f "$CAPTURE_DIR/.probe-err"
 printf '\n'
 
 # pick_vendor PROMPT — read a Vendor name, normalised, and insist on a valid one.
@@ -352,9 +403,10 @@ pick_vendor() {
     ask VENDOR_KIND "$1"
     raw=$(printf '%s' "$VENDOR_KIND" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
     case "$raw" in
-      ollama|o)          VENDOR_KIND=ollama;   return 0 ;;
-      lmstudio|lms|lm|l) VENDOR_KIND=lmstudio; return 0 ;;
-      *) warn "Type 'ollama' or 'lmstudio'. Got: '$VENDOR_KIND'" ;;
+      ollama|o)                  VENDOR_KIND=ollama;   return 0 ;;
+      lmstudio|lms|lm|l)         VENDOR_KIND=lmstudio; return 0 ;;
+      llamacpp|llama.cpp|llama|c) VENDOR_KIND=llamacpp; return 0 ;;
+      *) warn "Type one of: lmstudio, ollama, llamacpp. Got: '$VENDOR_KIND'" ;;
     esac
   done
   warn "No valid Vendor after 3 tries — stopping rather than picking one for you."
@@ -362,23 +414,23 @@ pick_vendor() {
 }
 
 VENDOR_KIND=""
-if [[ "$LMS_CODE" == 200 && "$OLL_CODE" == 200 ]]; then
-  step "Both are serving. Which one is this capture against?"
-  pick_vendor "Vendor [lmstudio|ollama]:"
-elif [[ "$LMS_CODE" == 200 ]]; then
-  VENDOR_KIND=lmstudio
-elif [[ "$OLL_CODE" == 200 ]]; then
-  VENDOR_KIND=ollama
-else
-  warn "Neither Vendor answered."
-  note "LM Studio: Developer tab -> Start Server."
-  note "Ollama:    it serves on 11434 once installed; 'ollama list' to confirm."
-  pick_vendor "Carry on anyway with [lmstudio|ollama]:"
-fi
+case "$(printf '%s' "$REACHABLE" | wc -w | tr -d ' ')" in
+  0) warn "None of the three answered. That is a recorded result, not a crash."
+     note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
+     note "Ollama:    serves on 11434 once installed; 'ollama list' to confirm."
+     note "llama.cpp: llama-server -m <model.gguf> --port 8080"
+     printf '\n'
+     confirm "Carry on and pick one by hand anyway?" || exit 1
+     pick_vendor "Vendor [lmstudio|ollama|llamacpp]:" ;;
+  1) VENDOR_KIND="$REACHABLE"
+     say "Only $(vendor_label "$VENDOR_KIND") answered — using it." ;;
+  *) step "More than one is serving: $REACHABLE"
+     pick_vendor "Vendor [lmstudio|ollama|llamacpp]:" ;;
+esac
 printf '\n'
 step "Vendor for this capture: $VENDOR_KIND"
 
-# Switching Vendor must not inherit the other one's answers. `ask` offers the
+# Switching Vendor must not inherit another one's answers. `ask` offers the
 # stored value as its default and Enter keeps it, so a URL and model saved
 # against LM Studio come back as the defaults for Ollama — and the capture
 # quietly runs against the Vendor you did not choose. Drop them on a switch.
@@ -395,25 +447,25 @@ if [[ -n "$PREV_KIND" && "$PREV_KIND" != "$VENDOR_KIND" ]]; then
 fi
 write_env VENDOR_KIND "$VENDOR_KIND"
 
-if [[ "$VENDOR_KIND" == "ollama" ]]; then
-  VENDOR_NAME="Ollama (local)"
-  DEFAULT_URL="http://127.0.0.1:11434"
-else
-  VENDOR_NAME="LM Studio (local)"
-  DEFAULT_URL="http://127.0.0.1:1234"
-fi
+VENDOR_NAME="$(vendor_label "$VENDOR_KIND") (local)"
+DEFAULT_URL="$(vendor_default_url "$VENDOR_KIND")"
+MODELS_PATH="$(vendor_models_path "$VENDOR_KIND")"
 printf '\n'
+
 # `ask` offers the value stored in ENV_FILE and Enter keeps it, while the prompt
 # advertises DEFAULT_URL — two different defaults in one prompt. A stored URL
-# belonging to the OTHER Vendor therefore survives here even when the Vendor
+# belonging to ANOTHER Vendor therefore survives here even when the Vendor
 # itself did not change, and Enter quietly captures the wrong server. Drop it.
-# A genuinely custom URL is left alone; only the other Vendor's default goes.
-if [[ "$VENDOR_KIND" == "ollama" ]]; then OTHER_URL="http://127.0.0.1:1234"
-else OTHER_URL="http://127.0.0.1:11434"; fi
-if [[ "$(_existing VENDOR_URL || true)" == "$OTHER_URL" ]]; then
-  forget_env VENDOR_URL
-  note "Dropped a saved base URL belonging to the other Vendor ($OTHER_URL)."
-fi
+# A genuinely custom URL is left alone; only another Vendor's default goes.
+STORED_URL=$(_existing VENDOR_URL || true)
+for k in $VENDOR_KINDS; do
+  [[ "$k" == "$VENDOR_KIND" ]] && continue
+  if [[ -n "$STORED_URL" && "$STORED_URL" == "$(vendor_default_url "$k")" ]]; then
+    forget_env VENDOR_URL
+    note "Dropped a saved base URL belonging to $(vendor_label "$k") ($STORED_URL)."
+    break
+  fi
+done
 
 ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAULT_URL]:"
 [[ -z "$VENDOR_URL" ]] && VENDOR_URL="$DEFAULT_URL"
@@ -422,30 +474,33 @@ write_env VENDOR_URL "$VENDOR_URL"
 # Prove the address chosen actually answers, and name it. Every confusion in
 # this stage came from the operator not being able to see which server was
 # about to be used.
-if [[ "$VENDOR_KIND" == "ollama" ]]; then MODELS_PATH="/v1/models"
-else MODELS_PATH="/api/v1/models"; fi
-URL_CODE=$(probe_vendor "$VENDOR_URL$MODELS_PATH")
+probe_vendor "$VENDOR_URL$MODELS_PATH"; URL_CODE="$PROBE_CODE"
 if [[ "$URL_CODE" == 200 ]]; then
   say "Confirmed: $VENDOR_KIND answering at $VENDOR_URL"
 else
   warn "$VENDOR_URL did not answer (HTTP $URL_CODE) for $VENDOR_KIND."
+  [[ -n "$PROBE_ERR" ]] && note "$PROBE_ERR"
   confirm "Continue anyway?" || exit 1
 fi
-printf '\n'
+note_manifest "chosen vendor: $VENDOR_KIND at $VENDOR_URL (HTTP $URL_CODE)"
 
 MODELS_JSON="$CAPTURE_DIR/vendor-models.json"
-if [[ "$VENDOR_KIND" == "ollama" ]]; then
-  capture_get "vendor-models.json" "$VENDOR_URL/v1/models"
-  # The native endpoint carries the parameter size and quantisation that the
-  # OpenAI-compatible one drops. Kept because it is evidence, not decoration.
-  capture_get "ollama-tags.json" "$VENDOR_URL/api/tags"
-else
-  capture_get "vendor-models.json" "$VENDOR_URL/api/v1/models"
-  if [[ ! -s "$MODELS_JSON" ]]; then
-    say "Trying the pre-0.4.0 path..."
-    capture_get "vendor-models.json" "$VENDOR_URL/api/v0/models"
-  fi
-fi
+capture_get "vendor-models.json" "$VENDOR_URL$MODELS_PATH"
+case "$VENDOR_KIND" in
+  ollama)
+    # The native endpoint carries the parameter size and quantisation that the
+    # OpenAI-compatible one drops. Kept because it is evidence, not decoration.
+    capture_get "ollama-tags.json" "$VENDOR_URL/api/tags" ;;
+  llamacpp)
+    # llama-server serves one model, and /props is where it names it along with
+    # the context size it was actually started with.
+    capture_get "llamacpp-props.json" "$VENDOR_URL/props" ;;
+  lmstudio)
+    if [[ ! -s "$MODELS_JSON" ]]; then
+      say "Trying the pre-0.4.0 path..."
+      capture_get "vendor-models.json" "$VENDOR_URL/api/v0/models"
+    fi ;;
+esac
 
 printf '\n'
 say "Model ids found:"
@@ -455,9 +510,9 @@ d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
     ctx = m.get("max_context_length") or m.get("context_length") or "?"
     caps = m.get("capabilities")
-    # Ollama's OpenAI-compatible listing carries no capability field at all.
-    # Absent is not the same as false, and printing "NO TOOLS" for a model that
-    # does support them would be a fabricated finding.
+    # Only LM Studio reports capabilities. Absent is not the same as false, and
+    # printing "NO TOOLS" for a model that does support them would be a
+    # fabricated finding.
     if caps is None:
         tools = "tools: unknown"
     else:
@@ -469,10 +524,14 @@ PYEOF
 
 printf '\n'
 step "Pick a TOOL-CAPABLE model — stage 6 needs it to make a tool call."
-[[ "$VENDOR_KIND" == "ollama" ]] && note "Ollama does not report tool support here. 'ollama show <model>' does."
+note "The id must match one in ~/.pi/agent/models.json, which is what Pi reads."
+[[ "$VENDOR_KIND" != "lmstudio" ]] && note "$(vendor_label "$VENDOR_KIND") does not report tool support here."
 ask PI_MODEL "Model id:"
 write_env PI_MODEL "$PI_MODEL"
 
+# Recorded, not asked for. Pi autodetects the context window from the endpoint
+# (finding P1); nothing here needs the number, so a prompt for it would be a
+# question with no consequence.
 CTX=$($PY - "$MODELS_JSON" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -482,13 +541,8 @@ for m in (d.get("models") or d.get("data") or []):
         break
 PYEOF
 )
-if [[ -z "$CTX" ]]; then
-  ask CTX "Context window (couldn't detect) [32768]:"
-  [[ -z "$CTX" ]] && CTX="32768"
-fi
-say "context window: $CTX"
-note_manifest "Vendor: $VENDOR_KIND at $VENDOR_URL"
-note_manifest "Model: $PI_MODEL (ctx $CTX)"
+say "context window reported by the Vendor: ${CTX:-not reported}"
+note_manifest "Model: $PI_MODEL (vendor-reported ctx: ${CTX:-none})"
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────
 stage "Vendor in Pi's own config — no extension"
