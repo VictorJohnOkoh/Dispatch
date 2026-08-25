@@ -208,7 +208,6 @@ MANIFEST="$CAPTURE_DIR/manifest.txt"
 
 PY=""
 PI_CMD=""
-EXT_FILE="$CAPTURE_DIR/vendor-provider.ts"
 
 note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 
@@ -236,11 +235,11 @@ run_pi_capture() {
   local label="$1" outfile="$2" prompt="$3" rc
   set +e
   if command -v timeout >/dev/null 2>&1; then
-    timeout 300 $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+    timeout 300 $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
       < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   else
-    $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+    $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
       < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   fi
@@ -299,7 +298,18 @@ fi
 note_manifest "=== Pi capture run: $(date -Iseconds) ==="
 note_manifest "OS: Windows (Git Bash) — $(uname -a 2>/dev/null || echo unknown)"
 note_manifest "node: $(node --version 2>&1)"
+# -ne disables auto-loaded extensions for every call below. Two reasons, and
+# neither is tidiness. A half-removed extension in ~/.pi/agent/npm aborts every
+# run before the model is reached — measured here as "Cannot find module
+# 'ollama'", exit 1, zero output, from a directory that is now empty. And a
+# capture is meant to show the Vendor path alone, so a third party's code in
+# the process is noise in the transcript.
+#
+# The provider itself is unaffected: it comes from ~/.pi/agent/models.json,
+# which is config rather than an extension. Finding P1.
+PI_CMD="$PI_CMD -ne"
 note_manifest "pi invocation: $PI_CMD"
+note_manifest "extensions: disabled with -ne; provider comes from models.json"
 note_manifest "capture dir: $CAPTURE_DIR"
 note_manifest ""
 
@@ -309,8 +319,8 @@ pause "Ready?"
 
 # ── Stage 2 ────────────────────────────────────────────────────────────────
 stage "Vendor — find one serving, pick a model"
-say "Either Vendor works. Pi reaches both the same way, through an"
-say "OpenAI-compatible endpoint registered from an extension."
+say "Either Vendor works. Pi reaches both the same way, through a provider"
+say "declared in ~/.pi/agent/models.json — no extension, no --base-url flag."
 note "Using 127.0.0.1 rather than localhost: on Windows, localhost can resolve to"
 note "::1 first and miss a server bound only to IPv4."
 printf '\n'
@@ -481,47 +491,31 @@ note_manifest "Vendor: $VENDOR_KIND at $VENDOR_URL"
 note_manifest "Model: $PI_MODEL (ctx $CTX)"
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────
-stage "Generate the provider extension"
-say "This is the part with no shortcut. Pi's built-in provider list does NOT"
-say "include a local Vendor, and there is no --base-url flag. An arbitrary"
-say "OpenAI-compatible endpoint is only reachable by registering a provider"
-say "from an extension, loaded with -e."
+stage "Vendor in Pi's own config — no extension"
+say "~/.pi/agent/models.json is a first-class config route. Finding P1 settled"
+say "this: an OpenAI-compatible endpoint needs no extension, and Pi autodetects"
+say "the context window and max output from the endpoint, which the extension"
+say "route makes you hardcode and get wrong."
+printf '\n'
+note "This wizard READS that file. It does not rewrite it behind your back."
 printf '\n'
 
-cat > "$EXT_FILE" <<EXTEOF
-export default function (pi) {
-  pi.registerProvider("$VENDOR_KIND", {
-    name: "$VENDOR_NAME",
-    baseUrl: "$VENDOR_URL/v1",
-    apiKey: "$VENDOR_KIND",
-    api: "openai-completions",
-    models: [
-      {
-        id: "$PI_MODEL",
-        name: "$PI_MODEL",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: $CTX,
-        maxTokens: 4096
-      }
-    ]
-  });
-}
-EXTEOF
+MODELS_CFG="$HOME/.pi/agent/models.json"
+if [[ -f "$MODELS_CFG" ]]; then
+  say "Config: $MODELS_CFG"
+else
+  warn "No $MODELS_CFG — Pi has no custom providers to offer."
+fi
+printf '\n'
 
-say "Written to $(basename "$EXT_FILE"):"
-sed 's/^/    /' "$EXT_FILE"
-printf '\n'
-note "Docs show a .ts extension with a type-only import. This file omits the"
-note "import so it is valid as both TS and plain JS. If loading fails, try"
-note "renaming it to .js and re-running."
-printf '\n'
-say "Verifying Pi can see the provider..."
+say "Asking Pi what it can see..."
 set +e
-$PI_CMD -e "$EXT_FILE" --list-models < /dev/null > "$CAPTURE_DIR/pi-list-models.txt" 2>&1
+$PI_CMD --list-models < /dev/null > "$CAPTURE_DIR/pi-list-models.txt" 2>&1
 LIST_RC=$?
 set -e
+sed 's/^/    /' "$CAPTURE_DIR/pi-list-models.txt" | head -n 15
+printf '\n'
+
 # Do NOT grep for the provider name alone: Pi prints it inside its own error
 # text ('Provider "<name>": ... is required'), so a substring match reports
 # success on the exact failure it is meant to catch. Require a real table row
@@ -533,35 +527,30 @@ if [[ $LIST_RC -eq 0 ]] \
    && awk -v m="$PI_MODEL" -v p="$VENDOR_KIND" '$1==p && $2==m {found=1} END{exit !found}' \
         "$CAPTURE_DIR/pi-list-models.txt" \
    && ! grep -qi "no models available\|errors loading models.json" "$CAPTURE_DIR/pi-list-models.txt"; then
-  say "  provider registered."
-  printf '
-'
-  say "This capture uses:  --provider $VENDOR_KIND --model $PI_MODEL"
-  say "                    baseUrl $VENDOR_URL/v1"
-  # ~/.pi/agent/models.json is loaded ALONGSIDE the -e extension, so its
-  # providers appear in this table whatever you picked here. Seeing an lmstudio
-  # row after choosing ollama is that file, not this capture. Say so, because
-  # the table is the only thing on screen and it reads like a contradiction.
-  if [[ -f "$HOME/.pi/agent/models.json" ]]      && awk -v p="$VENDOR_KIND" '$1!=p && $1!="provider" && NF>2 {found=1} END{exit !found}'           "$CAPTURE_DIR/pi-list-models.txt"; then
-    printf '
-'
-    note "Other providers in the table above come from ~/.pi/agent/models.json,"
-    note "which Pi loads as well as this extension. They are not used here."
-  fi
+  say "Pi has '$VENDOR_KIND / $PI_MODEL'. Using it."
 else
-  warn "Provider did NOT register (exit $LIST_RC). Output:"
-  head -n 15 "$CAPTURE_DIR/pi-list-models.txt" | sed 's/^/    /'
+  warn "Pi does not offer '$VENDOR_KIND / $PI_MODEL' (--list-models exit $LIST_RC)."
   printf '\n'
-  note "Most common cause: ~/.pi/agent/models.json exists and is invalid. Its"
-  note "errors also break -e extension loading when both define the same"
-  note "provider name. The key is 'baseUrl' — camelCase. 'baseURL' is rejected."
-  note "Fix or remove that file before continuing; stage 4 will otherwise hang"
-  note "with both output streams redirected and nothing to show you."
+  say "Add this to the providers block of $MODELS_CFG:"
   printf '\n'
+  cat <<CFGEOF | sed 's/^/    /'
+"$VENDOR_KIND": {
+  "baseUrl": "$VENDOR_URL/v1",
+  "api": "openai-completions",
+  "apiKey": "$VENDOR_KIND",
+  "models": [{"id": "$PI_MODEL"}]
+}
+CFGEOF
+  printf '\n'
+  note "The key is 'baseUrl' — camelCase. 'baseURL' is rejected with"
+  note "'\"baseUrl\" is required when defining custom models'."
+  note "An invalid models.json also makes every provider disappear."
+  printf '\n'
+  say "Edit it in another window, then continue — the file is re-read per run."
   confirm "Continue anyway?" || exit 1
 fi
-note_manifest "extension: $(basename "$EXT_FILE"); --list-models exit $LIST_RC"
-pause "Continue?"
+note_manifest "provider: $VENDOR_KIND; model: $PI_MODEL; --list-models exit $LIST_RC"
+note_manifest "config: $MODELS_CFG"
 
 # ── Stage 4 ────────────────────────────────────────────────────────────────
 stage "Baseline — plain text via -p"
@@ -574,12 +563,12 @@ set +e
 # the redirect this call blocks on the terminal forever; without the timeout a
 # genuine model stall looks identical to that hang.
 if command -v timeout >/dev/null 2>&1; then
-  timeout 120 $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+  timeout 120 $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
     --session-dir "$SESSION_DIR" \
     -p "Reply with exactly the word: hello." \
     < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
 else
-  $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+  $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
     --session-dir "$SESSION_DIR" \
     -p "Reply with exactly the word: hello." \
     < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
@@ -657,7 +646,7 @@ say "This is the mode the Daemon will actually build against: long-lived,"
 say "bidirectional LF-delimited JSONL over stdin/stdout."
 printf '\n'
 say "It settles two open questions:"
-step "does -e (extension loading) work in RPC mode at all?"
+step "does a models.json provider work in RPC mode as it does in json mode?"
 step "does agent_settled appear here but not in --mode json?"
 printf '\n'
 
@@ -690,11 +679,11 @@ set +e
 # agent_settled and closes stdin on that, rather than guessing a duration.
 RPC_HOLD=90
 if command -v timeout >/dev/null 2>&1; then
-  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD -e '$EXT_FILE' --provider '$VENDOR_KIND' --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
+  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD --provider '$VENDOR_KIND' --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 else
   { cat "$CAPTURE_DIR/rpc-command.jsonl"; sleep $RPC_HOLD; } \
-    | $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+    | $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode rpc \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 fi
