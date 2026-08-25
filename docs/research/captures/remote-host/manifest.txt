@@ -1,0 +1,17 @@
+=== Remote Host capture: 2026-08-25T12:16:24+01:00 ===
+Client: MINGW64_NT-10.0-26200 -PC 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys
+Host:   Victor@192.168.4.49:22 (windows)
+Vendor: ollama at http://127.0.0.1:11434
+Hermes: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+error: uv trampoline failed to spawn Python child process
+Pi:     ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+0.84.3
+
+Vendor over real interface (http://192.168.4.49:11434/api/tags): HTTP ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+000curl: (7) Failed to connect to 192.168.4.49 port 11434 after 2031 ms: Couldn't connect to server
