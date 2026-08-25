@@ -468,6 +468,19 @@ for k in $VENDOR_KINDS; do
 done
 
 ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAULT_URL]:"
+# strip_ctl STRING — remove ANSI escape sequences and control bytes.
+#
+# `ask` uses `read -r`, which has no line editing. An arrow key pressed to
+# correct a typo arrives as literal escape bytes and becomes part of the
+# answer: one run stored a model id with the cursor keys embedded in it, then
+# offered it back as the default on every later run. The trailing sequence can
+# be incomplete, so the final letter is optional. sed first, then tr — dropping
+# the ESC byte first would leave the '[D' behind as printable text.
+strip_ctl() {
+  printf '%s' "$1" | sed $'s/\[[0-9;]*[A-Za-z]\{0,1\}//g' | tr -d '[:cntrl:]'
+}
+
+VENDOR_URL=$(strip_ctl "$VENDOR_URL")
 [[ -z "$VENDOR_URL" ]] && VENDOR_URL="$DEFAULT_URL"
 write_env VENDOR_URL "$VENDOR_URL"
 
@@ -523,10 +536,60 @@ for m in (d.get("models") or d.get("data") or []):
 PYEOF
 
 printf '\n'
-step "Pick a TOOL-CAPABLE model — stage 6 needs it to make a tool call."
-note "The id must match one in ~/.pi/agent/models.json, which is what Pi reads."
 [[ "$VENDOR_KIND" != "lmstudio" ]] && note "$(vendor_label "$VENDOR_KIND") does not report tool support here."
-ask PI_MODEL "Model id:"
+
+# Ask Pi what it can reach BEFORE offering a choice, so the list cannot
+# contain a model the run would then fail on.
+$PI_CMD --list-models < /dev/null > "$CAPTURE_DIR/pi-models-available.txt" 2>&1 || true
+
+# pick_model — choose PI_MODEL from what Pi actually offers for this Vendor.
+#
+# Typing the id free-hand was the wrong design twice over. `read -r` has no line
+# editing, so an arrow key pressed to correct a typo is captured as literal
+# escape bytes: one run stored PI_MODEL=qwen3.6:9b^[[D^[[D^[[5 — the typo AND
+# the keystrokes meant to fix it — then offered it back as the default on every
+# later run. A number cannot be mistyped into a valid-looking wrong answer, and
+# a list can only contain models Pi can really reach.
+pick_model() {
+  local -a ids=()
+  local line n choice
+  while read -r line; do
+    ids+=("$line")
+  done < <(awk -v p="$VENDOR_KIND" '$1==p && $2!="" && $1!="provider" {print $2}' \
+             "$CAPTURE_DIR/pi-models-available.txt" 2>/dev/null)
+
+  if (( ${#ids[@]} == 0 )); then
+    warn "Pi reports no models for '$VENDOR_KIND'."
+    note "They come from ~/.pi/agent/models.json. Add the provider there first."
+    printf '\n'
+    # Last resort: typed, stripped of control bytes, and checked against the
+    # Vendor's own listing before it is accepted.
+    ask PI_MODEL "Model id (typed):"
+    PI_MODEL=$(strip_ctl "$PI_MODEL")
+    return
+  fi
+
+  say "Models Pi can reach through '$VENDOR_KIND':"
+  n=0
+  for line in "${ids[@]}"; do
+    n=$((n + 1))
+    printf '    %s%d%s  %s\n' "$BOLD" "$n" "$RESET" "$line"
+  done
+  printf '\n'
+  step "Pick a TOOL-CAPABLE one — stage 6 needs it to make a tool call."
+  while :; do
+    ask choice "Number [1-${#ids[@]}]:"
+    choice=$(printf '%s' "$choice" | tr -cd '0-9')
+    if [[ -n "$choice" ]] && (( choice >= 1 && choice <= ${#ids[@]} )); then
+      PI_MODEL="${ids[$((choice - 1))]}"
+      return
+    fi
+    warn "Type a number between 1 and ${#ids[@]}."
+  done
+}
+
+pick_model
+say "Model: $PI_MODEL"
 write_env PI_MODEL "$PI_MODEL"
 
 # Recorded, not asked for. Pi autodetects the context window from the endpoint
