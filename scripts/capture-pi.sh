@@ -200,7 +200,9 @@ export PI_TELEMETRY=0
 # back as defaults. Pi never reads it.
 ENV_FILE="$HOME/.pi-capture.env"
 
-CAPTURE_DIR="$HOME/pi-capture-$(date +%Y%m%d-%H%M%S)"
+# Named for the Vendor as well as the time: two passes started in the same
+# second would otherwise land in one directory and overwrite each other.
+CAPTURE_DIR="$HOME/pi-capture-${CAPTURE_VENDOR:+${CAPTURE_VENDOR}-}$(date +%Y%m%d-%H%M%S)"
 WORKDIR="$CAPTURE_DIR/workdir"
 SESSION_DIR="$CAPTURE_DIR/sessions"
 mkdir -p "$WORKDIR" "$SESSION_DIR"
@@ -214,7 +216,10 @@ note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 capture_get() {
   local name="$1" url="$2" code
   local out="$CAPTURE_DIR/$name"
-  code=$(curl -sS -o "$out" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log" || echo "000")
+  # `|| echo "000"` appended a second code, so a successful fetch was recorded
+  # as "HTTP 200000". curl writes the status even when it exits non-zero.
+  code=$(curl -sS -o "$out" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log") || true
+  [[ -z "$code" ]] && code=000
   if [[ "$code" == "200" ]]; then
     printf '  %s✓%s %s → %s (%s bytes)\n' "$GREEN" "$RESET" "$url" "$name" "$(wc -c < "$out" | tr -d ' ')"
   else
@@ -249,6 +254,137 @@ run_pi_capture() {
   note_manifest "$label exit code: $rc"
   say "captured $(wc -l < "$outfile" | tr -d ' ') JSONL lines → $(basename "$outfile")"
 }
+
+# ── Vendor helpers ─────────────────────────────────────────────────────────
+
+# Three known Vendors, so three case arms rather than a lookup table. The
+# defaults are the ports each ships with, and the model listing differs:
+# LM Studio serves its own under /api/v1, the other two are OpenAI-compatible.
+VENDOR_KINDS="lmstudio ollama llamacpp"
+vendor_label() {
+  case "$1" in
+    lmstudio) printf 'LM Studio' ;;
+    ollama)   printf 'Ollama' ;;
+    llamacpp) printf 'llama.cpp' ;;
+  esac
+}
+vendor_default_url() {
+  case "$1" in
+    lmstudio) printf 'http://127.0.0.1:1234' ;;
+    ollama)   printf 'http://127.0.0.1:11434' ;;
+    llamacpp) printf 'http://127.0.0.1:8080' ;;
+  esac
+}
+vendor_models_path() {
+  case "$1" in
+    lmstudio) printf '/api/v1/models' ;;
+    *)        printf '/v1/models' ;;
+  esac
+}
+
+# probe_vendor URL — sets PROBE_CODE to the HTTP status, or 000 when the
+# connection never happened, and PROBE_ERR to curl's own words. "000" alone
+# never says why, and the reason is the whole point of this stage.
+#
+# Results come back in globals, NOT on stdout, because `code=$(probe_vendor
+# ...)` would run the function in a subshell and discard PROBE_ERR — the same
+# trap that made the SSH preflight report tools as installed without running
+# them. curl also writes the code AND exits non-zero when it cannot connect, so
+# a plain `|| echo 000` appends a second 000 and yields "000000".
+PROBE_CODE=""
+PROBE_ERR=""
+probe_vendor() {
+  local errf="$CAPTURE_DIR/.probe-err"
+  PROBE_CODE=""; PROBE_ERR=""
+  PROBE_CODE=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>"$errf") || true
+  [[ -z "$PROBE_CODE" ]] && PROBE_CODE=000
+  [[ -s "$errf" ]] && PROBE_ERR=$(head -1 "$errf")
+  return 0
+}
+
+# strip_ctl STRING — remove ANSI escape sequences and control bytes.
+#
+# `ask` uses `read -r`, which has no line editing. An arrow key pressed to
+# correct a typo arrives as literal escape bytes and becomes part of the
+# answer: one run stored a model id with the cursor keys embedded in it, then
+# offered it back as the default on every later run. The trailing sequence can
+# be incomplete, so the final letter is optional. sed first, then tr — dropping
+# the ESC byte first would leave the '[D' behind as printable text.
+strip_ctl() {
+  printf '%s' "$1" | sed $'s/\[[0-9;]*[A-Za-z]\{0,1\}//g' | tr -d '[:cntrl:]'
+}
+
+# ── One pass per Vendor ─────────────────────────────────────────────────────
+#
+# Capturing one Vendor and stopping wastes the run: the interesting comparison
+# is how the SAME prompts behave across Vendors, and a second pass costs only
+# the time it takes.
+#
+# The wizard is a linear script, so rather than wrapping three hundred lines in
+# a loop it re-runs ITSELF once per Vendor with the choice pinned in
+# CAPTURE_VENDOR. Each pass therefore gets its own capture directory and its own
+# manifest, which is what the research record wants anyway — and a Vendor that
+# fails cannot take the others down with it.
+if [[ -z "${CAPTURE_VENDOR:-}" ]]; then
+  banner "Pi → Vendor: capture raw output"
+  printf '  %sChecking which Vendors are serving...%s\n\n' "$DIM" "$RESET"
+  mkdir -p "$CAPTURE_DIR"
+  REACHABLE=""
+  for k in $VENDOR_KINDS; do
+    url="$(vendor_default_url "$k")$(vendor_models_path "$k")"
+    probe_vendor "$url"
+    if [[ "$PROBE_CODE" == 200 ]]; then
+      REACHABLE="$REACHABLE $k"
+      printf '  %s✓%s  %-10s %-34s HTTP %s\n' "$GREEN" "$RESET" "$(vendor_label "$k")" "$url" "$PROBE_CODE"
+    else
+      printf '  %s·%s  %-10s %-34s HTTP %s\n' "$DIM" "$RESET" "$(vendor_label "$k")" "$url" "$PROBE_CODE"
+      [[ -n "$PROBE_ERR" ]] && printf '     %s%s%s\n' "$DIM" "$PROBE_ERR" "$RESET"
+    fi
+  done
+  REACHABLE="${REACHABLE# }"
+  # The dispatcher makes no capture of its own; each pass makes its own
+  # directory. Remove the scratch file first or rmdir refuses and leaves an
+  # empty pi-capture-<ts> behind on every run.
+  rm -f "$CAPTURE_DIR/.probe-err"
+  rmdir "$CAPTURE_DIR" 2>/dev/null || true
+  printf '\n'
+
+  if [[ -z "$REACHABLE" ]]; then
+    warn "None of the three answered. That is a recorded result, not a crash."
+    note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
+    note "Ollama:    serves on 11434 once installed; 'ollama list' to confirm."
+    note "llama.cpp: llama-server -m <model.gguf> --port 8080"
+    printf '\n'
+    confirm "Carry on and pick one by hand anyway?" || exit 1
+    CAPTURE_VENDOR=manual bash "$0"
+    exit $?
+  fi
+
+  say "Will capture against: $REACHABLE"
+  printf '\n'
+  confirm "Run a full pass for each?" || exit 1
+
+  RESULTS=""
+  for k in $REACHABLE; do
+    printf '\n%s%s  ── Vendor %s ──%s\n' "$BOLD" "$BLUE" "$(vendor_label "$k")" "$RESET"
+    # Not `exit` on failure: one Vendor refusing is a result to record, and the
+    # remaining Vendors still have to be tried.
+    if CAPTURE_VENDOR="$k" bash "$0"; then
+      RESULTS="$RESULTS $k=ok"
+    else
+      RESULTS="$RESULTS $k=exit$?"
+      warn "$(vendor_label "$k") pass ended non-zero — carrying on."
+    fi
+  done
+
+  printf '\n%s%s  All passes finished%s\n' "$BOLD" "$GREEN" "$RESET"
+  for r in $RESULTS; do printf '    %s\n' "$r"; done
+  printf '\n'
+  say "One capture directory per Vendor under $HOME:"
+  ls -1d "$HOME"/pi-capture-* 2>/dev/null | tail -n 5 | sed 's/^/    /'
+  printf '\n'
+  exit 0
+fi
 
 banner "Pi → Vendor: capture raw output"
 
@@ -329,50 +465,7 @@ note "find out what querying a Harness over SSH actually reports, so a refused"
 note "connection is a result: it gets recorded and the run carries on."
 printf '\n'
 
-# Three known Vendors, so three case arms rather than a lookup table. The
-# defaults are the ports each ships with, and the model listing differs:
-# LM Studio serves its own under /api/v1, the other two are OpenAI-compatible.
-VENDOR_KINDS="lmstudio ollama llamacpp"
-vendor_label() {
-  case "$1" in
-    lmstudio) printf 'LM Studio' ;;
-    ollama)   printf 'Ollama' ;;
-    llamacpp) printf 'llama.cpp' ;;
-  esac
-}
-vendor_default_url() {
-  case "$1" in
-    lmstudio) printf 'http://127.0.0.1:1234' ;;
-    ollama)   printf 'http://127.0.0.1:11434' ;;
-    llamacpp) printf 'http://127.0.0.1:8080' ;;
-  esac
-}
-vendor_models_path() {
-  case "$1" in
-    lmstudio) printf '/api/v1/models' ;;
-    *)        printf '/v1/models' ;;
-  esac
-}
 
-# probe_vendor URL — sets PROBE_CODE to the HTTP status, or 000 when the
-# connection never happened, and PROBE_ERR to curl's own words. "000" alone
-# never says why, and the reason is the whole point of this stage.
-#
-# Results come back in globals, NOT on stdout, because `code=$(probe_vendor
-# ...)` would run the function in a subshell and discard PROBE_ERR — the same
-# trap that made the SSH preflight report tools as installed without running
-# them. curl also writes the code AND exits non-zero when it cannot connect, so
-# a plain `|| echo 000` appends a second 000 and yields "000000".
-PROBE_CODE=""
-PROBE_ERR=""
-probe_vendor() {
-  local errf="$CAPTURE_DIR/.probe-err"
-  PROBE_CODE=""; PROBE_ERR=""
-  PROBE_CODE=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>"$errf") || true
-  [[ -z "$PROBE_CODE" ]] && PROBE_CODE=000
-  [[ -s "$errf" ]] && PROBE_ERR=$(head -1 "$errf")
-  return 0
-}
 
 REACHABLE=""
 for k in $VENDOR_KINDS; do
@@ -385,7 +478,14 @@ for k in $VENDOR_KINDS; do
     printf '  %s·%s  %-10s %-34s HTTP %s\n' "$DIM" "$RESET" "$(vendor_label "$k")" "$url" "$code"
     [[ -n "$PROBE_ERR" ]] && printf '     %s%s%s\n' "$DIM" "$PROBE_ERR" "$RESET"
   fi
-  note_manifest "probe $k $url -> HTTP $code${PROBE_ERR:+ ($PROBE_ERR)}"
+  # Only quote curl's stderr when the probe actually failed. curl can warn on a
+  # perfectly good 200 — MSYS reports "Failure writing output to destination"
+  # against /dev/null — and a warning filed beside a success reads as a failure.
+  if [[ "$code" == 200 ]]; then
+    note_manifest "probe $k $url -> HTTP $code"
+  else
+    note_manifest "probe $k $url -> HTTP $code${PROBE_ERR:+ ($PROBE_ERR)}"
+  fi
 done
 REACHABLE="${REACHABLE# }"
 rm -f "$CAPTURE_DIR/.probe-err"
@@ -414,6 +514,18 @@ pick_vendor() {
 }
 
 VENDOR_KIND=""
+# The dispatcher pins the Vendor for this pass. The probe above still ran, and
+# its results are still recorded, because a pass should say what the whole
+# machine looked like at the time — not only the Vendor it was told to use.
+if [[ -n "${CAPTURE_VENDOR:-}" && "$CAPTURE_VENDOR" != "manual" ]]; then
+  VENDOR_KIND="$CAPTURE_VENDOR"
+  say "This pass: $(vendor_label "$VENDOR_KIND") (pinned by the dispatcher)."
+  case " $REACHABLE " in
+    *" $VENDOR_KIND "*) : ;;
+    *) warn "$(vendor_label "$VENDOR_KIND") did not answer this time. Capturing anyway —"
+       warn "what it reports when unreachable is itself the thing being measured." ;;
+  esac
+else
 case "$(printf '%s' "$REACHABLE" | wc -w | tr -d ' ')" in
   0) warn "None of the three answered. That is a recorded result, not a crash."
      note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
@@ -427,6 +539,7 @@ case "$(printf '%s' "$REACHABLE" | wc -w | tr -d ' ')" in
   *) step "More than one is serving: $REACHABLE"
      pick_vendor "Vendor [lmstudio|ollama|llamacpp]:" ;;
 esac
+fi
 printf '\n'
 step "Vendor for this capture: $VENDOR_KIND"
 
@@ -468,17 +581,6 @@ for k in $VENDOR_KINDS; do
 done
 
 ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAULT_URL]:"
-# strip_ctl STRING — remove ANSI escape sequences and control bytes.
-#
-# `ask` uses `read -r`, which has no line editing. An arrow key pressed to
-# correct a typo arrives as literal escape bytes and becomes part of the
-# answer: one run stored a model id with the cursor keys embedded in it, then
-# offered it back as the default on every later run. The trailing sequence can
-# be incomplete, so the final letter is optional. sed first, then tr — dropping
-# the ESC byte first would leave the '[D' behind as printable text.
-strip_ctl() {
-  printf '%s' "$1" | sed $'s/\[[0-9;]*[A-Za-z]\{0,1\}//g' | tr -d '[:cntrl:]'
-}
 
 VENDOR_URL=$(strip_ctl "$VENDOR_URL")
 [[ -z "$VENDOR_URL" ]] && VENDOR_URL="$DEFAULT_URL"
