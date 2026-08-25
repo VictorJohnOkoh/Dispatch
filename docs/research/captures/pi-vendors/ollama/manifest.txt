@@ -1,0 +1,25 @@
+=== Pi capture run: 2026-08-25T16:47:21+01:00 ===
+OS: Windows (Git Bash) — MINGW64_NT-10.0-26200 ZenitoBurrito 3.4.10-87d57229.x86_64 2024-02-14 20:17 UTC x86_64 Msys
+node: v24.15.0
+pi invocation: pi -ne
+extensions: disabled with -ne; provider comes from models.json
+capture dir: /c/Users/Victor/pi-capture-ollama-20260825-164719
+
+probe lmstudio http://127.0.0.1:1234/api/v1/models -> HTTP 200
+probe ollama http://127.0.0.1:11434/v1/models -> HTTP 200
+probe llamacpp http://127.0.0.1:8080/v1/models -> HTTP 200
+chosen vendor: ollama at http://127.0.0.1:11434 (HTTP 200)
+GET http://127.0.0.1:11434/v1/models -> HTTP 200 -> vendor-models.json
+GET http://127.0.0.1:11434/api/tags -> HTTP 200 -> ollama-tags.json
+Model: qwen3.5:9b (vendor-reported ctx: none)
+provider: ollama; model: qwen3.5:9b; --list-models exit 0
+config: /c/Users/Victor/.pi/agent/models.json
+pi -p exit code: 0
+plain exit code: 0
+tool exit code: 0
+rpc exit code: 0
+agent_settled in rpc: yes
+agent_settled in json: yes
+session files captured: 4
+
+Finished: 2026-08-25T16:51:52+01:00

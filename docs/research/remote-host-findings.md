@@ -157,6 +157,93 @@ started by hand from a desktop session and cannot be brought up over SSH.
 Ollama runs headless. A Host reached only over SSH is therefore an Ollama Host
 in practice, whatever the local captures used.
 
+## R7. Pi's event vocabulary is the same across all three Vendors
+
+Three full passes on the Host, same wizard, same prompts, same model family,
+only the Vendor changing. Artefacts in
+[`captures/pi-vendors/`](./captures/pi-vendors/). `[desktop]`
+
+| Vendor | Endpoint | Model | Stages |
+| --- | --- | --- | --- |
+| LM Studio | `:1234` | `qwen/qwen3.5-9b` | all exit 0 |
+| Ollama | `:11434` | `qwen3.5:9b` | all exit 0 |
+| llama.cpp via llama-swap | `:8080` | `qwen3.5-9b` | all exit 0 |
+
+**Identical where it matters.** All three emit the same 23 event types, and
+nothing appears under one Vendor that does not appear under the others:
+
+```
+agent_start agent_end agent_settled session turn_start turn_end
+message_start message_update message_end
+text text_start text_delta text_end
+thinking thinking_start thinking_delta thinking_end
+toolcall_start toolcall_delta toolcall_end
+tool_execution_start tool_execution_update tool_execution_end
+```
+
+`stopReason` takes the same three values everywhere — `pending`, `stop`,
+`toolUse` — over the same raw values `stop` and `tool_calls`. All three called
+the `bash` tool on the tool-forcing prompt, and all three reported
+`agent_settled` in `--mode json` and `--mode rpc` alike.
+
+So the Event model can be written once. Vendor identity belongs in metadata, not
+in the event schema.
+
+**Different in the accounting, and it cannot be compared across Vendors.**
+
+| | LM Studio | Ollama | llama-swap |
+| --- | --- | --- | --- |
+| `thinkingSignature` | `reasoning_content` | `reasoning` | `reasoning_content` |
+| `usage.input` | 3012 | 3007 | 24 |
+| `usage.cacheRead` | 0 | 0 | 2986 |
+| `usage.reasoning` | 51 | 0 | 0 |
+| extra key | — | — | `responseModel` |
+
+Three traps for anything that reads these numbers:
+
+- **`usage.reasoning` is not trustworthy.** All three produced thinking
+  content; only LM Studio counted it. Zero means "not reported", not "none".
+- **`input` and `cacheRead` are not comparable.** llama-swap counted 24 input
+  tokens against a 2986-token cached prefix for the same prompt the others
+  charged ~3010 input for. Totals agree, the split does not. Summing `input`
+  across Vendors measures nothing.
+- **`thinkingSignature` is Vendor-specific.** Keying anything off the string
+  breaks the moment the Host changes Vendor.
+
+**Reaching them is uniform.** All three are OpenAI-compatible endpoints declared
+in `~/.pi/agent/models.json` — a `baseUrl`, an `api`, an `apiKey` that no local
+Vendor checks. No extension, no `--base-url`, no per-Vendor code. Every run used
+`pi -ne`, so nothing else was loaded into the process.
+
+Only discovery differs, and llama-swap is the awkward one: it fronts several
+Models, so a bare `/props` answers HTTP 404 with `no model id could be
+identified`, and the per-Model view is at `/upstream/<model>/props`. See
+[ADR-0002](../adr/0002-llama-swap-is-the-llama-cpp-vendor.md).
+
+## R8. A 200 is not proof the artefact arrived
+
+The three passes recorded `HTTP 200` for every Vendor model listing and wrote
+none of them. The capture directories have no `vendor-models.json` at all.
+`curl-errors.log` holds the reason:
+
+```
+curl: (23) Failure writing output to destination, passed 637 returned 4294967295
+```
+
+A native curl was handed an MSYS path (`/c/Users/...`) it could not open, so it
+fetched the body and threw it away. The status line was true and the artefact
+was absent. The fetch helper checked the status only.
+
+Two fixes, and both were needed: pass `winpath` so curl gets a path it can
+write, and check the file after the fetch rather than the status line. A run
+now reports `HTTP 200 but NO FILE WRITTEN` instead of a silent gap.
+
+This is the same fault as R4 in a new place. Across this exercise the capture
+has claimed success from a multiplexing error, from a pipeline's exit code,
+from a launcher stub that never ran, and now from a status line. **Every one of
+them was a check that read something adjacent to the thing it was meant to
+verify.**
+
 ---
 
 ## What this run establishes, and what it does not

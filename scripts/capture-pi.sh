@@ -249,12 +249,25 @@ capture_get() {
   code=$(curl -sS -m 300 -o "$dest" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log") || true
   [[ -z "$code" ]] && code=000
   CAPTURE_CODE="$code"
-  if [[ "$code" == "200" ]]; then
-    printf '  %s✓%s %s → %s (%s bytes)\n' "$GREEN" "$RESET" "$url" "$name" "$(wc -c < "$out" | tr -d ' ')"
+  # An HTTP status is not proof the body landed. One run recorded 200 for every
+  # fetch while curl wrote none of them — "curl: (23) Failure writing output to
+  # destination", from a native curl handed an MSYS path — and the artefacts
+  # were simply absent afterwards. winpath fixes that cause; this checks the
+  # file regardless, because a status line is not evidence a file exists.
+  local bytes=0
+  [[ -f "$out" ]] && bytes=$(wc -c < "$out" | tr -d ' ')
+  if [[ "$code" == "200" && "$bytes" -gt 0 ]]; then
+    printf '  %s✓%s %s → %s (%s bytes)
+' "$GREEN" "$RESET" "$url" "$name" "$bytes"
+    note_manifest "GET $url -> HTTP $code -> $name ($bytes bytes)"
+  elif [[ "$code" == "200" ]]; then
+    warn "$url answered 200 but wrote no file — the artefact is MISSING."
+    note "curl's reason is in $(basename "$CAPTURE_DIR")/curl-errors.log"
+    note_manifest "GET $url -> HTTP $code but NO FILE WRITTEN -> $name MISSING"
   else
-    warn "$url returned HTTP $code — saved anyway as $name"
+    warn "$url returned HTTP $code — kept as $name ($bytes bytes)"
+    note_manifest "GET $url -> HTTP $code -> $name ($bytes bytes)"
   fi
-  note_manifest "GET $url -> HTTP $code -> $name"
 }
 
 # run_pi_capture LABEL OUTFILE PROMPT — one-shot --mode json run, timed out.
