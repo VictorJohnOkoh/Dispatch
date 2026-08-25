@@ -208,7 +208,7 @@ MANIFEST="$CAPTURE_DIR/manifest.txt"
 
 PY=""
 PI_CMD=""
-EXT_FILE="$CAPTURE_DIR/lmstudio-provider.ts"
+EXT_FILE="$CAPTURE_DIR/vendor-provider.ts"
 
 note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 
@@ -236,11 +236,11 @@ run_pi_capture() {
   local label="$1" outfile="$2" prompt="$3" rc
   set +e
   if command -v timeout >/dev/null 2>&1; then
-    timeout 300 $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+    timeout 300 $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
       < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   else
-    $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+    $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
       < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   fi
@@ -251,7 +251,7 @@ run_pi_capture() {
   say "captured $(wc -l < "$outfile" | tr -d ' ') JSONL lines → $(basename "$outfile")"
 }
 
-banner "Pi → LM Studio: capture raw output"
+banner "Pi → Vendor: capture raw output"
 
 # ── Stage 1 ────────────────────────────────────────────────────────────────
 stage "Preflight — Node, Pi, and tools"
@@ -278,7 +278,7 @@ if command -v pi >/dev/null 2>&1; then
   say "pi:   $(pi --version 2>&1 | head -n1)"
 else
   warn "'pi' is not on PATH."
-  say "You said this machine has Hermes and LM Studio — Pi likely isn't installed yet."
+  say "You said this machine has Hermes and a Vendor — Pi likely isn't installed yet."
   printf '\n'
   if confirm "Install it globally now (npm i -g @earendil-works/pi-coding-agent)?"; then
     npm install -g @earendil-works/pi-coding-agent
@@ -308,31 +308,83 @@ say "Capturing into: $CAPTURE_DIR"
 pause "Ready?"
 
 # ── Stage 2 ────────────────────────────────────────────────────────────────
-stage "LM Studio — confirm it's serving, pick a model"
-say "LM Studio must have its local server running (Developer tab → Start Server)."
+stage "Vendor — find one serving, pick a model"
+say "Either Vendor works. Pi reaches both the same way, through an"
+say "OpenAI-compatible endpoint registered from an extension."
 note "Using 127.0.0.1 rather than localhost: on Windows, localhost can resolve to"
 note "::1 first and miss a server bound only to IPv4."
 printf '\n'
-ask LMSTUDIO_URL "LM Studio base URL [http://127.0.0.1:1234]:"
-[[ -z "$LMSTUDIO_URL" ]] && LMSTUDIO_URL="http://127.0.0.1:1234"
-write_env LMSTUDIO_URL "$LMSTUDIO_URL"
+
+# Probe both rather than asking first. On a Host reached over SSH the operator
+# cannot see which one is running, and a wrong guess costs a whole stage.
+probe_vendor() {
+  curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000
+}
+LMS_CODE=$(probe_vendor "http://127.0.0.1:1234/api/v1/models")
+OLL_CODE=$(probe_vendor "http://127.0.0.1:11434/v1/models")
+say "LM Studio on 1234:  HTTP $LMS_CODE"
+say "Ollama on 11434:    HTTP $OLL_CODE"
 printf '\n'
 
-capture_get "lmstudio-models.json" "$LMSTUDIO_URL/api/v1/models"
-if [[ ! -s "$CAPTURE_DIR/lmstudio-models.json" ]]; then
-  say "Trying the pre-0.4.0 path..."
-  capture_get "lmstudio-models-v0.json" "$LMSTUDIO_URL/api/v0/models"
+VENDOR_KIND=""
+if [[ "$LMS_CODE" == 200 && "$OLL_CODE" == 200 ]]; then
+  step "Both are serving. Which one is this capture against?"
+  ask VENDOR_KIND "Vendor [lmstudio|ollama]:"
+elif [[ "$LMS_CODE" == 200 ]]; then
+  VENDOR_KIND=lmstudio
+elif [[ "$OLL_CODE" == 200 ]]; then
+  VENDOR_KIND=ollama
+else
+  warn "Neither Vendor answered."
+  note "LM Studio: Developer tab -> Start Server."
+  note "Ollama:    it serves on 11434 once installed; 'ollama list' to confirm."
+  ask VENDOR_KIND "Carry on anyway with [lmstudio|ollama]:"
+fi
+[[ -z "$VENDOR_KIND" ]] && VENDOR_KIND=lmstudio
+write_env VENDOR_KIND "$VENDOR_KIND"
+
+if [[ "$VENDOR_KIND" == "ollama" ]]; then
+  VENDOR_NAME="Ollama (local)"
+  DEFAULT_URL="http://127.0.0.1:11434"
+else
+  VENDOR_NAME="LM Studio (local)"
+  DEFAULT_URL="http://127.0.0.1:1234"
+fi
+printf '\n'
+ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAULT_URL]:"
+[[ -z "$VENDOR_URL" ]] && VENDOR_URL="$DEFAULT_URL"
+write_env VENDOR_URL "$VENDOR_URL"
+printf '\n'
+
+MODELS_JSON="$CAPTURE_DIR/vendor-models.json"
+if [[ "$VENDOR_KIND" == "ollama" ]]; then
+  capture_get "vendor-models.json" "$VENDOR_URL/v1/models"
+  # The native endpoint carries the parameter size and quantisation that the
+  # OpenAI-compatible one drops. Kept because it is evidence, not decoration.
+  capture_get "ollama-tags.json" "$VENDOR_URL/api/tags"
+else
+  capture_get "vendor-models.json" "$VENDOR_URL/api/v1/models"
+  if [[ ! -s "$MODELS_JSON" ]]; then
+    say "Trying the pre-0.4.0 path..."
+    capture_get "vendor-models.json" "$VENDOR_URL/api/v0/models"
+  fi
 fi
 
 printf '\n'
 say "Model ids found:"
-$PY - "$CAPTURE_DIR/lmstudio-models.json" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
+$PY - "$MODELS_JSON" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
     ctx = m.get("max_context_length") or m.get("context_length") or "?"
-    caps = m.get("capabilities") or {}
-    tools = "tools" if caps.get("trained_for_tool_use") else "NO TOOLS"
+    caps = m.get("capabilities")
+    # Ollama's OpenAI-compatible listing carries no capability field at all.
+    # Absent is not the same as false, and printing "NO TOOLS" for a model that
+    # does support them would be a fabricated finding.
+    if caps is None:
+        tools = "tools: unknown"
+    else:
+        tools = "tools" if caps.get("trained_for_tool_use") else "NO TOOLS"
     # LM Studio >=0.4.0 keys this "key"; older builds use "id".
     print("   ", m.get("key") or m.get("id") or m.get("modelKey") or m.get("path"),
           " ctx:", ctx, " ", tools)
@@ -340,10 +392,11 @@ PYEOF
 
 printf '\n'
 step "Pick a TOOL-CAPABLE model — stage 6 needs it to make a tool call."
+[[ "$VENDOR_KIND" == "ollama" ]] && note "Ollama does not report tool support here. 'ollama show <model>' does."
 ask PI_MODEL "Model id:"
 write_env PI_MODEL "$PI_MODEL"
 
-CTX=$($PY - "$CAPTURE_DIR/lmstudio-models.json" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
+CTX=$($PY - "$MODELS_JSON" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
@@ -357,23 +410,23 @@ if [[ -z "$CTX" ]]; then
   [[ -z "$CTX" ]] && CTX="32768"
 fi
 say "context window: $CTX"
-note_manifest "LM Studio URL: $LMSTUDIO_URL"
+note_manifest "Vendor: $VENDOR_KIND at $VENDOR_URL"
 note_manifest "Model: $PI_MODEL (ctx $CTX)"
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────
 stage "Generate the provider extension"
 say "This is the part with no shortcut. Pi's built-in provider list does NOT"
-say "include LM Studio, and there is no --base-url flag. An arbitrary"
+say "include a local Vendor, and there is no --base-url flag. An arbitrary"
 say "OpenAI-compatible endpoint is only reachable by registering a provider"
 say "from an extension, loaded with -e."
 printf '\n'
 
 cat > "$EXT_FILE" <<EXTEOF
 export default function (pi) {
-  pi.registerProvider("lmstudio", {
-    name: "LM Studio (local)",
-    baseUrl: "$LMSTUDIO_URL/v1",
-    apiKey: "lm-studio",
+  pi.registerProvider("$VENDOR_KIND", {
+    name: "$VENDOR_NAME",
+    baseUrl: "$VENDOR_URL/v1",
+    apiKey: "$VENDOR_KIND",
     api: "openai-completions",
     models: [
       {
@@ -403,14 +456,14 @@ $PI_CMD -e "$EXT_FILE" --list-models < /dev/null > "$CAPTURE_DIR/pi-list-models.
 LIST_RC=$?
 set -e
 # Do NOT grep for the provider name alone: Pi prints it inside its own error
-# text ('Provider "lmstudio": ... is required'), so a substring match reports
+# text ('Provider "<name>": ... is required'), so a substring match reports
 # success on the exact failure it is meant to catch. Require a real table row
 # — provider and model on one line — and treat Pi's warnings as fatal.
 # --list-models also exits 0 with no models at all, so LIST_RC proves nothing.
 # Field comparison, not a regex: model ids contain '/' and '.', which turn a
 # hand-escaped pattern into a debugging exercise of its own.
 if [[ $LIST_RC -eq 0 ]] \
-   && awk -v m="$PI_MODEL" '$1=="lmstudio" && $2==m {found=1} END{exit !found}' \
+   && awk -v m="$PI_MODEL" -v p="$VENDOR_KIND" '$1==p && $2==m {found=1} END{exit !found}' \
         "$CAPTURE_DIR/pi-list-models.txt" \
    && ! grep -qi "no models available\|errors loading models.json" "$CAPTURE_DIR/pi-list-models.txt"; then
   say "  provider registered."
@@ -440,12 +493,12 @@ set +e
 # the redirect this call blocks on the terminal forever; without the timeout a
 # genuine model stall looks identical to that hang.
 if command -v timeout >/dev/null 2>&1; then
-  timeout 120 $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+  timeout 120 $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
     --session-dir "$SESSION_DIR" \
     -p "Reply with exactly the word: hello." \
     < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
 else
-  $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+  $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
     --session-dir "$SESSION_DIR" \
     -p "Reply with exactly the word: hello." \
     < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
@@ -453,7 +506,7 @@ fi
 BASE_RC=$?
 set -e
 if [[ $BASE_RC -eq 124 ]]; then
-  warn "Timed out after 120s. LM Studio is probably loading the model, or is busy."
+  warn "Timed out after 120s. The Vendor is probably loading the model, or is busy."
   warn "Check its Developer tab, then re-run this wizard."
 fi
 say "exit code: $BASE_RC   ← undocumented; record it"
@@ -556,11 +609,11 @@ set +e
 # agent_settled and closes stdin on that, rather than guessing a duration.
 RPC_HOLD=90
 if command -v timeout >/dev/null 2>&1; then
-  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD -e '$EXT_FILE' --provider lmstudio --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
+  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD -e '$EXT_FILE' --provider '$VENDOR_KIND' --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 else
   { cat "$CAPTURE_DIR/rpc-command.jsonl"; sleep $RPC_HOLD; } \
-    | $PI_CMD -e "$EXT_FILE" --provider lmstudio --model "$PI_MODEL" \
+    | $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode rpc \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 fi
@@ -624,6 +677,6 @@ printf '\n'
 step "Copy the folder into the repo as docs/research/captures/pi/"
 step "Then pair it with the Hermes capture to design the Event model."
 printf '\n'
-note "Nothing secret was captured here — LM Studio needs no real API key."
+note "Nothing secret was captured here — a local Vendor needs no real API key."
 
 finish
