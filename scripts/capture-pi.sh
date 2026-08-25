@@ -213,13 +213,42 @@ PI_CMD=""
 
 note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 
+# The status comes back in CAPTURE_CODE, not on stdout, for the reason spelled
+# out on probe_vendor: `code=$(capture_get ...)` would run the function in a
+# subshell and throw the status away with it. A caller needs that status to
+# decide whether to try a second URL.
+#
+# -m 300 matches llama-swap's healthCheckTimeout. A fetch that starts a cold
+# model is slow but finite, so a server that never answers becomes a recorded
+# 000 instead of a wizard sitting silently forever.
+CAPTURE_CODE=""
+
+# winpath PATH — the form of PATH that a native Windows program can open.
+#
+# Git Bash hands out /c/... paths and normally rewrites them when it calls a
+# native program. MSYS_NO_PATHCONV, exported above so that Pi gets its own
+# arguments unmangled, turns that rewriting off for everything — including curl
+# and python, which are both native here.
+#
+# Neither one complains where you would see it. curl still prints HTTP 200 and
+# writes nothing, leaving "curl: (23) Failure writing output to destination" in
+# curl-errors.log; python raises FileNotFoundError into the 2>/dev/null that
+# every parse block below redirects away. So the whole capture recorded HTTP 200
+# for empty files, and every "ctx:" read as unknown. Convert at each call site
+# rather than lifting the export, which Pi still needs.
+winpath() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
 capture_get() {
-  local name="$1" url="$2" code
+  local name="$1" url="$2" code dest
   local out="$CAPTURE_DIR/$name"
+  dest=$(winpath "$out")
   # `|| echo "000"` appended a second code, so a successful fetch was recorded
   # as "HTTP 200000". curl writes the status even when it exits non-zero.
-  code=$(curl -sS -o "$out" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log") || true
+  code=$(curl -sS -m 300 -o "$dest" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log") || true
   [[ -z "$code" ]] && code=000
+  CAPTURE_CODE="$code"
   if [[ "$code" == "200" ]]; then
     printf '  %s✓%s %s → %s (%s bytes)\n' "$GREEN" "$RESET" "$url" "$name" "$(wc -c < "$out" | tr -d ' ')"
   else
@@ -353,7 +382,8 @@ if [[ -z "${CAPTURE_VENDOR:-}" ]]; then
     warn "None of the three answered. That is a recorded result, not a crash."
     note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
     note "Ollama:    serves on 11434 once installed; 'ollama list' to confirm."
-    note "llama.cpp: llama-server -m <model.gguf> --port 8080"
+    note "llama.cpp: llama-server -m <model.gguf> --port 8080, or llama-swap"
+    note "           -config config.yaml -listen 127.0.0.1:8080 to serve several."
     printf '\n'
     confirm "Carry on and pick one by hand anyway?" || exit 1
     CAPTURE_VENDOR=manual bash "$0"
@@ -530,7 +560,8 @@ case "$(printf '%s' "$REACHABLE" | wc -w | tr -d ' ')" in
   0) warn "None of the three answered. That is a recorded result, not a crash."
      note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
      note "Ollama:    serves on 11434 once installed; 'ollama list' to confirm."
-     note "llama.cpp: llama-server -m <model.gguf> --port 8080"
+     note "llama.cpp: llama-server -m <model.gguf> --port 8080, or llama-swap"
+     note "           -config config.yaml -listen 127.0.0.1:8080 to serve several."
      printf '\n'
      confirm "Carry on and pick one by hand anyway?" || exit 1
      pick_vendor "Vendor [lmstudio|ollama|llamacpp]:" ;;
@@ -606,10 +637,9 @@ case "$VENDOR_KIND" in
     # The native endpoint carries the parameter size and quantisation that the
     # OpenAI-compatible one drops. Kept because it is evidence, not decoration.
     capture_get "ollama-tags.json" "$VENDOR_URL/api/tags" ;;
-  llamacpp)
-    # llama-server serves one model, and /props is where it names it along with
-    # the context size it was actually started with.
-    capture_get "llamacpp-props.json" "$VENDOR_URL/props" ;;
+  # llamacpp has no arm here on purpose. Its /props needs a model id whenever
+  # llama-swap is the thing on the port, so that capture happens further down,
+  # once pick_model has settled which model this pass uses.
   lmstudio)
     if [[ ! -s "$MODELS_JSON" ]]; then
       say "Trying the pre-0.4.0 path..."
@@ -619,7 +649,7 @@ esac
 
 printf '\n'
 say "Model ids found:"
-$PY - "$MODELS_JSON" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
+$PY - "$(winpath "$MODELS_JSON")" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
@@ -638,7 +668,12 @@ for m in (d.get("models") or d.get("data") or []):
 PYEOF
 
 printf '\n'
-[[ "$VENDOR_KIND" != "lmstudio" ]] && note "$(vendor_label "$VENDOR_KIND") does not report tool support here."
+case "$VENDOR_KIND" in
+  lmstudio) : ;;
+  llamacpp) note "llama.cpp reports no tool support in this listing, but it does report"
+            note "it at /props — captured below, once the model is chosen." ;;
+  *)        note "$(vendor_label "$VENDOR_KIND") does not report tool support here." ;;
+esac
 
 # Ask Pi what it can reach BEFORE offering a choice, so the list cannot
 # contain a model the run would then fail on.
@@ -694,10 +729,61 @@ pick_model
 say "Model: $PI_MODEL"
 write_env PI_MODEL "$PI_MODEL"
 
+# /props is where llama-server names the model and reports the context size it
+# was actually started with. A bare llama-server holds one model, so the path is
+# simply /props.
+#
+# llama-swap changes that. It fronts several models on one port and starts them
+# on demand, so a bare /props has no model to describe: it answers HTTP 404 with
+# {"error":{"message":"no model id could be identified"}} and puts the per-model
+# view at /upstream/<model>/props instead. Which of the two is on the port cannot
+# be known in advance, so try the plain path and fall back.
+#
+# This capture sits here, and not up with the other Vendors' extras, because the
+# fallback URL needs the model id — so it must follow pick_model. On llama-swap
+# the fetch also STARTS the model, so a first call as slow as a cold load is the
+# swap working rather than a hang, and it leaves the model loaded for stage 4.
+PROPS_JSON="$CAPTURE_DIR/llamacpp-props.json"
+if [[ "$VENDOR_KIND" == "llamacpp" ]]; then
+  printf '\n'
+  capture_get "llamacpp-props.json" "$VENDOR_URL/props"
+  if [[ "$CAPTURE_CODE" == "200" ]]; then
+    note_manifest "llamacpp: bare llama-server (/props answered directly)"
+  else
+    note "Plain /props refused — trying llama-swap's per-model path."
+    capture_get "llamacpp-props.json" "$VENDOR_URL/upstream/$PI_MODEL/props"
+    if [[ "$CAPTURE_CODE" == "200" ]]; then
+      say "llama-swap is on this port, not a bare llama-server."
+      note_manifest "llamacpp: llama-swap (/props only at /upstream/<model>/props)"
+    fi
+  fi
+
+  # chat_template_caps is llama.cpp's own answer to the question stage 6 depends
+  # on: whether this model's chat template can emit a tool call at all. Only
+  # /props carries it, which is why the check waits until the model is known.
+  if [[ -s "$PROPS_JSON" ]]; then
+    TOOLS=$($PY - "$(winpath "$PROPS_JSON")" <<'PYEOF' 2>/dev/null || echo ""
+import json, sys
+caps = json.load(open(sys.argv[1], encoding="utf-8")).get("chat_template_caps")
+print("" if caps is None else ("yes" if caps.get("supports_tools") else "no"))
+PYEOF
+)
+    case "$TOOLS" in
+      yes) say "tool support: yes — stage 6 can make a tool call." ;;
+      no)  warn "tool support: NO. This model's chat template cannot emit a tool"
+           warn "call, so stage 6 would capture a refusal. Re-run and pick another." ;;
+      *)   note "tool support: not reported at /props." ;;
+    esac
+    note_manifest "llamacpp supports_tools: ${TOOLS:-unreported}"
+  fi
+fi
+
+printf '\n'
 # Recorded, not asked for. Pi autodetects the context window from the endpoint
 # (finding P1); nothing here needs the number, so a prompt for it would be a
 # question with no consequence.
-CTX=$($PY - "$MODELS_JSON" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
+CTX_SOURCE="the model listing"
+CTX=$($PY - "$(winpath "$MODELS_JSON")" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
@@ -706,8 +792,28 @@ for m in (d.get("models") or d.get("data") or []):
         break
 PYEOF
 )
-say "context window reported by the Vendor: ${CTX:-not reported}"
-note_manifest "Model: $PI_MODEL (vendor-reported ctx: ${CTX:-none})"
+
+# llama-swap's /v1/models carries no context length at all — an id and a
+# loaded/unloaded status is the whole of it. /props does carry one, and n_ctx
+# there is the better evidence anyway: the size the server really started with,
+# rather than a maximum the model advertises.
+if [[ -z "$CTX" && -s "$PROPS_JSON" ]]; then
+  CTX=$($PY - "$(winpath "$PROPS_JSON")" <<'PYEOF' 2>/dev/null || echo ""
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+print(d.get("default_generation_settings", {}).get("n_ctx") or "")
+PYEOF
+)
+  if [[ -n "$CTX" ]]; then CTX_SOURCE="/props n_ctx — what the server started with"; fi
+fi
+
+if [[ -n "$CTX" ]]; then
+  say "context window reported by the Vendor: $CTX"
+  note "source: $CTX_SOURCE"
+else
+  say "context window reported by the Vendor: not reported"
+fi
+note_manifest "Model: $PI_MODEL (ctx: ${CTX:-none}${CTX:+ from $CTX_SOURCE})"
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────
 stage "Vendor in Pi's own config — no extension"
