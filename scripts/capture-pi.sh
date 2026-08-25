@@ -341,6 +341,22 @@ else
   ask VENDOR_KIND "Carry on anyway with [lmstudio|ollama]:"
 fi
 [[ -z "$VENDOR_KIND" ]] && VENDOR_KIND=lmstudio
+
+# Switching Vendor must not inherit the other one's answers. `ask` offers the
+# stored value as its default and Enter keeps it, so a URL and model saved
+# against LM Studio come back as the defaults for Ollama — and the capture
+# quietly runs against the Vendor you did not choose. Drop them on a switch.
+forget_env() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local tmp; tmp=$(mktemp)
+  grep -vE "^${1}=" "$ENV_FILE" > "$tmp" || true
+  mv "$tmp" "$ENV_FILE"
+}
+PREV_KIND=$(_existing VENDOR_KIND || true)
+if [[ -n "$PREV_KIND" && "$PREV_KIND" != "$VENDOR_KIND" ]]; then
+  forget_env VENDOR_URL; forget_env PI_MODEL; forget_env CTX
+  note "Vendor changed from $PREV_KIND — cleared the saved URL, model and context."
+fi
 write_env VENDOR_KIND "$VENDOR_KIND"
 
 if [[ "$VENDOR_KIND" == "ollama" ]]; then

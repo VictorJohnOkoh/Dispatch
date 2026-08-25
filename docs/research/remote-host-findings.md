@@ -161,9 +161,22 @@ in practice, whatever the local captures used.
 
 ## What this run establishes, and what it does not
 
-Establishes: a second machine reached over SSH key auth, a Vendor reached over a
-real network interface rather than a WSL2 virtual adapter, and one of the two
-Harnesses driven end to end remotely.
+Establishes: a second machine reached over SSH key auth, a Vendor reached
+without the WSL2 virtual-adapter hop that flattered the earlier runs, and one of
+the two Harnesses driven end to end remotely.
+
+On the Vendor, note what the improvement actually is. The earlier captures ran
+the Harness inside WSL2 and crossed a virtual adapter at `172.25.112.1` to reach
+the Vendor on the Windows side. Here the Harness and the Vendor sit on the same
+Host and the hop is gone — the Vendor answers on loopback and is not exposed to
+the network at all. That is what the design wants, since the Daemon is
+co-located with the Vendor. Exposing the port would have tested a path the
+architecture never uses.
+
+The capture records reachability from three vantage points — Host loopback, Host
+NIC, and the Client — because they answer different questions. A check run only
+on the Host tests the socket binding and never touches the firewall, so it
+cannot say whether anything off-box could connect.
 
 Does **not** establish: the Host is Windows, not bare-metal Linux. The Hermes
 stdin deadlock (C7) and phantom denial (C9) were disproved only under WSL2, and

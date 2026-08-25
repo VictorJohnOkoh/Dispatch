@@ -496,37 +496,62 @@ require_live
 sed 's/^/    /' "$SPECS"
 note "-> host-specs.txt"
 
-head2 "Vendor over a real network interface"
+head2 "Where the Vendor is reachable from"
 say "The WSL2 run reached the Vendor at 172.25.112.1 — a virtual adapter on the"
-say "same box. A second physical machine gives a real NIC. This is the question"
-say "one machine could never answer."
+say "same box, which flattered the result. Two machines settle it."
+printf '\n'
+note "Nothing here is a pass or a fail. In the design the Daemon runs ON the Host"
+note "and talks to the Vendor there, so loopback-only is the expected answer and"
+note "the safer one. The point is to write down which it is."
 printf '\n'
 if [[ "$HOST_OS" == "windows" ]]; then
   # The adapter carrying the default route, not simply the first one ipconfig
   # prints. A dev box has several virtual adapters — WSL, VMware, Bluetooth —
   # and picking one of those would test a virtual interface all over again,
   # which is the exact flaw in the WSL2 run this stage exists to correct.
-  IFACE=$(rsh "powershell -NoProfile -Command \"(Get-NetIPConfiguration | Where-Object { \\\$_.IPv4DefaultGateway -ne \\\$null } | Select-Object -First 1).IPv4Address.IPAddress\"" 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+  IFACE=$(rsh "powershell -NoProfile -Command \"(Get-NetIPConfiguration | Where-Object { \\$_.IPv4DefaultGateway -ne \\$null } | Select-Object -First 1).IPv4Address.IPAddress\"" 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
 else
   IFACE=$(rsh "ipconfig getifaddr en0 || ipconfig getifaddr en1" 2>/dev/null | tr -d '\r' | head -1)
 fi
 require_live
 [[ -z "$IFACE" ]] && IFACE="$HOST_ADDR"
 say "Host interface address: $IFACE"
+printf '\n'
 
 if [[ -n "$VENDOR_KIND" ]]; then
   IFACE_URL="${VENDOR_URL/127.0.0.1/$IFACE}"
-  CODE=$(rsh "curl -sS -m 10 -o /dev/null -w '%{http_code}' $IFACE_URL$VENDOR_PATH" 2>/dev/null)
-  require_live
-  if [[ "$CODE" == *200* ]]; then
-    printf '  %s  OK%s  Vendor answers on the real interface\n' "$GREEN" "$RESET"
+
+  # Three vantage points, because they answer three different questions and the
+  # old single check conflated them. Curling the Host's own IP from the Host
+  # tests the socket binding and never touches the firewall, so on its own it
+  # cannot say whether anything off-box could connect.
+  LOOP_CODE=$(rsh "curl -sS -m 10 -o /dev/null -w '%{http_code}' $VENDOR_URL$VENDOR_PATH" 2>/dev/null); require_live
+  IFACE_CODE=$(rsh "curl -sS -m 10 -o /dev/null -w '%{http_code}' $IFACE_URL$VENDOR_PATH" 2>/dev/null); require_live
+  CLIENT_CODE=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$IFACE_URL$VENDOR_PATH" 2>/dev/null || echo 000)
+
+  printf '  from the Host, loopback   %s  HTTP %s\n' "$VENDOR_URL$VENDOR_PATH" "$LOOP_CODE"
+  printf '  from the Host, real NIC   %s  HTTP %s\n' "$IFACE_URL$VENDOR_PATH" "$IFACE_CODE"
+  printf '  from the Client           %s  HTTP %s\n' "$IFACE_URL$VENDOR_PATH" "$CLIENT_CODE"
+  printf '\n'
+
+  if [[ "$IFACE_CODE" == *200* && "$CLIENT_CODE" == *200* ]]; then
+    VENDOR_REACH="loopback and LAN — the Vendor is exposed to the network"
+    note "Exposed on the LAN. Fine for a capture; consider binding back to"
+    note "loopback afterwards, since the Daemon does not need it."
+  elif [[ "$IFACE_CODE" == *200* ]]; then
+    VENDOR_REACH="Host's own NIC only — the Client is blocked, most likely by the firewall"
+    note "Bound to all interfaces, yet the Client cannot reach it. That gap is"
+    note "the firewall, and it is invisible to a check run only on the Host."
   else
-    warn "HTTP $CODE — the Vendor is bound to loopback only."
-    note "Ollama:    set OLLAMA_HOST=0.0.0.0 and restart the service"
-    note "LM Studio: Developer -> Serve on Local Network"
-    note "Revert it afterwards. The hermes-linux run had to, and said so."
+    VENDOR_REACH="loopback only — no network exposure"
+    say "Loopback only. This is what the design expects: the Daemon is"
+    say "co-located with the Vendor, so the port never leaves the machine."
   fi
-  mf "Vendor over real interface ($IFACE_URL$VENDOR_PATH): HTTP $CODE"
+  say "Reachability: $VENDOR_REACH"
+  mf "Vendor reachability: $VENDOR_REACH"
+  mf "  from Host loopback ($VENDOR_URL$VENDOR_PATH): HTTP $LOOP_CODE"
+  mf "  from Host real NIC ($IFACE_URL$VENDOR_PATH): HTTP $IFACE_CODE"
+  mf "  from Client        ($IFACE_URL$VENDOR_PATH): HTTP $CLIENT_CODE"
 fi
 
 head2 "Install Pi, if missing"
