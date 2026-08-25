@@ -318,7 +318,11 @@ printf '\n'
 # Probe both rather than asking first. On a Host reached over SSH the operator
 # cannot see which one is running, and a wrong guess costs a whole stage.
 probe_vendor() {
-  curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000
+  # curl writes the code AND exits non-zero when it cannot connect, so a plain
+  # `|| echo 000` appends a second 000 and yields "000000".
+  local c
+  c=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null) || true
+  printf '%s' "${c:-000}"
 }
 LMS_CODE=$(probe_vendor "http://127.0.0.1:1234/api/v1/models")
 OLL_CODE=$(probe_vendor "http://127.0.0.1:11434/v1/models")
@@ -389,9 +393,34 @@ else
   DEFAULT_URL="http://127.0.0.1:1234"
 fi
 printf '\n'
+# `ask` offers the value stored in ENV_FILE and Enter keeps it, while the prompt
+# advertises DEFAULT_URL — two different defaults in one prompt. A stored URL
+# belonging to the OTHER Vendor therefore survives here even when the Vendor
+# itself did not change, and Enter quietly captures the wrong server. Drop it.
+# A genuinely custom URL is left alone; only the other Vendor's default goes.
+if [[ "$VENDOR_KIND" == "ollama" ]]; then OTHER_URL="http://127.0.0.1:1234"
+else OTHER_URL="http://127.0.0.1:11434"; fi
+if [[ "$(_existing VENDOR_URL || true)" == "$OTHER_URL" ]]; then
+  forget_env VENDOR_URL
+  note "Dropped a saved base URL belonging to the other Vendor ($OTHER_URL)."
+fi
+
 ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAULT_URL]:"
 [[ -z "$VENDOR_URL" ]] && VENDOR_URL="$DEFAULT_URL"
 write_env VENDOR_URL "$VENDOR_URL"
+
+# Prove the address chosen actually answers, and name it. Every confusion in
+# this stage came from the operator not being able to see which server was
+# about to be used.
+if [[ "$VENDOR_KIND" == "ollama" ]]; then MODELS_PATH="/v1/models"
+else MODELS_PATH="/api/v1/models"; fi
+URL_CODE=$(probe_vendor "$VENDOR_URL$MODELS_PATH")
+if [[ "$URL_CODE" == 200 ]]; then
+  say "Confirmed: $VENDOR_KIND answering at $VENDOR_URL"
+else
+  warn "$VENDOR_URL did not answer (HTTP $URL_CODE) for $VENDOR_KIND."
+  confirm "Continue anyway?" || exit 1
+fi
 printf '\n'
 
 MODELS_JSON="$CAPTURE_DIR/vendor-models.json"
