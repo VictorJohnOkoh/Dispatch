@@ -101,36 +101,59 @@ EOF
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-SSH_BASE=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
+# ControlMaster=no and ControlPath=none are not tidiness. If the user's
+# ~/.ssh/config enables connection multiplexing and the master socket is stale,
+# ssh prints "mux_client_request_session: read from master failed" INSTEAD of
+# running the command — and a check that reads stdout accepts that text as a
+# version string. Every tool then reports as installed without being run.
+SSH_BASE=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new
+          -o ControlMaster=no -o ControlPath=none)
+
+_TOP_PID=$$
 
 # rsh "cmd" — run a command on the Host. Returns the REMOTE command's exit
-# code; those are findings and must survive. Sets RSH_DEAD=1 and returns 255
-# when ssh itself could not connect, which is not a finding but a dead run.
-RSH_DEAD=0
+# code, because those are findings and must survive.
+#
+# ssh reserves 255 for its own failures. That is not a finding, it is a dead
+# run, so it stops everything. The kill is load-bearing: every caller wraps
+# rsh in $(...), and a plain exit there would leave only the subshell and be
+# swallowed by the caller's `|| echo`. Signalling the top-level PID is the
+# only thing that actually stops the script.
 rsh() {
   local rc=0 out
   out=$(ssh "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>&1) || rc=$?
   printf '%s' "$out"
-  (( rc == 255 )) && RSH_DEAD=1
+  if (( rc == 255 )); then
+    printf '%s' "$out" > "$SSH_ERR_FILE"
+    kill -s TERM "$_TOP_PID" 2>/dev/null
+    exit 255
+  fi
   return $rc
 }
 
-# require_live — stop the run the moment the Host stops answering. Without this
-# a sleeping Host writes "NOT INSTALLED" into the record and the transcript
-# reads like a finding about Hermes rather than about the network.
-require_live() {
-  if (( RSH_DEAD )); then
-    printf '\n'
-    warn "Lost the SSH connection to $HOST_USER@$HOST_ADDR:$SSH_PORT."
-    note "  ssh -vvv -i $KEY -p $SSH_PORT $HOST_USER@$HOST_ADDR"
-    note "  Usual causes: the Host slept, its address moved, or Wi-Fi dropped."
-    note "  Prerequisites 5 and 6 exist to prevent exactly this."
-    printf '\n'
-    say "Stopped on purpose — a partial capture must not look like a complete one."
-    [[ -n "${MANIFEST:-}" ]] && printf 'ABORTED: SSH unreachable at %s\n' "$(date -Iseconds)" >> "$MANIFEST"
-    exit 1
-  fi
+SSH_ERR_FILE="${TMPDIR:-/tmp}/remote-host-ssh-err.$$"
+trap 'rm -f "$SSH_ERR_FILE"' EXIT
+
+# _ssh_died — the TERM handler. Reached only when ssh itself failed, never when
+# a remote command merely returned non-zero.
+_ssh_died() {
+  printf '\n'
+  warn "SSH failed talking to $HOST_USER@$HOST_ADDR:$SSH_PORT — stopping."
+  [[ -s "$SSH_ERR_FILE" ]] && note "  $(head -3 "$SSH_ERR_FILE" | tr '\n' ' ')"
+  printf '\n'
+  note "  Usual causes: the Host slept, its address moved, or Wi-Fi dropped."
+  note "  Diagnose: ssh -vvv -i $KEY -p $SSH_PORT $HOST_USER@$HOST_ADDR"
+  printf '\n'
+  say "Stopped on purpose — a transport error must never be read as a result."
+  [[ -n "${MANIFEST:-}" ]] && printf 'ABORTED: SSH failed at %s\n' "$(date -Iseconds)" >> "$MANIFEST"
+  rm -f "$SSH_ERR_FILE"
+  exit 1
 }
+trap _ssh_died TERM
+
+# require_live is now redundant — rsh stops the run itself. Kept as a no-op so
+# the call sites still read as deliberate checkpoints.
+require_live() { :; }
 
 # ── Details ───────────────────────────────────────────────────────────────
 
@@ -259,32 +282,52 @@ fi
 
 # --- Runtimes on the Host ---
 
-# missing "$output" — did the Host fail to find the command? bash says "command
-# not found"; cmd.exe says "is not recognized". Both must be caught, or a Host
-# still running cmd.exe reports every missing tool as present.
-missing() {
-  [[ -z "$1" || "$1" == *"not found"* || "$1" == *"not recognized"* ]]
+# have_remote CMD — is CMD on the Host's PATH? Decided by `command -v`'s EXIT
+# CODE, not by reading text.
+#
+# Parsing output cannot be made safe here. Anything ssh prints on its own
+# behalf — a multiplexing error, a post-quantum warning, a banner — arrives on
+# the same stream as the command's output, and a check that scans that text
+# for "not found" accepts the error as proof the tool is installed. Exit codes
+# do not have that failure mode.
+have_remote() {
+  rsh "command -v $1 >/dev/null 2>&1" >/dev/null
 }
 
+# remote_version CMD — CMD's first line of --version output, or empty. Only
+# meaningful once have_remote says the command exists.
+remote_version() {
+  rsh "$1 --version 2>&1 | head -1" 2>/dev/null | tr -d '\r'
+}
+
+# check_remote_cmd CMD LABEL REMEDY... — one PATH check, decided by exit code.
 check_remote_cmd() {
   local cmd="$1" label="$2"; shift 2
-  local out
-  out=$(rsh "$cmd" 2>/dev/null); require_live
-  if ! missing "$out"; then
-    pass "$label — $(printf '%s' "$out" | head -1 | tr -d '\r')"
+  if have_remote "$cmd"; then
+    pass "$label — $(remote_version "$cmd")"
   else
-    fail "$label missing on the Host" "$@"
+    fail "$label missing from the Host's PATH" "$@"
   fi
 }
 
-check_remote_cmd "python --version || python3 --version" "Python" \
-  "Prerequisite 4 — install Python 3.11+ with 'Add to PATH' ticked." \
-  "Hermes will not run without it."
-check_remote_cmd "node --version" "Node" \
+# A Windows SSH session inherits only the MACHINE PATH. Anything installed with
+# "Add to PATH" normally lands in the USER PATH, so it works at the desktop and
+# is invisible here. That is the usual cause of these three failing.
+PATH_REMEDY=(
+  "Installed but not on the SSH PATH? A Windows SSH session sees only the"
+  "MACHINE PATH, never your USER PATH. Check with:"
+  "  [Environment]::GetEnvironmentVariable('Path','Machine')"
+  "Add the directory there in an elevated PowerShell, then: Restart-Service sshd"
+)
+
+check_remote_cmd "python" "Python" \
+  "Prerequisite 4 — install Python 3.11+, or expose it to SSH." \
+  "Hermes will not run without it." "${PATH_REMEDY[@]}"
+check_remote_cmd "node" "Node" \
   "Prerequisite 4 — install Node LTS from https://nodejs.org." \
-  "Pi will not run without it."
-check_remote_cmd "curl --version" "curl" \
-  "Ships with Git for Windows and with macOS."
+  "Pi will not run without it." "${PATH_REMEDY[@]}"
+check_remote_cmd "curl" "curl" \
+  "Ships with Git for Windows and with macOS." "${PATH_REMEDY[@]}"
 
 # --- Vendor ---
 
@@ -319,18 +362,25 @@ fi
 
 # --- Harnesses ---
 
-HERMES_V=$(rsh "hermes --version" 2>/dev/null); require_live
-PI_V=$(rsh "pi --version" 2>/dev/null); require_live
-! missing "$HERMES_V" \
-  && pass "Hermes — $(printf '%s' "$HERMES_V" | head -1 | tr -d '\r')" \
-  || fail "Hermes not installed on the Host" \
-       "Needs its source tree there: pip install -e '.[acp]'" \
-       "Cannot be installed remotely. If it will not install, that is a" \
-       "RECORDED FINDING for issue #4, not a blocker — carry on with Pi."
-! missing "$PI_V" \
-  && pass "Pi — $(printf '%s' "$PI_V" | head -1 | tr -d '\r')" \
-  || fail "Pi not installed on the Host" \
-       "The real run offers to install it: npm i -g @earendil-works/pi-coding-agent"
+HERMES_V=""; PI_V=""
+if have_remote hermes; then
+  HERMES_V=$(remote_version hermes)
+  pass "Hermes — $HERMES_V"
+else
+  fail "Hermes not on the Host's PATH" \
+    "Needs its source tree there: pip install -e '.[acp]'" \
+    "Cannot be installed remotely. If it will not install, that is a" \
+    "RECORDED FINDING for issue #4, not a blocker — carry on with Pi." \
+    "${PATH_REMEDY[@]}"
+fi
+if have_remote pi; then
+  PI_V=$(remote_version pi)
+  pass "Pi — $PI_V"
+else
+  fail "Pi not on the Host's PATH" \
+    "The real run offers to install it: npm i -g @earendil-works/pi-coding-agent" \
+    "${PATH_REMEDY[@]}"
+fi
 
 # --- Verdict ---
 
@@ -423,7 +473,7 @@ if [[ -n "$VENDOR_KIND" ]]; then
 fi
 
 head2 "Install Pi, if missing"
-if missing "$PI_V"; then
+if [[ -z "$PI_V" ]]; then
   if confirm "Install Pi on the Host over SSH now?"; then
     rsh "npm install -g @earendil-works/pi-coding-agent" | tail -5
     require_live
