@@ -119,12 +119,22 @@ _TOP_PID=$$
 # rsh in $(...), and a plain exit there would leave only the subshell and be
 # swallowed by the caller's `|| echo`. Signalling the top-level PID is the
 # only thing that actually stops the script.
+# rsh CMD — run CMD on the Host, print its stdout, return its exit code.
+#
+# ssh's OWN stderr goes to a file and never into the captured output. The
+# client writes there on its own behalf, and the post-quantum key exchange
+# notice is written on every single connection. Merged, that prose landed in
+# the research record as a Hermes version, a Pi version, an HTTP status code
+# and two lines of host specs, all in one run.
+#
+# The consequence for callers: remote stderr is not returned either. A caller
+# that wants it merges it REMOTELY, inside the command string — `cmd 2>&1` —
+# so the merge happens on the Host where only the Host is speaking.
 rsh() {
   local rc=0 out
-  out=$(ssh "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>&1) || rc=$?
+  out=$(ssh "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>"$SSH_ERR_FILE") || rc=$?
   printf '%s' "$out"
   if (( rc == 255 )); then
-    printf '%s' "$out" > "$SSH_ERR_FILE"
     kill -s TERM "$_TOP_PID" 2>/dev/null
     exit 255
   fi
@@ -139,7 +149,7 @@ trap 'rm -f "$SSH_ERR_FILE"' EXIT
 _ssh_died() {
   printf '\n'
   warn "SSH failed talking to $HOST_USER@$HOST_ADDR:$SSH_PORT — stopping."
-  [[ -s "$SSH_ERR_FILE" ]] && note "  $(head -3 "$SSH_ERR_FILE" | tr '\n' ' ')"
+  [[ -s "$SSH_ERR_FILE" ]] && note "  $(tail -3 "$SSH_ERR_FILE" | tr '\n' ' ')"
   printf '\n'
   note "  Usual causes: the Host slept, its address moved, or Wi-Fi dropped."
   note "  Diagnose: ssh -vvv -i $KEY -p $SSH_PORT $HOST_USER@$HOST_ADDR"
@@ -474,13 +484,13 @@ head2 "Host specs and VRAM"
 say "Recorded because issue #4 asks for them in the Answer."
 SPECS="$LANDING/host-specs.txt"
 if [[ "$HOST_OS" == "windows" ]]; then
-  rsh 'systeminfo | grep -E "OS Name|OS Version|Total Physical Memory"' > "$SPECS" 2>&1
+  rsh 'systeminfo 2>&1 | grep -E "OS Name|OS Version|Total Physical Memory"' > "$SPECS"
   require_live
-  rsh 'wmic path win32_VideoController get name,AdapterRAM' >> "$SPECS" 2>&1
+  rsh 'powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Format-Table -AutoSize Name,AdapterRAM" 2>&1' >> "$SPECS"
 else
-  rsh 'sw_vers; sysctl -n machdep.cpu.brand_string; sysctl -n hw.memsize' > "$SPECS" 2>&1
+  rsh 'sw_vers 2>&1; sysctl -n machdep.cpu.brand_string 2>&1; sysctl -n hw.memsize 2>&1' > "$SPECS"
   require_live
-  rsh 'system_profiler SPDisplaysDataType | head -40' >> "$SPECS" 2>&1
+  rsh 'system_profiler SPDisplaysDataType 2>&1 | head -40' >> "$SPECS"
 fi
 require_live
 sed 's/^/    /' "$SPECS"
