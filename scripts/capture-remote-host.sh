@@ -396,26 +396,36 @@ fi
 
 # --- Harnesses ---
 
+# _V holds the version when the Harness runs; _STATUS is what the manifest
+# records. They differ on purpose: a Harness that is installed and refuses to
+# start must not be written down as "NOT INSTALLED". That is a different
+# finding with a different cause, and the manifest is the research record.
 HERMES_V=""; PI_V=""
+HERMES_STATUS="NOT INSTALLED"; PI_STATUS="NOT INSTALLED"
+
 _hrc=0; remote_probe hermes || _hrc=$?
 case $_hrc in
-  0)   HERMES_V="$(printf '%s' "$PROBE_OUT" | head -1)"; pass "Hermes — $HERMES_V" ;;
+  0)   HERMES_V="$(printf '%s' "$PROBE_OUT" | head -1)"; HERMES_STATUS="$HERMES_V"
+       pass "Hermes — $HERMES_V" ;;
   127) fail "Hermes not on the Host's PATH" \
          "Needs its source tree there: pip install -e '.[acp]'" \
          "Cannot be installed remotely. If it will not install, that is a" \
          "RECORDED FINDING for issue #4, not a blocker — carry on with Pi." \
          "${PATH_REMEDY[@]}" ;;
-  *)   mapfile -t _m < <(broken_remedy)
+  *)   HERMES_STATUS="INSTALLED BUT WILL NOT RUN OVER SSH (exit $_hrc): $(printf '%s' "$PROBE_OUT" | head -1)"
+       mapfile -t _m < <(broken_remedy)
        fail "Hermes is on the Host's PATH but will not run (exit $_hrc)" "${_m[@]}" ;;
 esac
 
 _prc=0; remote_probe pi || _prc=$?
 case $_prc in
-  0)   PI_V="$(printf '%s' "$PROBE_OUT" | head -1)"; pass "Pi — $PI_V" ;;
+  0)   PI_V="$(printf '%s' "$PROBE_OUT" | head -1)"; PI_STATUS="$PI_V"
+       pass "Pi — $PI_V" ;;
   127) fail "Pi not on the Host's PATH" \
          "The real run offers to install it: npm i -g @earendil-works/pi-coding-agent" \
          "${PATH_REMEDY[@]}" ;;
-  *)   mapfile -t _m < <(broken_remedy)
+  *)   PI_STATUS="INSTALLED BUT WILL NOT RUN OVER SSH (exit $_prc): $(printf '%s' "$PROBE_OUT" | head -1)"
+       mapfile -t _m < <(broken_remedy)
        fail "Pi is on the Host's PATH but will not run (exit $_prc)" "${_m[@]}" ;;
 esac
 
@@ -456,8 +466,8 @@ mf "=== Remote Host capture: $(date -Iseconds) ==="
 mf "Client: $(uname -a 2>/dev/null || echo unknown)"
 mf "Host:   $HOST_USER@$HOST_ADDR:$SSH_PORT ($HOST_OS)"
 mf "Vendor: ${VENDOR_KIND:-none} at ${VENDOR_URL:-n/a}"
-mf "Hermes: ${HERMES_V:-NOT INSTALLED}"
-mf "Pi:     ${PI_V:-NOT INSTALLED}"
+mf "Hermes: $HERMES_STATUS"
+mf "Pi:     $PI_STATUS"
 mf ""
 
 head2 "Host specs and VRAM"
