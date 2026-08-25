@@ -128,6 +128,35 @@ The manifest recorded `Hermes: NOT INSTALLED` when Hermes was installed and
 would not start. That is a fabricated finding with the wrong cause attached.
 The manifest now distinguishes the two states.
 
+## R6. Pi reaches Ollama through the same extension as LM Studio
+
+Pi has no `--base-url` flag and no built-in entry for either local Vendor. Both
+are reached the same way: an extension loaded with `-e` that calls
+`registerProvider` with an `openai-completions` api and a `baseUrl`. Only the
+port and the provider name differ. `[desktop]`
+
+```
+provider  model            context  max-out
+ollama    qwen3.5:9b       32.8K    4.1K
+```
+
+A one-shot `--mode json` run exits 0 and emits 41 frames naming `ollama` as the
+provider. The `apiKey` is required by the schema and ignored by both Vendors.
+
+Two differences matter for the Daemon:
+
+- Ollama's OpenAI-compatible `/v1/models` carries **no capability field**, so
+  tool support cannot be read from it. LM Studio reports
+  `trained_for_tool_use`. Absent is not false, and a discovery routine that
+  treats it as false will hide every usable model on an Ollama Host.
+- Ollama's `/v1/models` also drops the context length, which LM Studio reports.
+  The native `/api/tags` carries parameter size and quantisation instead.
+
+This matters for a remote Host because LM Studio is GUI-first — its server is
+started by hand from a desktop session and cannot be brought up over SSH.
+Ollama runs headless. A Host reached only over SSH is therefore an Ollama Host
+in practice, whatever the local captures used.
+
 ---
 
 ## What this run establishes, and what it does not
