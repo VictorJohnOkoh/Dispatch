@@ -326,10 +326,31 @@ say "LM Studio on 1234:  HTTP $LMS_CODE"
 say "Ollama on 11434:    HTTP $OLL_CODE"
 printf '\n'
 
+# pick_vendor PROMPT — read a Vendor name, normalised, and insist on a valid one.
+#
+# The answer used to be matched literally against "ollama", with everything else
+# falling through to an else branch that meant LM Studio. So "Ollama", "OLLAMA"
+# and a trailing space all selected LM Studio, silently, after the operator had
+# typed the other name. Never guess a Vendor: ask again.
+pick_vendor() {
+  local raw tries=0
+  while (( tries++ < 3 )); do
+    ask VENDOR_KIND "$1"
+    raw=$(printf '%s' "$VENDOR_KIND" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    case "$raw" in
+      ollama|o)          VENDOR_KIND=ollama;   return 0 ;;
+      lmstudio|lms|lm|l) VENDOR_KIND=lmstudio; return 0 ;;
+      *) warn "Type 'ollama' or 'lmstudio'. Got: '$VENDOR_KIND'" ;;
+    esac
+  done
+  warn "No valid Vendor after 3 tries — stopping rather than picking one for you."
+  exit 1
+}
+
 VENDOR_KIND=""
 if [[ "$LMS_CODE" == 200 && "$OLL_CODE" == 200 ]]; then
   step "Both are serving. Which one is this capture against?"
-  ask VENDOR_KIND "Vendor [lmstudio|ollama]:"
+  pick_vendor "Vendor [lmstudio|ollama]:"
 elif [[ "$LMS_CODE" == 200 ]]; then
   VENDOR_KIND=lmstudio
 elif [[ "$OLL_CODE" == 200 ]]; then
@@ -338,9 +359,10 @@ else
   warn "Neither Vendor answered."
   note "LM Studio: Developer tab -> Start Server."
   note "Ollama:    it serves on 11434 once installed; 'ollama list' to confirm."
-  ask VENDOR_KIND "Carry on anyway with [lmstudio|ollama]:"
+  pick_vendor "Carry on anyway with [lmstudio|ollama]:"
 fi
-[[ -z "$VENDOR_KIND" ]] && VENDOR_KIND=lmstudio
+printf '\n'
+step "Vendor for this capture: $VENDOR_KIND"
 
 # Switching Vendor must not inherit the other one's answers. `ask` offers the
 # stored value as its default and Enter keeps it, so a URL and model saved
@@ -483,6 +505,20 @@ if [[ $LIST_RC -eq 0 ]] \
         "$CAPTURE_DIR/pi-list-models.txt" \
    && ! grep -qi "no models available\|errors loading models.json" "$CAPTURE_DIR/pi-list-models.txt"; then
   say "  provider registered."
+  printf '
+'
+  say "This capture uses:  --provider $VENDOR_KIND --model $PI_MODEL"
+  say "                    baseUrl $VENDOR_URL/v1"
+  # ~/.pi/agent/models.json is loaded ALONGSIDE the -e extension, so its
+  # providers appear in this table whatever you picked here. Seeing an lmstudio
+  # row after choosing ollama is that file, not this capture. Say so, because
+  # the table is the only thing on screen and it reads like a contradiction.
+  if [[ -f "$HOME/.pi/agent/models.json" ]]      && awk -v p="$VENDOR_KIND" '$1!=p && $1!="provider" && NF>2 {found=1} END{exit !found}'           "$CAPTURE_DIR/pi-list-models.txt"; then
+    printf '
+'
+    note "Other providers in the table above come from ~/.pi/agent/models.json,"
+    note "which Pi loads as well as this extension. They are not used here."
+  fi
 else
   warn "Provider did NOT register (exit $LIST_RC). Output:"
   head -n 15 "$CAPTURE_DIR/pi-list-models.txt" | sed 's/^/    /'
