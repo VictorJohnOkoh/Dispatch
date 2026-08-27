@@ -44,6 +44,17 @@ from collections import Counter
 TERMINAL = {"completed", "failed"}
 GATE_CLASSES = ("read", "edit", "execute")
 
+# Classes OpenCode gives no way to gate. Its permission block takes edit, bash
+# and webfetch and has no key for reads, so a read that does not ask is the
+# Harness having no gate rather than the Harness skipping one. Denying reads
+# instead would leave a Harness that cannot read a file, which is not a Session
+# anyone would pick.
+#
+# The exemption is narrow and it is never silent. It stops a class from failing
+# gate 2; it does not stop it being counted or reported. If a class in here does
+# ask on the Host, the counts say so and nothing is exempted in practice.
+UNGATEABLE = {"read"}
+
 
 def _load_frames(path):
     """Yield parsed frames. A malformed line is a finding, not a crash."""
@@ -178,10 +189,12 @@ def main():
     quiet = dict((k, started[k] - terminal.get(k, 0))
                  for k in started if started[k] - terminal.get(k, 0) > 0)
 
-    # Gate 2 fails only for a class that ran and never asked. A class that never
-    # ran is unknown, and unknown is not a pass.
-    gate2_fail = sorted(k for k in GATE_CLASSES
-                        if started.get(k, 0) > 0 and permissions.get(k, 0) == 0)
+    # Gate 2 fails only for a class that ran, never asked, and had a gate to
+    # skip. A class that never ran is unknown, and unknown is not a pass.
+    silent = [k for k in GATE_CLASSES
+              if started.get(k, 0) > 0 and permissions.get(k, 0) == 0]
+    gate2_exempt = sorted(k for k in silent if k in UNGATEABLE)
+    gate2_fail = sorted(k for k in silent if k not in UNGATEABLE)
     if gate2_fail:
         gate2 = "fail"
     elif unseen:
@@ -231,7 +244,9 @@ def main():
                 "verdict": gate2,
                 "asked": asked,
                 "ran_but_never_asked": gate2_fail,
+                "exempt_ungateable": gate2_exempt,
                 "never_exercised": unseen,
+                "ungateable_classes": sorted(UNGATEABLE),
             },
             "gate3_terminal_per_class": {
                 "verdict": gate3,
@@ -259,14 +274,14 @@ def main():
     if gate2_fail:
         print("          ran but never asked: %s" % ", ".join(gate2_fail))
         print('          those classes get "deny" in the permission block (ADR 0003)')
-        if "read" in gate2_fail:
-            # A class with no key is not a class that forgot to ask, and the two
-            # have different fixes. OpenCode's own examples only ever set edit,
-            # bash and webfetch, so read may not be gateable at all -- and
-            # denying reads outright is not a usable Session.
-            print("          read has no key in OpenCode's permission block, so this may be")
-            print("          'cannot ask' rather than 'did not ask'. Confirm which before")
-            print("          applying the deny recovery: denying reads ends the Session's use.")
+    if gate2_exempt:
+        # Exempt, and said out loud every run. An ungated class is a class the
+        # Approval Policy cannot hold, and that stays true however the gate is
+        # scored.
+        print("          exempt, no gate exists: %s" % ", ".join(gate2_exempt))
+        print("          the Daemon cannot honour wait or refuse for these, so a Session")
+        print("          reads whatever its working directory holds. Workspace Root is")
+        print("          the only thing bounding that.")
     if unseen:
         print("          never exercised: %s" % ", ".join(unseen))
     print("  gate 3  terminal Event per tool class    %s" % gate3.upper())

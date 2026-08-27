@@ -17,10 +17,14 @@ Hermes v0.19.0 fails the only test that matters for an entry in the Client:
 OpenCode enters v1 only when a capture on a remote Host, over SSH, shows all three:
 
 1. `opencode acp` starts under a supervisor that owns stdin, and a real tool call runs to completion.
-2. `session/request_permission` fires separately for `read`, `edit` and `execute`.
+2. `session/request_permission` fires separately for every tool class OpenCode can gate.
 3. Terminal Events are known per tool class, with counts.
 
 Gate 3 asks for knowledge, not perfection. A quiet tool class does not block v1, because the adapter synthesises the terminal Event. An unknown tool class does block it.
+
+Gate 2 exempts `read`. OpenCode's permission block takes `edit`, `bash` and `webfetch` and has no key for reads, so a read that does not ask is a Harness with no gate rather than a Harness skipping one. The `deny` recovery below does not fit it either: a Harness that cannot read a file is not a Session anyone would pick. The exemption is narrow, and it is never silent. `read` is still counted and still reported on every run, and if it does ask on the Host then nothing is exempted in practice.
+
+What the exemption costs is stated plainly, because it does not go away by being scored as a pass. **The Approval Policy cannot honour wait or refuse for reads.** A Session reads whatever its working directory holds, and Workspace Root is the only thing bounding that. Any Client that offers a per-Session Approval Policy has to say so rather than implying a gate that is not there.
 
 Nothing about OpenCode is established yet. What is known comes from a version string, a `--help` listing, a `permission` block found inside the shipped binary, and a working local `provider` config on the development machine. Under the rule this project already paid to learn, none of that is evidence.
 
@@ -38,7 +42,7 @@ Nothing about OpenCode is established yet. What is known comes from a version st
 - Ticket #6 stays unblocked. Because Hermes remains as a fixture, the Event model keeps its degrade witness and does not wait on the OpenCode capture. Only #7 waits.
 - The adapter seam stays at one shape. `opencode acp` speaks the same JSON-RPC 2.0 over ndjson as `hermes acp`, so the Harness interface still covers subprocess-with-structured-stdio and nothing else. `opencode serve` was not chosen, and it would have added a second shape.
 - The Daemon owns the Approval Policy ladder on every Harness. It launches each Harness asking for everything, then answers each `session/request_permission` itself: allow for immediate, forward to the user for wait, deny for refuse. It never sets a Harness's native mode and never passes `--auto`. This makes OpenCode's missing three-mode ladder irrelevant, and it makes Pi's permission-gate extension mandatory rather than optional.
-- A tool class that never asks is written as `deny` in OpenCode's own `permission` block. The class is then refused rather than ungated, and the Approval Policy is still honoured.
+- A gateable tool class that never asks is written as `deny` in OpenCode's own `permission` block. The class is then refused rather than ungated, and the Approval Policy is still honoured. A class with no key to write, such as `read`, cannot take this recovery, which is why it is exempt above instead.
 - A launch failure on the Host is fatal. If gate 1 fails, v1 ships Pi alone rather than a second Harness that cannot start.
 - The Daemon writes a per-Session config beside the Session's working directory, rather than editing a file the user owns. Two Sessions on different Models cannot then fight over one file, and the Model chosen at Session start has somewhere to land. This assumes OpenCode discovers configuration from the working directory, which the capture must confirm. If it does not, configuration falls back to a manual per-Host prerequisite, and the Model can no longer be chosen per Session.
 - Reaching all three Vendors is recorded, not gated. A Vendor that fails is a configuration bug, not grounds to reject a Harness. Pointing OpenCode at one is a `provider` block with an `@ai-sdk/openai-compatible` `baseURL` on loopback, the same shape as Pi's `models.json` write, so the Data Plane invariant holds.

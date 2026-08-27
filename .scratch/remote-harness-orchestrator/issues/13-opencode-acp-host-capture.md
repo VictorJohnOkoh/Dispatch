@@ -19,7 +19,7 @@ What is known about OpenCode today is a version string (1.18.9), a `--help` list
 A gate that fails changes v1. Record the result even when it is inconvenient.
 
 1. **A tool call completes on the Host over SSH.** `opencode acp` starts under a supervisor that **owns stdin rather than inheriting it**, and a real tool call runs to completion. Both existing Harnesses trap on stdin in opposite directions, so this is the first thing to get wrong. Failure here is fatal: v1 ships Pi alone.
-2. **`session/request_permission` fires for `read`, `edit` and `execute` separately.** The Daemon owns the Approval Policy ladder and the Harness runs its own tools, so this method is the only lever the policy has. Any class that never asks is a class the Daemon cannot gate. Failure here is recoverable: that class is written `deny` in OpenCode's `permission` block and is refused rather than ungated.
+2. **`session/request_permission` fires for every tool class OpenCode can gate.** The Daemon owns the Approval Policy ladder and the Harness runs its own tools, so this method is the only lever the policy has. A gateable class that never asks is written `deny` in OpenCode's `permission` block, so it is refused rather than ungated. **`read` is exempt**: OpenCode's permission block takes `edit`, `bash` and `webfetch` and has no key for reads, so a silent read is a Harness with no gate rather than a Harness skipping one, and the `deny` recovery would leave a Harness that cannot read a file. The exemption is never silent — `read` is still counted and reported, and the cost is recorded: the Approval Policy cannot honour wait or refuse for reads, so Workspace Root is the only thing bounding what a Session reads.
 3. **Terminal Events are known per tool class, with counts.** This asks for knowledge, not perfection. A quiet class does not block v1, because the adapter synthesises the terminal Event. An unknown class does block it. Match the rigour that produced Hermes' 12/12.
 
 ### Also record, but do not gate on
@@ -39,7 +39,7 @@ Freeze the capture bytes under `docs/research/captures/opencode/` and write the 
 ## Acceptance criteria
 
 - [ ] Gate 1 answered: a tool call completed on the Host over SSH, with the supervisor owning stdin, or a recorded failure with the cause investigated
-- [ ] Gate 2 answered: `session/request_permission` counted per tool class for `read`, `edit` and `execute`
+- [ ] Gate 2 answered: `session/request_permission` counted per tool class for `read`, `edit` and `execute`, with `read` exempt from failing the gate and the exemption recorded
 - [ ] Gate 3 answered: terminal Events counted per tool class, with the quiet classes named
 - [ ] Vendor coverage recorded for LM Studio, Ollama and llama-swap
 - [ ] OpenCode's configuration discovery order confirmed, and the per-Session config assumption in ADR 0003 upheld or reversed

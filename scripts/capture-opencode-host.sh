@@ -187,6 +187,20 @@ save_conf
 
 head2 "Preflight"
 
+# The Client's own Python counts the gates at the very end. Check it first, so a
+# broken interpreter fails here rather than after three slow captures. A uv
+# trampoline that cannot spawn its child answers `--version` and dies on a real
+# script, so run a real script.
+if python -c "import json,glob,argparse" >/dev/null 2>&1; then
+  pass "Client Python runs — $(python --version 2>&1 | tr -d '\r')"
+else
+  fail "the Client's python will not run a script" \
+    "The gates are counted here, not on the Host, so this stops the run." \
+    "It answers --version and then fails to spawn, which is a broken shim" \
+    "rather than a missing interpreter. Try a different one:" \
+    "  PATH=/c/Users/\$USER/AppData/Local/Programs/Python/Python313:\$PATH"
+fi
+
 if [[ -f "$KEY" ]]; then
   pass "SSH key present — $KEY"
 else
