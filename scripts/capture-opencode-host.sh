@@ -111,6 +111,29 @@ EOF
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
+# Windows ships its own ssh.exe in System32\OpenSSH, and Git Bash ships another
+# in /usr/bin. Under MSYS they are not interchangeable: MSYS gives a child
+# named pipes for stdio, the native Windows build expects Windows handles, and
+# it dies with
+#
+#     getsockname failed: Not a socket
+#
+# before it ever reaches the network. Which one a bare `ssh` finds depends on
+# PATH order, so pick rather than hope, and say which was picked. Same lesson as
+# resolve-harness-exe.py: choose the binary that actually works in the
+# environment it will run in, and put the choice in the record.
+pick_ssh() {
+  local name="$1" msys="/usr/bin/$1"
+  if [[ "$(uname -s 2>/dev/null)" == MINGW* || "$(uname -s 2>/dev/null)" == MSYS* ]] \
+     && [[ -x "$msys" ]]; then
+    printf '%s' "$msys"
+  else
+    printf '%s' "$name"
+  fi
+}
+SSH_BIN=$(pick_ssh ssh)
+SCP_BIN=$(pick_ssh scp)
+
 # ControlMaster=no and ControlPath=none are not tidiness. A stale multiplexing
 # socket makes ssh print "mux_client_request_session: read from master failed"
 # INSTEAD of running the command, and a check that reads stdout accepts that
@@ -130,7 +153,7 @@ trap 'rm -f "$SSH_ERR_FILE"' EXIT
 # that wants the remote stderr merges it REMOTELY, inside the command string.
 rsh() {
   local rc=0 out
-  out=$(ssh -n "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>"$SSH_ERR_FILE") || rc=$?
+  out=$("$SSH_BIN" -n "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>"$SSH_ERR_FILE") || rc=$?
   printf '%s' "$out"
   if (( rc == 255 )); then
     kill -s TERM "$_TOP_PID" 2>/dev/null
@@ -145,7 +168,7 @@ rsh() {
 # situation: no TTY, and the supervisor owns the pipe.
 rsh_live() {
   local rc=0
-  ssh -n "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>"$SSH_ERR_FILE" || rc=$?
+  "$SSH_BIN" -n "${SSH_BASE[@]}" -i "$KEY" -p "$SSH_PORT" "$HOST_USER@$HOST_ADDR" "$1" 2>"$SSH_ERR_FILE" || rc=$?
   if (( rc == 255 )); then
     kill -s TERM "$_TOP_PID" 2>/dev/null
     exit 255
@@ -159,7 +182,7 @@ _ssh_died() {
   [[ -s "$SSH_ERR_FILE" ]] && note "  $(tail -3 "$SSH_ERR_FILE" | tr '\n' ' ')"
   printf '\n'
   note "  Usual causes: the Host slept, its address moved, or Wi-Fi dropped."
-  note "  Diagnose: ssh -vvv -i $KEY -p $SSH_PORT $HOST_USER@$HOST_ADDR"
+  note "  Diagnose: $SSH_BIN -vvv -i $KEY -p $SSH_PORT $HOST_USER@$HOST_ADDR"
   printf '\n'
   say "Stopped on purpose — a transport error must never be read as a result."
   [[ -n "${MANIFEST:-}" ]] && printf 'ABORTED: SSH failed at %s\n' "$(date -Iseconds)" >> "$MANIFEST"
@@ -186,6 +209,20 @@ save_conf
 # ── Preflight ─────────────────────────────────────────────────────────────
 
 head2 "Preflight"
+
+# Which ssh, said out loud. A run that dies on the wrong build should not have to
+# be guessed at afterwards.
+SSH_V=$("$SSH_BIN" -V 2>&1 | head -1)
+if [[ "$SSH_V" == *for_Windows* ]] && [[ "$(uname -s 2>/dev/null)" == MINGW* ]]; then
+  fail "using the native Windows ssh from inside Git Bash — $SSH_BIN" \
+    "It cannot read the stdio MSYS hands it, and fails with" \
+    "  getsockname failed: Not a socket" \
+    "before it reaches the network. Either install Git for Windows so that" \
+    "/usr/bin/ssh exists, or run this script from PowerShell rather than" \
+    "Git Bash."
+else
+  pass "ssh — $SSH_BIN ($SSH_V)"
+fi
 
 # The gates are counted on the Client, so the Client needs a Python too. Checked
 # first, so a broken interpreter stops the run here rather than after three slow
@@ -457,10 +494,10 @@ EOF
 # obvious and cannot be a hallucination that happens to look right.
 printf 'pomegranate\n' > "$STAGE/notes.txt"
 
-scp -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
+"$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
   "$STAGE/opencode.json" "$STAGE/notes.txt" \
   "$HOST_USER@$HOST_ADDR:$REMOTE_WORK/" && say "config and fixture copied"
-scp -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
+"$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
   "$REPO_ROOT/scripts/acp-capture.py" \
   "$REPO_ROOT/scripts/resolve-harness-exe.py" \
   "$HOST_USER@$HOST_ADDR:$REMOTE_ABS/" && say "acp-capture.py copied, unchanged"
@@ -571,7 +608,7 @@ run_capture "execute" \
 
 head2 "Bring the capture home"
 
-scp -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
+"$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
   "$HOST_USER@$HOST_ADDR:$REMOTE_ABS/out/*" "$LANDING/" 2>/dev/null \
   && say "artefacts copied to $LANDING" \
   || warn "nothing came back from $REMOTE_ABS/out — the runs produced no files"
