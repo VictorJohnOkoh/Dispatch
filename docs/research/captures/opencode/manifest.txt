@@ -1,9 +1,9 @@
-=== OpenCode ACP on a Host: 2026-08-27T19:23:33+01:00 ===
+=== OpenCode ACP on a Host: 2026-08-27T22:39:44+01:00 ===
 Issue:  #16   ADR: 0003
 Client: MINGW64_NT-10.0-26200 -PC 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys
 Host:   Victor@ZenitoBurrito:22
-Vendor: ollama at http://127.0.0.1:11434
-Model:  qwen3.5:9b
+Vendor: llamaswap at http://127.0.0.1:8080
+Model:  qwen3.5-9b
 OpenCode: 1.18.23
 
 Session working directory: /c/Users/Victor/capstone-opencode/work
@@ -15,5 +15,5 @@ run edit: exit 0
 run execute: exit 0
 
 === gates ===
-gate note: Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin; Vendor ollama, Model qwen3.5:9b
+gate note: Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin; Vendor llamaswap, Model qwen3.5-9b
 gates.json exit: 0  (0 all pass, 1 a gate failed, 3 something unknown)
