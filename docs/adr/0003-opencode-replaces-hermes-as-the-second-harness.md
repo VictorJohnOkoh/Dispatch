@@ -46,6 +46,6 @@ Nothing about OpenCode is established yet. What is known comes from a version st
 - A launch failure on the Host is fatal. If gate 1 fails, v1 ships Pi alone rather than a second Harness that cannot start.
 - The Daemon writes a per-Session config beside the Session's working directory, rather than editing a file the user owns. Two Sessions on different Models cannot then fight over one file, and the Model chosen at Session start has somewhere to land. This assumes OpenCode discovers configuration from the working directory, which the capture must confirm. If it does not, configuration falls back to a manual per-Host prerequisite, and the Model can no longer be chosen per Session.
 - Reaching all three Vendors is recorded, not gated. A Vendor that fails is a configuration bug, not grounds to reject a Harness. Pointing OpenCode at one is a `provider` block with an `@ai-sdk/openai-compatible` `baseURL` on loopback, the same shape as Pi's `models.json` write, so the Data Plane invariant holds.
-- `CONTEXT.md` and the architecture sketch still name Hermes as a Harness. They change when the capture returns, so that neither claims something unproven in the meantime.
+- `CONTEXT.md` still names Hermes as a Harness. It changes when the capture returns, so that it does not claim something unproven in the meantime.
 
 This decision does not reopen ADR-0001. The Daemon still owns Session lifecycle and admission control, and the Approval Policy rule above follows directly from that ownership.

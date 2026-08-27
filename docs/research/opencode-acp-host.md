@@ -221,5 +221,5 @@ ADR 0003's conditional half resolves in favour of OpenCode. Gate 1 passes, which
 was the fatal one. Gates 2 and 3 pass, with `read` exempt and the cost of that
 exemption now measured rather than inferred.
 
-`CONTEXT.md` and `docs/architecture-sketch.html` still name Hermes as a Harness.
-ADR 0003 says they change when the capture returns.
+`CONTEXT.md` named Hermes as a Harness and now names OpenCode, which ADR 0003
+required once the capture returned.
