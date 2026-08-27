@@ -187,18 +187,20 @@ save_conf
 
 head2 "Preflight"
 
-# The Client's own Python counts the gates at the very end. Check it first, so a
-# broken interpreter fails here rather than after three slow captures. A uv
-# trampoline that cannot spawn its child answers `--version` and dies on a real
-# script, so run a real script.
+# The gates are counted on the Client, so the Client needs a Python too. Checked
+# first, so a broken interpreter stops the run here rather than after three slow
+# captures. Run a real script rather than --version, for the same reason the
+# Host's probe does: on the PATH and able to run are different questions, and a
+# shim answers the first while failing the second.
 if python -c "import json,glob,argparse" >/dev/null 2>&1; then
   pass "Client Python runs — $(python --version 2>&1 | tr -d '\r')"
 else
-  fail "the Client's python will not run a script" \
-    "The gates are counted here, not on the Host, so this stops the run." \
-    "It answers --version and then fails to spawn, which is a broken shim" \
-    "rather than a missing interpreter. Try a different one:" \
-    "  PATH=/c/Users/\$USER/AppData/Local/Programs/Python/Python313:\$PATH"
+  fail "the Client's python is on the PATH and will not run a script" \
+    "Prerequisite 4, at the Client. The gates are counted here, not on the" \
+    "Host, so the run stops without it." \
+    "Install Python 3.11+ and put a working one first on the PATH." \
+    "It answers --version, so this is a shim that cannot spawn its child" \
+    "rather than a missing interpreter. Record which, then fix it."
 fi
 
 if [[ -f "$KEY" ]]; then

@@ -143,6 +143,16 @@ together. Skipping it is the third common time-sink.
 
 ## Then, from your own machine
 
+`scripts/capture-opencode-host.sh` needs **Python 3.11+ on the Client too**, and
+that is the only thing this side asks for. `scripts/opencode-gates.py` counts the
+three gates there rather than on the Host, on purpose: the Host is the thing
+under test, so the measurement should not share its environment.
+
+The preflight runs a real script rather than `--version`, because a shim answers
+`--version` and then fails to spawn its child. That happened on the development
+machine: a `uv` trampoline first on the `PATH` reported 3.11 and died with
+`os error 4551` on every actual script.
+
 ```bash
 bash scripts/capture-remote-host.sh --check
 ```
