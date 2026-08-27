@@ -1,0 +1,11 @@
+opencode/big-pickle
+opencode/hy3-free
+opencode/mimo-v2.5-free
+opencode/muse-spark-1.2-contributor-free
+opencode/nemotron-3-ultra-free
+opencode/nemotron-3.5-lightning-free
+capstone/qwen3.5:9b
+lmstudio/gpt-oss-20b
+lmstudio/qwen/qwen3.5-9b
+lmstudio/qwen2.5-coder-1.5b-instruct
+lmstudio/qwen3.8-27b
