@@ -200,9 +200,7 @@ export PI_TELEMETRY=0
 # back as defaults. Pi never reads it.
 ENV_FILE="$HOME/.pi-capture.env"
 
-# Named for the Vendor as well as the time: two passes started in the same
-# second would otherwise land in one directory and overwrite each other.
-CAPTURE_DIR="$HOME/pi-capture-${CAPTURE_VENDOR:+${CAPTURE_VENDOR}-}$(date +%Y%m%d-%H%M%S)"
+CAPTURE_DIR="$HOME/pi-capture-$(date +%Y%m%d-%H%M%S)"
 WORKDIR="$CAPTURE_DIR/workdir"
 SESSION_DIR="$CAPTURE_DIR/sessions"
 mkdir -p "$WORKDIR" "$SESSION_DIR"
@@ -210,64 +208,20 @@ MANIFEST="$CAPTURE_DIR/manifest.txt"
 
 PY=""
 PI_CMD=""
+EXT_FILE="$CAPTURE_DIR/vendor-provider.ts"
 
 note_manifest() { printf '%s\n' "$1" >> "$MANIFEST"; }
 
-# The status comes back in CAPTURE_CODE, not on stdout, for the reason spelled
-# out on probe_vendor: `code=$(capture_get ...)` would run the function in a
-# subshell and throw the status away with it. A caller needs that status to
-# decide whether to try a second URL.
-#
-# -m 300 matches llama-swap's healthCheckTimeout. A fetch that starts a cold
-# model is slow but finite, so a server that never answers becomes a recorded
-# 000 instead of a wizard sitting silently forever.
-CAPTURE_CODE=""
-
-# winpath PATH — the form of PATH that a native Windows program can open.
-#
-# Git Bash hands out /c/... paths and normally rewrites them when it calls a
-# native program. MSYS_NO_PATHCONV, exported above so that Pi gets its own
-# arguments unmangled, turns that rewriting off for everything — including curl
-# and python, which are both native here.
-#
-# Neither one complains where you would see it. curl still prints HTTP 200 and
-# writes nothing, leaving "curl: (23) Failure writing output to destination" in
-# curl-errors.log; python raises FileNotFoundError into the 2>/dev/null that
-# every parse block below redirects away. So the whole capture recorded HTTP 200
-# for empty files, and every "ctx:" read as unknown. Convert at each call site
-# rather than lifting the export, which Pi still needs.
-winpath() {
-  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
-}
-
 capture_get() {
-  local name="$1" url="$2" code dest
+  local name="$1" url="$2" code
   local out="$CAPTURE_DIR/$name"
-  dest=$(winpath "$out")
-  # `|| echo "000"` appended a second code, so a successful fetch was recorded
-  # as "HTTP 200000". curl writes the status even when it exits non-zero.
-  code=$(curl -sS -m 300 -o "$dest" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log") || true
-  [[ -z "$code" ]] && code=000
-  CAPTURE_CODE="$code"
-  # An HTTP status is not proof the body landed. One run recorded 200 for every
-  # fetch while curl wrote none of them — "curl: (23) Failure writing output to
-  # destination", from a native curl handed an MSYS path — and the artefacts
-  # were simply absent afterwards. winpath fixes that cause; this checks the
-  # file regardless, because a status line is not evidence a file exists.
-  local bytes=0
-  [[ -f "$out" ]] && bytes=$(wc -c < "$out" | tr -d ' ')
-  if [[ "$code" == "200" && "$bytes" -gt 0 ]]; then
-    printf '  %s✓%s %s → %s (%s bytes)
-' "$GREEN" "$RESET" "$url" "$name" "$bytes"
-    note_manifest "GET $url -> HTTP $code -> $name ($bytes bytes)"
-  elif [[ "$code" == "200" ]]; then
-    warn "$url answered 200 but wrote no file — the artefact is MISSING."
-    note "curl's reason is in $(basename "$CAPTURE_DIR")/curl-errors.log"
-    note_manifest "GET $url -> HTTP $code but NO FILE WRITTEN -> $name MISSING"
+  code=$(curl -sS -o "$out" -w '%{http_code}' "$url" 2>>"$CAPTURE_DIR/curl-errors.log" || echo "000")
+  if [[ "$code" == "200" ]]; then
+    printf '  %s✓%s %s → %s (%s bytes)\n' "$GREEN" "$RESET" "$url" "$name" "$(wc -c < "$out" | tr -d ' ')"
   else
-    warn "$url returned HTTP $code — kept as $name ($bytes bytes)"
-    note_manifest "GET $url -> HTTP $code -> $name ($bytes bytes)"
+    warn "$url returned HTTP $code — saved anyway as $name"
   fi
+  note_manifest "GET $url -> HTTP $code -> $name"
 }
 
 # run_pi_capture LABEL OUTFILE PROMPT — one-shot --mode json run, timed out.
@@ -282,11 +236,11 @@ run_pi_capture() {
   local label="$1" outfile="$2" prompt="$3" rc
   set +e
   if command -v timeout >/dev/null 2>&1; then
-    timeout 300 $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+    timeout 300 $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
       < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   else
-    $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+    $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode json "$prompt" \
       < /dev/null > "$outfile" 2> "$CAPTURE_DIR/$label-stderr.log"
   fi
@@ -296,138 +250,6 @@ run_pi_capture() {
   note_manifest "$label exit code: $rc"
   say "captured $(wc -l < "$outfile" | tr -d ' ') JSONL lines → $(basename "$outfile")"
 }
-
-# ── Vendor helpers ─────────────────────────────────────────────────────────
-
-# Three known Vendors, so three case arms rather than a lookup table. The
-# defaults are the ports each ships with, and the model listing differs:
-# LM Studio serves its own under /api/v1, the other two are OpenAI-compatible.
-VENDOR_KINDS="lmstudio ollama llamacpp"
-vendor_label() {
-  case "$1" in
-    lmstudio) printf 'LM Studio' ;;
-    ollama)   printf 'Ollama' ;;
-    llamacpp) printf 'llama.cpp' ;;
-  esac
-}
-vendor_default_url() {
-  case "$1" in
-    lmstudio) printf 'http://127.0.0.1:1234' ;;
-    ollama)   printf 'http://127.0.0.1:11434' ;;
-    llamacpp) printf 'http://127.0.0.1:8080' ;;
-  esac
-}
-vendor_models_path() {
-  case "$1" in
-    lmstudio) printf '/api/v1/models' ;;
-    *)        printf '/v1/models' ;;
-  esac
-}
-
-# probe_vendor URL — sets PROBE_CODE to the HTTP status, or 000 when the
-# connection never happened, and PROBE_ERR to curl's own words. "000" alone
-# never says why, and the reason is the whole point of this stage.
-#
-# Results come back in globals, NOT on stdout, because `code=$(probe_vendor
-# ...)` would run the function in a subshell and discard PROBE_ERR — the same
-# trap that made the SSH preflight report tools as installed without running
-# them. curl also writes the code AND exits non-zero when it cannot connect, so
-# a plain `|| echo 000` appends a second 000 and yields "000000".
-PROBE_CODE=""
-PROBE_ERR=""
-probe_vendor() {
-  local errf="$CAPTURE_DIR/.probe-err"
-  PROBE_CODE=""; PROBE_ERR=""
-  PROBE_CODE=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>"$errf") || true
-  [[ -z "$PROBE_CODE" ]] && PROBE_CODE=000
-  [[ -s "$errf" ]] && PROBE_ERR=$(head -1 "$errf")
-  return 0
-}
-
-# strip_ctl STRING — remove ANSI escape sequences and control bytes.
-#
-# `ask` uses `read -r`, which has no line editing. An arrow key pressed to
-# correct a typo arrives as literal escape bytes and becomes part of the
-# answer: one run stored a model id with the cursor keys embedded in it, then
-# offered it back as the default on every later run. The trailing sequence can
-# be incomplete, so the final letter is optional. sed first, then tr — dropping
-# the ESC byte first would leave the '[D' behind as printable text.
-strip_ctl() {
-  printf '%s' "$1" | sed $'s/\[[0-9;]*[A-Za-z]\{0,1\}//g' | tr -d '[:cntrl:]'
-}
-
-# ── One pass per Vendor ─────────────────────────────────────────────────────
-#
-# Capturing one Vendor and stopping wastes the run: the interesting comparison
-# is how the SAME prompts behave across Vendors, and a second pass costs only
-# the time it takes.
-#
-# The wizard is a linear script, so rather than wrapping three hundred lines in
-# a loop it re-runs ITSELF once per Vendor with the choice pinned in
-# CAPTURE_VENDOR. Each pass therefore gets its own capture directory and its own
-# manifest, which is what the research record wants anyway — and a Vendor that
-# fails cannot take the others down with it.
-if [[ -z "${CAPTURE_VENDOR:-}" ]]; then
-  banner "Pi → Vendor: capture raw output"
-  printf '  %sChecking which Vendors are serving...%s\n\n' "$DIM" "$RESET"
-  mkdir -p "$CAPTURE_DIR"
-  REACHABLE=""
-  for k in $VENDOR_KINDS; do
-    url="$(vendor_default_url "$k")$(vendor_models_path "$k")"
-    probe_vendor "$url"
-    if [[ "$PROBE_CODE" == 200 ]]; then
-      REACHABLE="$REACHABLE $k"
-      printf '  %s✓%s  %-10s %-34s HTTP %s\n' "$GREEN" "$RESET" "$(vendor_label "$k")" "$url" "$PROBE_CODE"
-    else
-      printf '  %s·%s  %-10s %-34s HTTP %s\n' "$DIM" "$RESET" "$(vendor_label "$k")" "$url" "$PROBE_CODE"
-      [[ -n "$PROBE_ERR" ]] && printf '     %s%s%s\n' "$DIM" "$PROBE_ERR" "$RESET"
-    fi
-  done
-  REACHABLE="${REACHABLE# }"
-  # The dispatcher makes no capture of its own; each pass makes its own
-  # directory. Remove the scratch file first or rmdir refuses and leaves an
-  # empty pi-capture-<ts> behind on every run.
-  rm -f "$CAPTURE_DIR/.probe-err"
-  rmdir "$CAPTURE_DIR" 2>/dev/null || true
-  printf '\n'
-
-  if [[ -z "$REACHABLE" ]]; then
-    warn "None of the three answered. That is a recorded result, not a crash."
-    note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
-    note "Ollama:    serves on 11434 once installed; 'ollama list' to confirm."
-    note "llama.cpp: llama-server -m <model.gguf> --port 8080, or llama-swap"
-    note "           -config config.yaml -listen 127.0.0.1:8080 to serve several."
-    printf '\n'
-    confirm "Carry on and pick one by hand anyway?" || exit 1
-    CAPTURE_VENDOR=manual bash "$0"
-    exit $?
-  fi
-
-  say "Will capture against: $REACHABLE"
-  printf '\n'
-  confirm "Run a full pass for each?" || exit 1
-
-  RESULTS=""
-  for k in $REACHABLE; do
-    printf '\n%s%s  ── Vendor %s ──%s\n' "$BOLD" "$BLUE" "$(vendor_label "$k")" "$RESET"
-    # Not `exit` on failure: one Vendor refusing is a result to record, and the
-    # remaining Vendors still have to be tried.
-    if CAPTURE_VENDOR="$k" bash "$0"; then
-      RESULTS="$RESULTS $k=ok"
-    else
-      RESULTS="$RESULTS $k=exit$?"
-      warn "$(vendor_label "$k") pass ended non-zero — carrying on."
-    fi
-  done
-
-  printf '\n%s%s  All passes finished%s\n' "$BOLD" "$GREEN" "$RESET"
-  for r in $RESULTS; do printf '    %s\n' "$r"; done
-  printf '\n'
-  say "One capture directory per Vendor under $HOME:"
-  ls -1d "$HOME"/pi-capture-* 2>/dev/null | tail -n 5 | sed 's/^/    /'
-  printf '\n'
-  exit 0
-fi
 
 banner "Pi → Vendor: capture raw output"
 
@@ -477,18 +299,7 @@ fi
 note_manifest "=== Pi capture run: $(date -Iseconds) ==="
 note_manifest "OS: Windows (Git Bash) — $(uname -a 2>/dev/null || echo unknown)"
 note_manifest "node: $(node --version 2>&1)"
-# -ne disables auto-loaded extensions for every call below. Two reasons, and
-# neither is tidiness. A half-removed extension in ~/.pi/agent/npm aborts every
-# run before the model is reached — measured here as "Cannot find module
-# 'ollama'", exit 1, zero output, from a directory that is now empty. And a
-# capture is meant to show the Vendor path alone, so a third party's code in
-# the process is noise in the transcript.
-#
-# The provider itself is unaffected: it comes from ~/.pi/agent/models.json,
-# which is config rather than an extension. Finding P1.
-PI_CMD="$PI_CMD -ne"
 note_manifest "pi invocation: $PI_CMD"
-note_manifest "extensions: disabled with -ne; provider comes from models.json"
 note_manifest "capture dir: $CAPTURE_DIR"
 note_manifest ""
 
@@ -497,41 +308,26 @@ say "Capturing into: $CAPTURE_DIR"
 pause "Ready?"
 
 # ── Stage 2 ────────────────────────────────────────────────────────────────
-stage "Vendor — probe all three, pick one that answered"
-say "Any of the three works. Pi reaches all of them the same way, through a"
-say "provider declared in ~/.pi/agent/models.json — no extension, no flag."
+stage "Vendor — find one serving, pick a model"
+say "Either Vendor works. Pi reaches both the same way, through an"
+say "OpenAI-compatible endpoint registered from an extension."
 note "Using 127.0.0.1 rather than localhost: on Windows, localhost can resolve to"
 note "::1 first and miss a server bound only to IPv4."
 printf '\n'
-note "A Vendor that is not running is not an error here. This wizard exists to"
-note "find out what querying a Harness over SSH actually reports, so a refused"
-note "connection is a result: it gets recorded and the run carries on."
-printf '\n'
 
-
-
-REACHABLE=""
-for k in $VENDOR_KINDS; do
-  url="$(vendor_default_url "$k")$(vendor_models_path "$k")"
-  probe_vendor "$url"; code="$PROBE_CODE"
-  if [[ "$code" == 200 ]]; then
-    REACHABLE="$REACHABLE $k"
-    printf '  %s✓%s  %-10s %-34s HTTP %s\n' "$GREEN" "$RESET" "$(vendor_label "$k")" "$url" "$code"
-  else
-    printf '  %s·%s  %-10s %-34s HTTP %s\n' "$DIM" "$RESET" "$(vendor_label "$k")" "$url" "$code"
-    [[ -n "$PROBE_ERR" ]] && printf '     %s%s%s\n' "$DIM" "$PROBE_ERR" "$RESET"
-  fi
-  # Only quote curl's stderr when the probe actually failed. curl can warn on a
-  # perfectly good 200 — MSYS reports "Failure writing output to destination"
-  # against /dev/null — and a warning filed beside a success reads as a failure.
-  if [[ "$code" == 200 ]]; then
-    note_manifest "probe $k $url -> HTTP $code"
-  else
-    note_manifest "probe $k $url -> HTTP $code${PROBE_ERR:+ ($PROBE_ERR)}"
-  fi
-done
-REACHABLE="${REACHABLE# }"
-rm -f "$CAPTURE_DIR/.probe-err"
+# Probe both rather than asking first. On a Host reached over SSH the operator
+# cannot see which one is running, and a wrong guess costs a whole stage.
+probe_vendor() {
+  # curl writes the code AND exits non-zero when it cannot connect, so a plain
+  # `|| echo 000` appends a second 000 and yields "000000".
+  local c
+  c=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null) || true
+  printf '%s' "${c:-000}"
+}
+LMS_CODE=$(probe_vendor "http://127.0.0.1:1234/api/v1/models")
+OLL_CODE=$(probe_vendor "http://127.0.0.1:11434/v1/models")
+say "LM Studio on 1234:  HTTP $LMS_CODE"
+say "Ollama on 11434:    HTTP $OLL_CODE"
 printf '\n'
 
 # pick_vendor PROMPT — read a Vendor name, normalised, and insist on a valid one.
@@ -546,10 +342,9 @@ pick_vendor() {
     ask VENDOR_KIND "$1"
     raw=$(printf '%s' "$VENDOR_KIND" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
     case "$raw" in
-      ollama|o)                  VENDOR_KIND=ollama;   return 0 ;;
-      lmstudio|lms|lm|l)         VENDOR_KIND=lmstudio; return 0 ;;
-      llamacpp|llama.cpp|llama|c) VENDOR_KIND=llamacpp; return 0 ;;
-      *) warn "Type one of: lmstudio, ollama, llamacpp. Got: '$VENDOR_KIND'" ;;
+      ollama|o)          VENDOR_KIND=ollama;   return 0 ;;
+      lmstudio|lms|lm|l) VENDOR_KIND=lmstudio; return 0 ;;
+      *) warn "Type 'ollama' or 'lmstudio'. Got: '$VENDOR_KIND'" ;;
     esac
   done
   warn "No valid Vendor after 3 tries — stopping rather than picking one for you."
@@ -557,37 +352,23 @@ pick_vendor() {
 }
 
 VENDOR_KIND=""
-# The dispatcher pins the Vendor for this pass. The probe above still ran, and
-# its results are still recorded, because a pass should say what the whole
-# machine looked like at the time — not only the Vendor it was told to use.
-if [[ -n "${CAPTURE_VENDOR:-}" && "$CAPTURE_VENDOR" != "manual" ]]; then
-  VENDOR_KIND="$CAPTURE_VENDOR"
-  say "This pass: $(vendor_label "$VENDOR_KIND") (pinned by the dispatcher)."
-  case " $REACHABLE " in
-    *" $VENDOR_KIND "*) : ;;
-    *) warn "$(vendor_label "$VENDOR_KIND") did not answer this time. Capturing anyway —"
-       warn "what it reports when unreachable is itself the thing being measured." ;;
-  esac
+if [[ "$LMS_CODE" == 200 && "$OLL_CODE" == 200 ]]; then
+  step "Both are serving. Which one is this capture against?"
+  pick_vendor "Vendor [lmstudio|ollama]:"
+elif [[ "$LMS_CODE" == 200 ]]; then
+  VENDOR_KIND=lmstudio
+elif [[ "$OLL_CODE" == 200 ]]; then
+  VENDOR_KIND=ollama
 else
-case "$(printf '%s' "$REACHABLE" | wc -w | tr -d ' ')" in
-  0) warn "None of the three answered. That is a recorded result, not a crash."
-     note "LM Studio: Developer tab -> Start Server (needs a desktop session)."
-     note "Ollama:    serves on 11434 once installed; 'ollama list' to confirm."
-     note "llama.cpp: llama-server -m <model.gguf> --port 8080, or llama-swap"
-     note "           -config config.yaml -listen 127.0.0.1:8080 to serve several."
-     printf '\n'
-     confirm "Carry on and pick one by hand anyway?" || exit 1
-     pick_vendor "Vendor [lmstudio|ollama|llamacpp]:" ;;
-  1) VENDOR_KIND="$REACHABLE"
-     say "Only $(vendor_label "$VENDOR_KIND") answered — using it." ;;
-  *) step "More than one is serving: $REACHABLE"
-     pick_vendor "Vendor [lmstudio|ollama|llamacpp]:" ;;
-esac
+  warn "Neither Vendor answered."
+  note "LM Studio: Developer tab -> Start Server."
+  note "Ollama:    it serves on 11434 once installed; 'ollama list' to confirm."
+  pick_vendor "Carry on anyway with [lmstudio|ollama]:"
 fi
 printf '\n'
 step "Vendor for this capture: $VENDOR_KIND"
 
-# Switching Vendor must not inherit another one's answers. `ask` offers the
+# Switching Vendor must not inherit the other one's answers. `ask` offers the
 # stored value as its default and Enter keeps it, so a URL and model saved
 # against LM Studio come back as the defaults for Ollama — and the capture
 # quietly runs against the Vendor you did not choose. Drop them on a switch.
@@ -604,73 +385,69 @@ if [[ -n "$PREV_KIND" && "$PREV_KIND" != "$VENDOR_KIND" ]]; then
 fi
 write_env VENDOR_KIND "$VENDOR_KIND"
 
-VENDOR_NAME="$(vendor_label "$VENDOR_KIND") (local)"
-DEFAULT_URL="$(vendor_default_url "$VENDOR_KIND")"
-MODELS_PATH="$(vendor_models_path "$VENDOR_KIND")"
+if [[ "$VENDOR_KIND" == "ollama" ]]; then
+  VENDOR_NAME="Ollama (local)"
+  DEFAULT_URL="http://127.0.0.1:11434"
+else
+  VENDOR_NAME="LM Studio (local)"
+  DEFAULT_URL="http://127.0.0.1:1234"
+fi
 printf '\n'
-
 # `ask` offers the value stored in ENV_FILE and Enter keeps it, while the prompt
 # advertises DEFAULT_URL — two different defaults in one prompt. A stored URL
-# belonging to ANOTHER Vendor therefore survives here even when the Vendor
+# belonging to the OTHER Vendor therefore survives here even when the Vendor
 # itself did not change, and Enter quietly captures the wrong server. Drop it.
-# A genuinely custom URL is left alone; only another Vendor's default goes.
-STORED_URL=$(_existing VENDOR_URL || true)
-for k in $VENDOR_KINDS; do
-  [[ "$k" == "$VENDOR_KIND" ]] && continue
-  if [[ -n "$STORED_URL" && "$STORED_URL" == "$(vendor_default_url "$k")" ]]; then
-    forget_env VENDOR_URL
-    note "Dropped a saved base URL belonging to $(vendor_label "$k") ($STORED_URL)."
-    break
-  fi
-done
+# A genuinely custom URL is left alone; only the other Vendor's default goes.
+if [[ "$VENDOR_KIND" == "ollama" ]]; then OTHER_URL="http://127.0.0.1:1234"
+else OTHER_URL="http://127.0.0.1:11434"; fi
+if [[ "$(_existing VENDOR_URL || true)" == "$OTHER_URL" ]]; then
+  forget_env VENDOR_URL
+  note "Dropped a saved base URL belonging to the other Vendor ($OTHER_URL)."
+fi
 
-ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAULT_URL]:"
-
-VENDOR_URL=$(strip_ctl "$VENDOR_URL")
+ask VENDOR_URL "$VENDOR_NAME base URL [$DEFAUL  T_URL]:"
 [[ -z "$VENDOR_URL" ]] && VENDOR_URL="$DEFAULT_URL"
 write_env VENDOR_URL "$VENDOR_URL"
 
 # Prove the address chosen actually answers, and name it. Every confusion in
 # this stage came from the operator not being able to see which server was
 # about to be used.
-probe_vendor "$VENDOR_URL$MODELS_PATH"; URL_CODE="$PROBE_CODE"
+if [[ "$VENDOR_KIND" == "ollama" ]]; then MODELS_PATH="/v1/models"
+else MODELS_PATH="/api/v1/models"; fi
+URL_CODE=$(probe_vendor "$VENDOR_URL$MODELS_PATH")
 if [[ "$URL_CODE" == 200 ]]; then
   say "Confirmed: $VENDOR_KIND answering at $VENDOR_URL"
 else
   warn "$VENDOR_URL did not answer (HTTP $URL_CODE) for $VENDOR_KIND."
-  [[ -n "$PROBE_ERR" ]] && note "$PROBE_ERR"
   confirm "Continue anyway?" || exit 1
 fi
-note_manifest "chosen vendor: $VENDOR_KIND at $VENDOR_URL (HTTP $URL_CODE)"
+printf '\n'
 
 MODELS_JSON="$CAPTURE_DIR/vendor-models.json"
-capture_get "vendor-models.json" "$VENDOR_URL$MODELS_PATH"
-case "$VENDOR_KIND" in
-  ollama)
-    # The native endpoint carries the parameter size and quantisation that the
-    # OpenAI-compatible one drops. Kept because it is evidence, not decoration.
-    capture_get "ollama-tags.json" "$VENDOR_URL/api/tags" ;;
-  # llamacpp has no arm here on purpose. Its /props needs a model id whenever
-  # llama-swap is the thing on the port, so that capture happens further down,
-  # once pick_model has settled which model this pass uses.
-  lmstudio)
-    if [[ ! -s "$MODELS_JSON" ]]; then
-      say "Trying the pre-0.4.0 path..."
-      capture_get "vendor-models.json" "$VENDOR_URL/api/v0/models"
-    fi ;;
-esac
+if [[ "$VENDOR_KIND" == "ollama" ]]; then
+  capture_get "vendor-models.json" "$VENDOR_URL/v1/models"
+  # The native endpoint carries the parameter size and quantisation that the
+  # OpenAI-compatible one drops. Kept because it is evidence, not decoration.
+  capture_get "ollama-tags.json" "$VENDOR_URL/api/tags"
+else
+  capture_get "vendor-models.json" "$VENDOR_URL/api/v1/models"
+  if [[ ! -s "$MODELS_JSON" ]]; then
+    say "Trying the pre-0.4.0 path..."
+    capture_get "vendor-models.json" "$VENDOR_URL/api/v0/models"
+  fi
+fi
 
 printf '\n'
 say "Model ids found:"
-$PY - "$(winpath "$MODELS_JSON")" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
+$PY - "$MODELS_JSON" <<'PYEOF' 2>/dev/null || say "  (couldn't parse — read the file yourself)"
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
     ctx = m.get("max_context_length") or m.get("context_length") or "?"
     caps = m.get("capabilities")
-    # Only LM Studio reports capabilities. Absent is not the same as false, and
-    # printing "NO TOOLS" for a model that does support them would be a
-    # fabricated finding.
+    # Ollama's OpenAI-compatible listing carries no capability field at all.
+    # Absent is not the same as false, and printing "NO TOOLS" for a model that
+    # does support them would be a fabricated finding.
     if caps is None:
         tools = "tools: unknown"
     else:
@@ -681,122 +458,12 @@ for m in (d.get("models") or d.get("data") or []):
 PYEOF
 
 printf '\n'
-case "$VENDOR_KIND" in
-  lmstudio) : ;;
-  llamacpp) note "llama.cpp reports no tool support in this listing, but it does report"
-            note "it at /props — captured below, once the model is chosen." ;;
-  *)        note "$(vendor_label "$VENDOR_KIND") does not report tool support here." ;;
-esac
-
-# Ask Pi what it can reach BEFORE offering a choice, so the list cannot
-# contain a model the run would then fail on.
-$PI_CMD --list-models < /dev/null > "$CAPTURE_DIR/pi-models-available.txt" 2>&1 || true
-
-# pick_model — choose PI_MODEL from what Pi actually offers for this Vendor.
-#
-# Typing the id free-hand was the wrong design twice over. `read -r` has no line
-# editing, so an arrow key pressed to correct a typo is captured as literal
-# escape bytes: one run stored PI_MODEL=qwen3.6:9b^[[D^[[D^[[5 — the typo AND
-# the keystrokes meant to fix it — then offered it back as the default on every
-# later run. A number cannot be mistyped into a valid-looking wrong answer, and
-# a list can only contain models Pi can really reach.
-pick_model() {
-  local -a ids=()
-  local line n choice
-  while read -r line; do
-    ids+=("$line")
-  done < <(awk -v p="$VENDOR_KIND" '$1==p && $2!="" && $1!="provider" {print $2}' \
-             "$CAPTURE_DIR/pi-models-available.txt" 2>/dev/null)
-
-  if (( ${#ids[@]} == 0 )); then
-    warn "Pi reports no models for '$VENDOR_KIND'."
-    note "They come from ~/.pi/agent/models.json. Add the provider there first."
-    printf '\n'
-    # Last resort: typed, stripped of control bytes, and checked against the
-    # Vendor's own listing before it is accepted.
-    ask PI_MODEL "Model id (typed):"
-    PI_MODEL=$(strip_ctl "$PI_MODEL")
-    return
-  fi
-
-  say "Models Pi can reach through '$VENDOR_KIND':"
-  n=0
-  for line in "${ids[@]}"; do
-    n=$((n + 1))
-    printf '    %s%d%s  %s\n' "$BOLD" "$n" "$RESET" "$line"
-  done
-  printf '\n'
-  step "Pick a TOOL-CAPABLE one — stage 6 needs it to make a tool call."
-  while :; do
-    ask choice "Number [1-${#ids[@]}]:"
-    choice=$(printf '%s' "$choice" | tr -cd '0-9')
-    if [[ -n "$choice" ]] && (( choice >= 1 && choice <= ${#ids[@]} )); then
-      PI_MODEL="${ids[$((choice - 1))]}"
-      return
-    fi
-    warn "Type a number between 1 and ${#ids[@]}."
-  done
-}
-
-pick_model
-say "Model: $PI_MODEL"
+step "Pick a TOOL-CAPABLE model — stage 6 needs it to make a tool call."
+[[ "$VENDOR_KIND" == "ollama" ]] && note "Ollama does not report tool support here. 'ollama show <model>' does."
+ask PI_MODEL "Model id:"
 write_env PI_MODEL "$PI_MODEL"
 
-# /props is where llama-server names the model and reports the context size it
-# was actually started with. A bare llama-server holds one model, so the path is
-# simply /props.
-#
-# llama-swap changes that. It fronts several models on one port and starts them
-# on demand, so a bare /props has no model to describe: it answers HTTP 404 with
-# {"error":{"message":"no model id could be identified"}} and puts the per-model
-# view at /upstream/<model>/props instead. Which of the two is on the port cannot
-# be known in advance, so try the plain path and fall back.
-#
-# This capture sits here, and not up with the other Vendors' extras, because the
-# fallback URL needs the model id — so it must follow pick_model. On llama-swap
-# the fetch also STARTS the model, so a first call as slow as a cold load is the
-# swap working rather than a hang, and it leaves the model loaded for stage 4.
-PROPS_JSON="$CAPTURE_DIR/llamacpp-props.json"
-if [[ "$VENDOR_KIND" == "llamacpp" ]]; then
-  printf '\n'
-  capture_get "llamacpp-props.json" "$VENDOR_URL/props"
-  if [[ "$CAPTURE_CODE" == "200" ]]; then
-    note_manifest "llamacpp: bare llama-server (/props answered directly)"
-  else
-    note "Plain /props refused — trying llama-swap's per-model path."
-    capture_get "llamacpp-props.json" "$VENDOR_URL/upstream/$PI_MODEL/props"
-    if [[ "$CAPTURE_CODE" == "200" ]]; then
-      say "llama-swap is on this port, not a bare llama-server."
-      note_manifest "llamacpp: llama-swap (/props only at /upstream/<model>/props)"
-    fi
-  fi
-
-  # chat_template_caps is llama.cpp's own answer to the question stage 6 depends
-  # on: whether this model's chat template can emit a tool call at all. Only
-  # /props carries it, which is why the check waits until the model is known.
-  if [[ -s "$PROPS_JSON" ]]; then
-    TOOLS=$($PY - "$(winpath "$PROPS_JSON")" <<'PYEOF' 2>/dev/null || echo ""
-import json, sys
-caps = json.load(open(sys.argv[1], encoding="utf-8")).get("chat_template_caps")
-print("" if caps is None else ("yes" if caps.get("supports_tools") else "no"))
-PYEOF
-)
-    case "$TOOLS" in
-      yes) say "tool support: yes — stage 6 can make a tool call." ;;
-      no)  warn "tool support: NO. This model's chat template cannot emit a tool"
-           warn "call, so stage 6 would capture a refusal. Re-run and pick another." ;;
-      *)   note "tool support: not reported at /props." ;;
-    esac
-    note_manifest "llamacpp supports_tools: ${TOOLS:-unreported}"
-  fi
-fi
-
-printf '\n'
-# Recorded, not asked for. Pi autodetects the context window from the endpoint
-# (finding P1); nothing here needs the number, so a prompt for it would be a
-# question with no consequence.
-CTX_SOURCE="the model listing"
-CTX=$($PY - "$(winpath "$MODELS_JSON")" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
+CTX=$($PY - "$MODELS_JSON" "$PI_MODEL" <<'PYEOF' 2>/dev/null || echo ""
 import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 for m in (d.get("models") or d.get("data") or []):
@@ -805,55 +472,56 @@ for m in (d.get("models") or d.get("data") or []):
         break
 PYEOF
 )
-
-# llama-swap's /v1/models carries no context length at all — an id and a
-# loaded/unloaded status is the whole of it. /props does carry one, and n_ctx
-# there is the better evidence anyway: the size the server really started with,
-# rather than a maximum the model advertises.
-if [[ -z "$CTX" && -s "$PROPS_JSON" ]]; then
-  CTX=$($PY - "$(winpath "$PROPS_JSON")" <<'PYEOF' 2>/dev/null || echo ""
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8"))
-print(d.get("default_generation_settings", {}).get("n_ctx") or "")
-PYEOF
-)
-  if [[ -n "$CTX" ]]; then CTX_SOURCE="/props n_ctx — what the server started with"; fi
+if [[ -z "$CTX" ]]; then
+  ask CTX "Context window (couldn't detect) [32768]:"
+  [[ -z "$CTX" ]] && CTX="32768"
 fi
-
-if [[ -n "$CTX" ]]; then
-  say "context window reported by the Vendor: $CTX"
-  note "source: $CTX_SOURCE"
-else
-  say "context window reported by the Vendor: not reported"
-fi
-note_manifest "Model: $PI_MODEL (ctx: ${CTX:-none}${CTX:+ from $CTX_SOURCE})"
+say "context window: $CTX"
+note_manifest "Vendor: $VENDOR_KIND at $VENDOR_URL"
+note_manifest "Model: $PI_MODEL (ctx $CTX)"
 
 # ── Stage 3 ────────────────────────────────────────────────────────────────
-stage "Vendor in Pi's own config — no extension"
-say "~/.pi/agent/models.json is a first-class config route. Finding P1 settled"
-say "this: an OpenAI-compatible endpoint needs no extension, and Pi autodetects"
-say "the context window and max output from the endpoint, which the extension"
-say "route makes you hardcode and get wrong."
-printf '\n'
-note "This wizard READS that file. It does not rewrite it behind your back."
+stage "Generate the provider extension"
+say "This is the part with no shortcut. Pi's built-in provider list does NOT"
+say "include a local Vendor, and there is no --base-url flag. An arbitrary"
+say "OpenAI-compatible endpoint is only reachable by registering a provider"
+say "from an extension, loaded with -e."
 printf '\n'
 
-MODELS_CFG="$HOME/.pi/agent/models.json"
-if [[ -f "$MODELS_CFG" ]]; then
-  say "Config: $MODELS_CFG"
-else
-  warn "No $MODELS_CFG — Pi has no custom providers to offer."
-fi
-printf '\n'
+cat > "$EXT_FILE" <<EXTEOF
+export default function (pi) {
+  pi.registerProvider("$VENDOR_KIND", {
+    name: "$VENDOR_NAME",
+    baseUrl: "$VENDOR_URL/v1",
+    apiKey: "$VENDOR_KIND",
+    api: "openai-completions",
+    models: [
+      {
+        id: "$PI_MODEL",
+        name: "$PI_MODEL",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: $CTX,
+        maxTokens: 4096
+      }
+    ]
+  });
+}
+EXTEOF
 
-say "Asking Pi what it can see..."
+say "Written to $(basename "$EXT_FILE"):"
+sed 's/^/    /' "$EXT_FILE"
+printf '\n'
+note "Docs show a .ts extension with a type-only import. This file omits the"
+note "import so it is valid as both TS and plain JS. If loading fails, try"
+note "renaming it to .js and re-running."
+printf '\n'
+say "Verifying Pi can see the provider..."
 set +e
-$PI_CMD --list-models < /dev/null > "$CAPTURE_DIR/pi-list-models.txt" 2>&1
+$PI_CMD -e "$EXT_FILE" --list-models < /dev/null > "$CAPTURE_DIR/pi-list-models.txt" 2>&1
 LIST_RC=$?
 set -e
-sed 's/^/    /' "$CAPTURE_DIR/pi-list-models.txt" | head -n 15
-printf '\n'
-
 # Do NOT grep for the provider name alone: Pi prints it inside its own error
 # text ('Provider "<name>": ... is required'), so a substring match reports
 # success on the exact failure it is meant to catch. Require a real table row
@@ -865,30 +533,35 @@ if [[ $LIST_RC -eq 0 ]] \
    && awk -v m="$PI_MODEL" -v p="$VENDOR_KIND" '$1==p && $2==m {found=1} END{exit !found}' \
         "$CAPTURE_DIR/pi-list-models.txt" \
    && ! grep -qi "no models available\|errors loading models.json" "$CAPTURE_DIR/pi-list-models.txt"; then
-  say "Pi has '$VENDOR_KIND / $PI_MODEL'. Using it."
+  say "  provider registered."
+  printf '
+'
+  say "This capture uses:  --provider $VENDOR_KIND --model $PI_MODEL"
+  say "                    baseUrl $VENDOR_URL/v1"
+  # ~/.pi/agent/models.json is loaded ALONGSIDE the -e extension, so its
+  # providers appear in this table whatever you picked here. Seeing an lmstudio
+  # row after choosing ollama is that file, not this capture. Say so, because
+  # the table is the only thing on screen and it reads like a contradiction.
+  if [[ -f "$HOME/.pi/agent/models.json" ]]      && awk -v p="$VENDOR_KIND" '$1!=p && $1!="provider" && NF>2 {found=1} END{exit !found}'           "$CAPTURE_DIR/pi-list-models.txt"; then
+    printf '
+'
+    note "Other providers in the table above come from ~/.pi/agent/models.json,"
+    note "which Pi loads as well as this extension. They are not used here."
+  fi
 else
-  warn "Pi does not offer '$VENDOR_KIND / $PI_MODEL' (--list-models exit $LIST_RC)."
+  warn "Provider did NOT register (exit $LIST_RC). Output:"
+  head -n 15 "$CAPTURE_DIR/pi-list-models.txt" | sed 's/^/    /'
   printf '\n'
-  say "Add this to the providers block of $MODELS_CFG:"
+  note "Most common cause: ~/.pi/agent/models.json exists and is invalid. Its"
+  note "errors also break -e extension loading when both define the same"
+  note "provider name. The key is 'baseUrl' — camelCase. 'baseURL' is rejected."
+  note "Fix or remove that file before continuing; stage 4 will otherwise hang"
+  note "with both output streams redirected and nothing to show you."
   printf '\n'
-  cat <<CFGEOF | sed 's/^/    /'
-"$VENDOR_KIND": {
-  "baseUrl": "$VENDOR_URL/v1",
-  "api": "openai-completions",
-  "apiKey": "$VENDOR_KIND",
-  "models": [{"id": "$PI_MODEL"}]
-}
-CFGEOF
-  printf '\n'
-  note "The key is 'baseUrl' — camelCase. 'baseURL' is rejected with"
-  note "'\"baseUrl\" is required when defining custom models'."
-  note "An invalid models.json also makes every provider disappear."
-  printf '\n'
-  say "Edit it in another window, then continue — the file is re-read per run."
   confirm "Continue anyway?" || exit 1
 fi
-note_manifest "provider: $VENDOR_KIND; model: $PI_MODEL; --list-models exit $LIST_RC"
-note_manifest "config: $MODELS_CFG"
+note_manifest "extension: $(basename "$EXT_FILE"); --list-models exit $LIST_RC"
+pause "Continue?"
 
 # ── Stage 4 ────────────────────────────────────────────────────────────────
 stage "Baseline — plain text via -p"
@@ -901,12 +574,12 @@ set +e
 # the redirect this call blocks on the terminal forever; without the timeout a
 # genuine model stall looks identical to that hang.
 if command -v timeout >/dev/null 2>&1; then
-  timeout 120 $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+  timeout 120 $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
     --session-dir "$SESSION_DIR" \
     -p "Reply with exactly the word: hello." \
     < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
 else
-  $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+  $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
     --session-dir "$SESSION_DIR" \
     -p "Reply with exactly the word: hello." \
     < /dev/null > "$CAPTURE_DIR/baseline-stdout.txt" 2> "$CAPTURE_DIR/baseline-stderr.txt"
@@ -984,7 +657,7 @@ say "This is the mode the Daemon will actually build against: long-lived,"
 say "bidirectional LF-delimited JSONL over stdin/stdout."
 printf '\n'
 say "It settles two open questions:"
-step "does a models.json provider work in RPC mode as it does in json mode?"
+step "does -e (extension loading) work in RPC mode at all?"
 step "does agent_settled appear here but not in --mode json?"
 printf '\n'
 
@@ -1017,11 +690,11 @@ set +e
 # agent_settled and closes stdin on that, rather than guessing a duration.
 RPC_HOLD=90
 if command -v timeout >/dev/null 2>&1; then
-  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD --provider '$VENDOR_KIND' --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
+  timeout $((RPC_HOLD + 60)) bash -c "{ cat '$CAPTURE_DIR/rpc-command.jsonl'; sleep $RPC_HOLD; } | $PI_CMD -e '$EXT_FILE' --provider '$VENDOR_KIND' --model '$PI_MODEL' --session-dir '$SESSION_DIR' --mode rpc" \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 else
   { cat "$CAPTURE_DIR/rpc-command.jsonl"; sleep $RPC_HOLD; } \
-    | $PI_CMD --provider "$VENDOR_KIND" --model "$PI_MODEL" \
+    | $PI_CMD -e "$EXT_FILE" --provider "$VENDOR_KIND" --model "$PI_MODEL" \
       --session-dir "$SESSION_DIR" --mode rpc \
     > "$CAPTURE_DIR/rpc-events.jsonl" 2> "$CAPTURE_DIR/rpc-stderr.log"
 fi
