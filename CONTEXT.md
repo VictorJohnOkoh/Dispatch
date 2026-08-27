@@ -43,7 +43,7 @@ A specific set of weights a Vendor can serve, selected before a Session begins.
 _Avoid_: LLM, checkpoint
 
 **Harness**:
-A program that turns a Model into an agent — running the tool-calling loop, managing context, and deciding what to do next. Hermes and Pi are Harnesses. Sending a prompt straight to a Vendor with no agency is modelled as a passthrough Harness, not as a separate path.
+A program that turns a Model into an agent — running the tool-calling loop, managing context, and deciding what to do next. OpenCode and Pi are Harnesses. Sending a prompt straight to a Vendor with no agency is modelled as a passthrough Harness, not as a separate path.
 _Avoid_: agent, framework, scaffold, runner
 
 **Session**:

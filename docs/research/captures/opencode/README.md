@@ -27,11 +27,13 @@ cannot be confused with each other.
 
 Recorded here so nothing downstream reads more into these files than they hold.
 
-- **One Vendor.** Ollama only. LM Studio was serving and was not driven;
-  llama-swap was not serving at capture time. Vendor coverage is recorded, not
-  gated (ADR 0003).
-- **One Model**, `qwen3.5:9b`, and **one run per class**. Counts are 1, 1 and 2,
-  not the 12/12 that produced the Hermes findings.
+- **These files are the llama-swap run.** Every run writes to this same
+  directory, so each Vendor overwrote the one before it. The Ollama bytes are in
+  git at `7db708f`; these are `f25cb06`. **The LM Studio run left nothing** — it
+  was overwritten by llama-swap before either was committed. That run passing is
+  a report, not evidence.
+- **One Model per Vendor**, and **one run per class**, not the 12/12 that
+  produced the Hermes findings.
 - **Every permission request was answered with allow.** No refusal was captured,
   so these bytes say nothing about what `reject` does.
 - **`webfetch` was never exercised**, though OpenCode's permission block gates it.
