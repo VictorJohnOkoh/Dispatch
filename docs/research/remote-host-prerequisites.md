@@ -63,6 +63,40 @@ New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell `
 Hermes is a Python program; Pi is a Node one. Neither runs without its runtime
 on `PATH` for the SSH session, not just for the desktop session.
 
+### PATH order decides which one runs
+
+Windows OpenSSH gives the SSH session the **Machine** `PATH`. Your User `PATH`
+is not in it, so a directory you added for the desktop session stays invisible
+to every capture script.
+
+Order decides the rest. `command -v python` returns the first match, not the
+working one, so a single dead entry near the front hides every good entry behind
+it. On the development Host the list began with a Hermes venv `Scripts`
+directory, and its `python.exe` is a uv trampoline:
+
+```
+error: uv trampoline failed to spawn Python child process
+  Caused by: uncategorized error (os error 4551)
+```
+
+The preflight reported Python as found and unable to start. That reads like a
+broken interpreter, and it was a `PATH` written in the wrong order.
+
+Check from the Client over SSH rather than at the Host's keyboard. The two
+sessions get different lists, so only the SSH one answers the question:
+
+```bash
+ssh <user>@<host> 'echo "$PATH"; command -v python; python --version'
+```
+
+If the wrong entry wins, move the real interpreter's directory to the front of
+the Machine `PATH` in an elevated PowerShell, then `Restart-Service sshd`. Move
+it rather than deleting whatever sat in front of it: that directory usually
+carries other commands that still work. Back the old value up first, because
+this variable is easy to truncate and hard to reconstruct.
+
+The same trap catches Node and `npm`.
+
 ## 5. A fixed address
 
 Set a static IP, or reserve the Host's address on your router. A capture run
