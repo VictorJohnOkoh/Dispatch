@@ -453,6 +453,11 @@ save_conf
 
 head2 "Stage the Session on the Host"
 
+# One directory per Vendor. Every run used to land in the same place, so a second
+# --vendor run silently overwrote the first, and the LM Studio capture was lost
+# that way before anyone noticed. Vendor coverage is a thing this ticket has to
+# show, so the runs that show it must not erase each other.
+LANDING="$LANDING/$VENDOR_KIND"
 mkdir -p "$LANDING"
 MANIFEST="$LANDING/manifest.txt"
 : > "$MANIFEST"

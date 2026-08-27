@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "capstone/qwen/qwen3.5-9b",
+  "permission": {
+    "edit": "ask",
+    "bash": "ask",
+    "webfetch": "ask"
+  },
+  "provider": {
+    "capstone": {
+      "name": "Capstone Vendor (lmstudio)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:1234/v1",
+        "apiKey": "not-required-for-a-local-vendor"
+      },
+      "models": {
+        "qwen/qwen3.5-9b": { "name": "qwen/qwen3.5-9b" }
+      }
+    }
+  }
+}

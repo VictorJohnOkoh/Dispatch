@@ -18,13 +18,13 @@ output.
 | Harness | OpenCode 1.18.23, `opencode acp` |
 | Spawned as | `C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe acp` |
 | Vendor | Ollama, then repeated against LM Studio and llama-swap |
-| Model | `qwen3.5:9b` on Ollama, `qwen3.5-9b` on llama-swap |
-| Date | 2026-08-27, 19:23 and 22:39 +01:00 |
+| Models | one per Vendor, listed under [Vendor coverage](#vendor-coverage) |
+| Date | 2026-08-27, 19:23 to 22:47 +01:00 |
 
 Three runs per Vendor, one per tool class, so the counts cannot be confused with
 each other. No TTY on either side. The supervisor owned stdin.
 
-The gate counts below are from the Ollama capture. The llama-swap capture gives
+The gate counts below are from the Ollama capture. LM Studio and llama-swap give
 the same three verdicts — see [Vendor coverage](#vendor-coverage).
 
 ## Gate 1 — a tool call completes on the Host over SSH: PASS
@@ -101,7 +101,7 @@ Harness defect, and the Harness recovered from it inside one turn.
 
 ## The ACP method set
 
-Recorded, not gated. Counts across all three runs.
+Recorded, not gated. Counts across the Ollama capture's three runs.
 
 | direction | method | n |
 | --- | --- | --- |
@@ -130,7 +130,7 @@ two directions:
 `terminal/*` was never used: the client advertised `terminal: false` and OpenCode
 ran `bash` in-process.
 
-Agent capabilities, identical in all three runs:
+Agent capabilities, identical in every run against every Vendor:
 
 ```json
 {"loadSession": true,
@@ -165,19 +165,19 @@ in the user's global config stays visible and reachable from inside it.
 
 ## Vendor coverage
 
-Recorded, not gated. All three Vendors were driven to a tool call.
+Recorded, not gated. All three Vendors were driven to a tool call, and all three
+pass all three gates.
 
-| Vendor | gates | bytes |
-| --- | --- | --- |
-| Ollama, `127.0.0.1:11434` | 1, 2, 3 pass | frozen in `7db708f` |
-| llama-swap, `127.0.0.1:8080` | 1, 2, 3 pass | frozen in `f25cb06`, the current tree |
-| LM Studio, `127.0.0.1:1234` | reported as passing | **not frozen — overwritten** |
+| Vendor | Model | started / ended / asked | gates |
+| --- | --- | --- | --- |
+| Ollama | `qwen3.5:9b` | `edit` 1/1/1, `execute` 1/1/1, `read` 2/2/0 | pass |
+| LM Studio | `qwen/qwen3.5-9b` | `edit` 1/1/1, `execute` 1/1/1, `read` 1/1/0 | pass |
+| llama-swap | `qwen3.5-9b` | `edit` 1/1/1, `execute` 1/1/1, `read` 1/1/0 | pass |
 
-llama-swap counts: `edit` 1/1/1, `execute` 1/1/1, `read` 1/1/0. Same shape as
-Ollama, `read` silent again.
+Same shape every time, and `read` silent every time.
 
-**The Event vocabulary is Vendor-independent**, across the two Vendors whose
-bytes survive. Compared frame by frame, Ollama and llama-swap agree exactly:
+**The Event vocabulary is Vendor-independent.** Compared frame by frame, all
+three agree exactly:
 
 ```
 methods        fs/write_text_file, initialize, session/close, session/new,
@@ -193,17 +193,17 @@ read there failed on a model error. It is a difference in what happened, not in
 the vocabulary. This is the property Pi was proven to have, so the Event model
 can keep Vendor identity in metadata.
 
-**The LM Studio bytes were lost.** The capture script writes every run into the
-same landing directory, so the LM Studio run overwrote the Ollama one and was
-then overwritten by llama-swap before anything was committed. No frames, no
-manifest and no `gates.json` survive for it. That run passing is a report, not
-evidence, and it is written here as one.
+**Each run used to overwrite the last.** Every capture landed in one directory,
+so LM Studio overwrote Ollama and llama-swap overwrote LM Studio, and the first
+LM Studio run was gone before anyone noticed. Ollama was recovered from
+`7db708f`, LM Studio was re-run and recovered from the Host, and the script now
+lands under `captures/opencode/<vendor>/`. `lmstudio/` is missing the two files
+the Client writes — see the capture README.
 
 ## What this capture does not establish
 
 Named here so the answer on #16 cannot quietly overclaim.
 
-- **LM Studio is unevidenced.** Two of three Vendors have frozen bytes.
 - **One Model per Vendor.**
 - **One run per class.** Counts are 1, 1 and 2. This does not match the 12/12
   rigour that produced the Hermes findings, and a silent class could still be
