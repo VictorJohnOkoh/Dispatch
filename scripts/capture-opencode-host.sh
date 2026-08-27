@@ -142,8 +142,9 @@ SSH_BASE=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-
           -o ControlMaster=no -o ControlPath=none)
 
 SSH_ERR_FILE="${TMPDIR:-/tmp}/opencode-host-ssh-err.$$"
+SCP_ERR_FILE="${TMPDIR:-/tmp}/opencode-host-scp-err.$$"
 _TOP_PID=$$
-trap 'rm -f "$SSH_ERR_FILE"' EXIT
+trap 'rm -f "$SSH_ERR_FILE" "$SCP_ERR_FILE"' EXIT
 
 # rsh CMD — run CMD on the Host, print its stdout, return its exit code.
 #
@@ -175,6 +176,21 @@ rsh_live() {
   fi
   return $rc
 }
+
+# rcp DEST SRC... — copy to the Host, with DEST RELATIVE to the Host's home.
+#
+# Never hand scp the absolute path `pwd` returns on the Host. Git Bash answers
+# /c/Users/Victor/..., scp on OpenSSH 9+ speaks SFTP, and sftp-server.exe knows
+# C:/Users/Victor/... and nothing about an MSYS path. The copy fails, and a
+# silent failure here surfaces much later as the Harness being unspawnable —
+# a transport error scored as gate 1, which ADR 0003 calls fatal.
+rcp() {
+  local dest="$1"; shift
+  "$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
+    "$@" "$HOST_USER@$HOST_ADDR:$dest" 2>"$SCP_ERR_FILE"
+}
+
+scp_said() { tr '\n' ' ' < "$SCP_ERR_FILE" 2>/dev/null | head -c 300; }
 
 _ssh_died() {
   printf '\n'
@@ -463,7 +479,7 @@ mf "Session working directory: $REMOTE_WORK"
 # Harness ask. If the Harness is not asking for everything, gate 2 measures the
 # config rather than the Harness.
 STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"; rm -f "$SSH_ERR_FILE"' EXIT
+trap 'rm -rf "$STAGE"; rm -f "$SSH_ERR_FILE" "$SCP_ERR_FILE"' EXIT
 
 cat > "$STAGE/opencode.json" <<EOF
 {
@@ -494,13 +510,37 @@ EOF
 # obvious and cannot be a hallucination that happens to look right.
 printf 'pomegranate\n' > "$STAGE/notes.txt"
 
-"$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
-  "$STAGE/opencode.json" "$STAGE/notes.txt" \
-  "$HOST_USER@$HOST_ADDR:$REMOTE_WORK/" && say "config and fixture copied"
-"$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
-  "$REPO_ROOT/scripts/acp-capture.py" \
-  "$REPO_ROOT/scripts/resolve-harness-exe.py" \
-  "$HOST_USER@$HOST_ADDR:$REMOTE_ABS/" && say "acp-capture.py copied, unchanged"
+if rcp "$REMOTE_DIR/work/" "$STAGE/opencode.json" "$STAGE/notes.txt"; then
+  say "config and fixture copied"
+else
+  fail "could not copy the config and fixture to the Host" \
+    "scp said:" "  $(scp_said)" \
+    "Stopping here. Everything below assumes these files arrived."
+  exit 1
+fi
+if rcp "$REMOTE_DIR/" "$REPO_ROOT/scripts/acp-capture.py" \
+                      "$REPO_ROOT/scripts/resolve-harness-exe.py"; then
+  say "acp-capture.py copied, unchanged"
+else
+  fail "could not copy the capture scripts to the Host" \
+    "scp said:" "  $(scp_said)" \
+    "Stopping here. Without them the Host has nothing to run."
+  exit 1
+fi
+
+# Ask the Host what arrived rather than trusting scp's exit code. This is the
+# check that would have caught the run where work/ stayed empty and the script
+# went on to report the Harness as unspawnable.
+STAGED=$(rsh "cd $REMOTE_DIR && ls acp-capture.py resolve-harness-exe.py work/opencode.json work/notes.txt 2>/dev/null | wc -l" | tr -d '\r ')
+if [[ "$STAGED" == "4" ]]; then
+  pass "all 4 staged files are on the Host"
+else
+  fail "only ${STAGED:-0} of 4 staged files are on the Host" \
+    "scp reported success and the files are not there, so the remote path is" \
+    "wrong rather than the transfer. Look at what arrived:" \
+    "  $SSH_BIN -i $KEY -p $SSH_PORT $HOST_USER@$HOST_ADDR 'ls -la $REMOTE_DIR $REMOTE_DIR/work'"
+  exit 1
+fi
 
 cp "$STAGE/opencode.json" "$LANDING/session-opencode.json"
 
@@ -510,7 +550,7 @@ cp "$STAGE/opencode.json" "$LANDING/session-opencode.json"
 # is a shim that CreateProcess cannot run, so `command -v opencode` passes and
 # the spawn still fails. Settle it by spawning, not by asking.
 head2 "Resolve the Harness the way a supervisor would"
-rsh "cd $REMOTE_ABS && python resolve-harness-exe.py opencode 2>&1" \
+rsh "cd $REMOTE_DIR && python resolve-harness-exe.py opencode 2>&1" \
   > "$LANDING/harness-resolution.json"
 HARNESS_EXE=$(python - "$LANDING/harness-resolution.json" <<'PY'
 import json, sys
@@ -518,7 +558,9 @@ try:
     with open(sys.argv[1], encoding="utf-8") as fh:
         print(json.load(fh).get("chosen_spawn") or "")
 except Exception:
-    print("")
+    # Not JSON at all. The resolver did not run, which is a different claim
+    # from the Harness being unspawnable, and only one of them is a gate.
+    print("!did-not-run")
 PY
 )
 SHELL_ONLY=$(python - "$LANDING/harness-resolution.json" <<'PY'
@@ -531,6 +573,18 @@ except Exception:
 PY
 )
 
+if [[ "$HARNESS_EXE" == "!did-not-run" ]]; then
+  fail "the resolver did not run on the Host, so gate 1 was not measured" \
+    "This is NOT the Harness failing to spawn. resolve-harness-exe.py printed" \
+    "something that is not JSON, so it never got as far as trying." \
+    "The Host said:" \
+    "  $(head -3 "$LANDING/harness-resolution.json" | tr '\n' ' ' | head -c 300)" \
+    "Usual causes: the file never arrived, or the Host's python is broken." \
+    "Nothing is concluded about OpenCode. Gate 1 stays unanswered."
+  mf "Harness resolution: NOT MEASURED — the resolver did not run"
+  printf '\n'
+  exit 1
+fi
 if [[ -z "$HARNESS_EXE" ]]; then
   fail "nothing named opencode could be spawned on the Host" \
     "It is on the PATH and it will not start under a supervisor. That is gate 1" \
@@ -579,10 +633,15 @@ printf '\n'
 run_capture() {
   local label="$1" prompt="$2" rc=0
   printf '  %s%s%s  %s\n' "$BOLD" "$label" "$RESET" "$prompt"
-  rsh_live "cd $REMOTE_WORK && python $REMOTE_ABS/acp-capture.py \
+  # Relative paths, because acp-capture.py is native Python and $REMOTE_WORK is
+  # what Git Bash's pwd returns. Windows Python reads /c/Users/... as C:\c\Users
+  # and would run the Session in an empty directory it had just created, with no
+  # notes.txt and no opencode.json. Gate 2 would then measure the config rather
+  # than the Harness, and gate 3 would count a Session that read nothing.
+  rsh_live "cd $REMOTE_DIR/work && python ../acp-capture.py \
     --agent-cmd '$HARNESS_EXE acp' \
-    --cwd '$REMOTE_WORK' \
-    --outdir '$REMOTE_ABS/out' \
+    --cwd . \
+    --outdir ../out \
     --label '$label' \
     --permission allow \
     --timeout 300 \
@@ -608,10 +667,22 @@ run_capture "execute" \
 
 head2 "Bring the capture home"
 
-"$SCP_BIN" -q "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
-  "$HOST_USER@$HOST_ADDR:$REMOTE_ABS/out/*" "$LANDING/" 2>/dev/null \
-  && say "artefacts copied to $LANDING" \
-  || warn "nothing came back from $REMOTE_ABS/out — the runs produced no files"
+# -r on the directory rather than a remote glob: SFTP-mode scp expands globs
+# unevenly across builds, and the directory is there if any run started.
+if "$SCP_BIN" -q -r "${SSH_BASE[@]}" -i "$KEY" -P "$SSH_PORT" \
+     "$HOST_USER@$HOST_ADDR:$REMOTE_DIR/out" "$LANDING/" 2>"$SCP_ERR_FILE"; then
+  # opencode-gates.py globs $LANDING itself, so flatten the copied directory.
+  if [[ -d "$LANDING/out" ]]; then
+    mv "$LANDING/out/"* "$LANDING/" 2>/dev/null
+    rmdir "$LANDING/out" 2>/dev/null
+  fi
+  say "artefacts copied to $LANDING"
+else
+  warn "could not copy $REMOTE_DIR/out back from the Host"
+  note "  scp said: $(scp_said)"
+  note "  That is a transport failure, not a result. The frames may still be"
+  note "  on the Host at $REMOTE_ABS/out."
+fi
 
 # What the Session actually did on disk, which the frames alone cannot show.
 rsh "ls -la $REMOTE_WORK 2>&1; echo '--- out.txt ---'; cat $REMOTE_WORK/out.txt 2>&1" \
