@@ -38,10 +38,10 @@
       "stop_reason": "end_turn",
       "agent_exit_code": 0,
       "tool_calls_started": {
-        "read": 2
+        "read": 1
       },
       "tool_calls_terminal": {
-        "read": 2
+        "read": 1
       },
       "permission_requests": {},
       "permission_requests_without_kind": 0,
@@ -52,12 +52,12 @@
     "tool_calls_started": {
       "edit": 1,
       "execute": 1,
-      "read": 2
+      "read": 1
     },
     "tool_calls_terminal": {
       "edit": 1,
       "execute": 1,
-      "read": 2
+      "read": 1
     },
     "permission_requests": {
       "edit": 1,
@@ -67,7 +67,7 @@
   "gates": {
     "gate1_tool_call_on_host": {
       "verdict": "pass",
-      "note": "Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin; Vendor ollama, Model qwen3.5:9b"
+      "note": "Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin; Vendor llamaswap, Model qwen3.5-9b"
     },
     "gate2_permission_per_class": {
       "verdict": "pass",

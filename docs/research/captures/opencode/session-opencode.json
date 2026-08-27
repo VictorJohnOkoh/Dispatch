@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "capstone/qwen3.5:9b",
+  "model": "capstone/qwen3.5-9b",
   "permission": {
     "edit": "ask",
     "bash": "ask",
@@ -8,14 +8,14 @@
   },
   "provider": {
     "capstone": {
-      "name": "Capstone Vendor (ollama)",
+      "name": "Capstone Vendor (llamaswap)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://127.0.0.1:11434/v1",
+        "baseURL": "http://127.0.0.1:8080/v1",
         "apiKey": "not-required-for-a-local-vendor"
       },
       "models": {
-        "qwen3.5:9b": { "name": "qwen3.5:9b" }
+        "qwen3.5-9b": { "name": "qwen3.5-9b" }
       }
     }
   }
