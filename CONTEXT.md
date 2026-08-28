@@ -69,7 +69,7 @@ One normalised, typed thing that happened inside a Session — an assistant mess
 _Avoid_: message, chunk, token, log line
 
 **Event Kind**:
-The type of one Event, from a closed set of thirteen. Written by the Harness adapter: `Reasoning`, `AssistantMessage`, `ToolCallRequested`, `ToolCallEnded`, `PromptCompleted`. Written by the Daemon: `SessionStarted`, `PromptSubmitted`, `ApprovalRequested`, `ApprovalDecided`, `Error`, `SessionEnded`, `HubDetached`, `HubAttached`. A Kind exists when at least two of Pi, OpenCode and passthrough produce the fact and the Client draws it.
+The type of one Event, from a closed set of fourteen. Written by the Harness adapter: `Reasoning`, `AssistantMessage`, `ToolCallRequested`, `ToolCallEnded`, `PromptCompleted`. Written by the Daemon: `SessionStarted`, `ApprovalPolicySet`, `PromptSubmitted`, `ApprovalRequested`, `ApprovalDecided`, `Error`, `SessionEnded`, `HubDetached`, `HubAttached`. A Kind exists when at least two of Pi, OpenCode and passthrough produce the fact and the Client draws it, or when it records a Daemon decision that changes how a Session behaves.
 _Avoid_: event type, message type, tag
 
 **Envelope**:
@@ -99,5 +99,5 @@ The directory on a Host outside which no Session may operate. Configured per Hos
 _Avoid_: sandbox, jail, base path
 
 **Approval Policy**:
-The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused.
+The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused. One decision per `toolKind`, so five slots that are always all set. Chosen when the Session starts and changeable while it runs, so answering an approval with "always allow" flips one slot. Every value it ever holds is an `ApprovalPolicySet` Event. A passthrough Session has no tools and so has no Approval Policy.
 _Avoid_: permissions, confirmation mode, safety setting

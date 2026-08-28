@@ -1,8 +1,8 @@
-# Thirteen Event kinds, a per-Daemon sequence number, and text that streams as Deltas the log never keeps
+# Fourteen Event kinds, a per-Daemon sequence number, and text that streams as Deltas the log never keeps
 
 Every Harness writes its own vocabulary, and the Client renders only Events, so something has to
 translate. That translation could have been thin, keeping a `raw` field on every Event so nothing was
-ever lost. Instead the adapter translates into a closed set of thirteen kinds and drops the rest, and
+ever lost. Instead the adapter translates into a closed set of fourteen kinds and drops the rest, and
 the raw bytes go to a file beside the Session rather than into the log. We chose this because an
 Event kind is a thing the Client draws, and a field nothing draws is a field nobody maintains.
 
@@ -70,14 +70,15 @@ There is no `harness` field and no `host` field. The Harness is fixed for the li
 is named once in `SessionStarted`. There is no `v` field either, for the reason in
 [Compatibility](#compatibility).
 
-## The thirteen kinds
+## The fourteen kinds
 
 `written by` matters. Some Events describe the Harness, some describe what the Daemon decided, and
 two describe the Daemon's observer.
 
 | kind | written by | payload | appendable |
 | --- | --- | --- | --- |
-| `SessionStarted` | Daemon | harness, model, vendor, cwd, approvalPolicy | no |
+| `SessionStarted` | Daemon | harness, model, vendor, cwd | no |
+| `ApprovalPolicySet` | Daemon | one decision per toolKind, setBy | no |
 | `PromptSubmitted` | Daemon | text | no |
 | `Reasoning` | adapter | text, complete | **yes** |
 | `AssistantMessage` | adapter | text, complete | **yes** |
@@ -99,9 +100,10 @@ gap between them is the whole feature. **`ToolCallStarted` is deleted.** Neither
 it honestly, since both announce a start before the gate resolves, so the kind would carry a claim
 the bytes do not support.
 
-Four kinds are new. `PromptSubmitted` because a fold without the user's own words replays answers to
+Five kinds are new. `PromptSubmitted` because a fold without the user's own words replays answers to
 questions nobody asked. `Reasoning` for the reason below. `PromptCompleted` because `stopReason` and
 `usage` need somewhere to land and every Harness produces both exactly once per prompt.
+`ApprovalPolicySet` because the policy changes mid-Session and the fold has to see it change.
 `HubDetached` and `HubAttached` come from ADR 0004, and they are the first Events with no Harness
 origin at all.
 
@@ -225,10 +227,52 @@ The three awkward cases:
 | The Daemon restarts | The Harness child died with it, so the call can never run. On boot the Daemon writes `ApprovalDecided{refused, by: daemon_restart}`, then `ToolCallEnded{refused}`, then `SessionEnded{lost}`. |
 | The user never answers | It waits, with no timeout, forever. |
 
-Waiting forever is deliberate. A timeout that allows is a gate that opens when nobody is watching. A
-timeout that refuses throws away work the user may have wanted, on a Session they may have walked
-away from for ten minutes. The Session is visibly stuck in the Client, and stopping it is one click,
-which produces `ApprovalDecided{refused, by: session_stopped}`.
+Waiting forever is deliberate, and it is not the same as making the user answer everything. The next
+section is how they stop being asked. A pending question is one the user chose to be asked, so a
+timer on it would open a gate when nobody is watching, or throw away work over a coffee break. The
+Session is visibly stuck in the Client, and stopping it is one click, which produces
+`ApprovalDecided{refused, by: session_stopped}`.
+
+## Answering once for the whole Session
+
+Nobody wants to sit and allow every edit. Three answers exist, and the Event model has to carry all
+three, because a Session's fold must say what may run without asking.
+
+**The Approval Policy is one decision per `toolKind`, not one per Session.** A fixed array of five,
+always fully populated, each slot `auto`, `wait` or `refuse`. This is the granularity the Harnesses
+ask at: OpenCode's `session/request_permission` carries `toolCall.kind`, so the Daemon can already
+answer by class without inspecting anything. So the three answers are one mechanism at three
+settings:
+
+| the user wants | the policy |
+| --- | --- |
+| Never be asked | every slot `auto`, chosen when the Session starts |
+| Be asked about edits and commands, not reads | `edit` and `execute` on `wait`, the rest `auto` |
+| Stop being asked about edits, from now on | flip the `edit` slot to `auto` while the Session runs |
+
+**Every change to that array is an `ApprovalPolicySet` Event.** This is the standing rule about
+Daemon decisions, applied to the decision that matters most. Without the Event, a Session that was
+asking about edits at 10:00 and running them silently at 10:05 has a log that cannot explain the
+difference, and a Client that reconnects cannot tell the user what is currently unguarded.
+
+The third row is the one the user reaches for mid-Session, and it is two Events, not one. Answering
+an approval with **always allow** writes `ApprovalDecided{allowed, by: user}` for the call in hand,
+then `ApprovalPolicySet` with the `edit` slot flipped. The decision and the policy change are
+separate facts, so the log never has to guess which one a single Event meant.
+
+`ApprovalPolicySet` is written once immediately after `SessionStarted`, which is why
+`SessionStarted` no longer carries the policy itself. The fold then reads the policy from exactly
+one place: the last `ApprovalPolicySet`. Two places would need a precedence rule, and a precedence
+rule about what may run is a rule that will eventually be got wrong.
+
+Two consequences worth naming. This gives **always refuse** for free, which OpenCode's own option
+set does not offer, because a standing refusal is the same slot set to `refuse` and ADR 0003 already
+requires the Daemon to hold it. And the `read` slot is unenforceable on OpenCode, which never asks
+about reads, so the Client must show that slot as ungated rather than as whatever the array says.
+ADR 0003 priced this already; the array must not be allowed to imply a gate that is not there.
+
+A passthrough Session has no tools, so it has no Approval Policy and no `ApprovalPolicySet`. That is
+an absence, not an empty value.
 
 ## Errors and endings
 
@@ -303,6 +347,7 @@ Session state is derivable from its Events, with one exception.
 | Is it waiting on me | An `ApprovalRequested` has no `ApprovalDecided` |
 | Is it working | A `PromptSubmitted` has no `PromptCompleted` |
 | Which Model and Vendor | `SessionStarted` |
+| What may run without asking | The last `ApprovalPolicySet` |
 | Tokens used | Sum the `PromptCompleted` payloads |
 | What did I miss while offline | Between `HubDetached` and `HubAttached` |
 
@@ -314,8 +359,9 @@ Keeping the fold honest needs one standing rule:
 
 > Any Daemon decision that changes how a Session behaves is itself an Event.
 
-The Approval Policy is the live test. If #9 lets it change mid-Session, that change is an Event, or
-`SessionStarted` alone stops describing the Session and the fold quietly lies.
+The Approval Policy was the live test, and it is settled above: it changes mid-Session, so it is an
+Event. Anything #9 adds that behaves the same way, such as a change of Model or of working
+directory, needs the same treatment or `SessionStarted` alone stops describing the Session.
 
 ## Compatibility
 
@@ -336,9 +382,9 @@ program's own history, which is exactly the case append-only semantics handle.
 ## Passthrough
 
 A passthrough Session produces `SessionStarted`, `PromptSubmitted`, `Reasoning`,
-`AssistantMessage`, `PromptCompleted`, `Error`, `SessionEnded`, and the two Hub Events. Seven of
-thirteen, a strict subset, with no kind bent to fit and no field left permanently empty that an agent
-Session fills.
+`AssistantMessage`, `PromptCompleted`, `Error`, `SessionEnded`, and the two Hub Events. Nine of
+fourteen, a strict subset, with no kind bent to fit and no field left permanently empty that an agent
+Session fills. The five it never writes are the five about tools, which it does not have.
 
 The ticket set a fair test: if passthrough feels forced, the abstraction is wrong. It does not. The
 one thing that could have forced it was reasoning, since a passthrough Session with reasoning folded
@@ -362,8 +408,14 @@ its own kind removes the problem from both Session types at once.
   counter, and two counters that must agree will disagree.
 - **`read` and `edit` marked fire-and-forget by kind.** Fixes the Hermes hang with no synthesis.
   Rejected: it writes one Harness's defect into the model's shape, and OpenCode completes both kinds.
-- **Approval timeout that allows.** Rejected: a gate that opens when nobody is watching.
+- **Approval timeout that allows.** Rejected: a gate that opens when nobody is watching, and an
+  `auto` slot in the Approval Policy is the honest way to not be asked.
 - **Approval timeout that refuses.** Rejected: it throws away work over a coffee break.
+- **One Approval Policy per Session rather than per `toolKind`.** One value to hold and to render.
+  Rejected: the only way to stop being asked about edits is then to stop being asked about shell
+  commands too, and OpenCode's request already carries the class the Daemon would need to do better.
+- **The policy on `SessionStarted`, with changes folded into it.** One fewer kind. Rejected: the fold
+  then reads the policy from two places and needs a precedence rule about what may run unattended.
 
 ## Consequences
 
@@ -380,19 +432,24 @@ its own kind removes the problem from both Session types at once.
   `ApprovalDecided{daemon_restart}` then `ToolCallEnded` then `SessionEnded{lost}`, and the rule that
   any Daemon decision changing Session behaviour is an Event. Its `daemon_started` follows
   `HubDetached`'s shape: written by the Daemon about itself, into each Session's log.
+- #9 also inherits an Approval Policy that is five slots rather than one value, and that changes
+  while a Session runs. It still owns the defaults, who may change them, and whether a Host config
+  can pin a slot the user cannot loosen. What it no longer owns is whether the change is an Event.
 - [#8](https://github.com/VictorJohnOkoh/Capstone/issues/8) owns mapping three reasoning field names
   onto one `Reasoning` Event, and three error bodies onto `Error{vendor_error}`, including Ollama's
   unframed JSON and LM Studio's bare string under HTTP 200.
-- [#11](https://github.com/VictorJohnOkoh/Capstone/issues/11) renders thirteen kinds, applies Deltas
+- [#11](https://github.com/VictorJohnOkoh/Capstone/issues/11) renders fourteen kinds, applies Deltas
   by `N`, draws `complete: false` as a torn message, draws `ToolCallEnded{unknown}` as "no result
-  reported", and never draws a tool call as running before its `ApprovalDecided`.
+  reported", and never draws a tool call as running before its `ApprovalDecided`. Its approval prompt
+  offers allow, always allow and refuse, and it shows the five policy slots somewhere the user can
+  see what is currently ungated, with `read` on OpenCode marked as ungated whatever the slot says.
 - The Daemon writes a raw transcript per Session beside the Event log, and that file needs its own
   rotation and retention. It is not covered by #10's log retention.
 - Pi's streaming tool output does not reach the Client in v1.
 - The Client cannot show cost, on any Harness. Local Vendors report zero, so nothing is lost yet, and
   a remote Vendor would make this the first thing the rule promotes.
-- `CONTEXT.md` gains **Delta**, **Sequence Number**, **Tool Call** and **Prompt**, and the thirteen
-  kinds are listed under **Event**.
+- `CONTEXT.md` gains **Delta**, **Sequence Number**, **Tool Call** and **Prompt**, the fourteen kinds
+  are listed under **Event Kind**, and **Approval Policy** becomes five slots that change by Event.
 
 This does not reopen ADR 0004. `HubDetached` and `HubAttached` are kinds here under the names ADR 0004
 gave them. It does not reopen ADR 0003 either: the terminal Event rule that ADR named is the synthesis
