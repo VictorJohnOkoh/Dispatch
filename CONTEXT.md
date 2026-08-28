@@ -65,8 +65,32 @@ One run of one Harness against one Model on one Host. The unit whose lifecycle a
 _Avoid_: conversation, chat, instance, job
 
 **Event**:
-One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history.
+One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. Native output that no Event Kind covers is dropped, and the Harness's raw bytes are kept in a per-Session transcript file beside the log. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history, and a Session's whole state is derivable by folding it.
 _Avoid_: message, chunk, token, log line
+
+**Event Kind**:
+The type of one Event, from a closed set of fourteen. Written by the Harness adapter: `Reasoning`, `AssistantMessage`, `ToolCallRequested`, `ToolCallEnded`, `PromptCompleted`. Written by the Daemon: `SessionStarted`, `ApprovalPolicySet`, `PromptSubmitted`, `ApprovalRequested`, `ApprovalDecided`, `Error`, `SessionEnded`, `HubDetached`, `HubAttached`. A Kind exists when at least two of Pi, OpenCode and passthrough produce the fact and the Client draws it, or when it records a Daemon decision that changes how a Session behaves.
+_Avoid_: event type, message type, tag
+
+**Envelope**:
+The five fields every Event carries whatever its Kind: Sequence Number, Session id, the Daemon's timestamp, Kind, and the Kind's payload. There is no Harness field, no Host field and no version field.
+_Avoid_: header, metadata, wrapper
+
+**Sequence Number**:
+The Daemon-wide counter that orders every Event on one Host. Starts at 1, never skips, and is both the Event log's primary key and the `Last-Event-ID` offset. Unique inside one Daemon and nowhere else, so the Hub tracks one per Host.
+_Avoid_: offset, index, event id, cursor
+
+**Delta**:
+A frame on the Event stream that adds text to an `AssistantMessage` or `Reasoning` Event the log already holds. Never stored, never given a Sequence Number, and never carrying information its Event will not eventually hold. The final Delta of an Event carries the whole text and replaces rather than appends, so a Client that dropped one repairs itself.
+_Avoid_: chunk, token, partial, streaming event
+
+**Prompt**:
+One submission from the user and all the work a Session does because of it. Bounded by a `PromptSubmitted` Event and a `PromptCompleted` Event, which carries the stop reason and the token usage.
+_Avoid_: turn, request, query, exchange
+
+**Tool Call**:
+One attempt by a Harness to run one tool, identified by a tool call id that correlates a `ToolCallRequested` Event with its `ToolCallEnded`. Every Tool Call ends: when a Harness reports no result, the Daemon writes `ToolCallEnded` with outcome `unknown` as the Prompt completes. `toolKind` is one of `read`, `edit`, `execute`, `fetch`, `other`.
+_Avoid_: tool use, function call, action, invocation
 
 ### Containment
 
@@ -75,5 +99,5 @@ The directory on a Host outside which no Session may operate. Configured per Hos
 _Avoid_: sandbox, jail, base path
 
 **Approval Policy**:
-The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused.
+The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused. One decision per `toolKind`, so five slots that are always all set. Chosen when the Session starts and changeable while it runs, so answering an approval with "always allow" flips one slot. Every value it ever holds is an `ApprovalPolicySet` Event. A passthrough Session has no tools and so has no Approval Policy.
 _Avoid_: permissions, confirmation mode, safety setting
