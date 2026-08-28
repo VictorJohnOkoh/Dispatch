@@ -17,7 +17,10 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   └── 0001-resident-daemon-on-host.md
+│   ├── 0001-resident-daemon-on-host.md
+│   ├── 0002-llama-swap-is-the-llama-cpp-vendor.md
+│   ├── 0003-opencode-replaces-hermes-as-the-second-harness.md
+│   └── 0004-host-state-is-connection-liveness.md
 └── scripts/
 ```
 
