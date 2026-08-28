@@ -9,6 +9,12 @@
 #
 #   bash scripts/capture-opencode-host.sh --check    preflight only, changes nothing
 #   bash scripts/capture-opencode-host.sh            preflight, then the real run
+#   bash scripts/capture-opencode-host.sh --vendor llamaswap    that Vendor or nothing
+#
+# --vendor names the Vendor the run must use. If it is not serving, the run stops.
+# A capture filed under the Vendor it asked for rather than the one that answered
+# is worse than no capture, because nothing downstream can tell the difference.
+# Without --vendor the first Vendor that answers is used, and the manifest says so.
 #
 # Read docs/research/remote-host-prerequisites.md first and do it at the Host.
 # Prerequisite 3 (Git Bash as the SSH default shell) is required here, because
@@ -355,11 +361,19 @@ say "All three are probed and all three results are recorded. A Vendor that is"
 say "not running is an observation, not a crash."
 printf '\n'
 
+# One list. The probe reads it and so does --vendor, so a name that is valid in
+# one place cannot be unknown in the other.
+VENDOR_PROBES=(
+  "ollama|http://127.0.0.1:11434|/api/tags"
+  "lmstudio|http://127.0.0.1:1234|/api/v1/models"
+  "llamaswap|http://127.0.0.1:8080|/v1/models"
+)
+ALL_KINDS=()
+for v in "${VENDOR_PROBES[@]}"; do IFS='|' read -r vk _ _ <<< "$v"; ALL_KINDS+=("$vk"); done
+
 FOUND_KINDS=()
 FOUND_URLS=()
-for v in "ollama|http://127.0.0.1:11434|/api/tags" \
-         "lmstudio|http://127.0.0.1:1234|/api/v1/models" \
-         "llamaswap|http://127.0.0.1:8080|/v1/models"; do
+for v in "${VENDOR_PROBES[@]}"; do
   IFS='|' read -r vk vu vp <<< "$v"
   code=$(rsh "curl -sS -m 5 -o /dev/null -w '%{http_code}' $vu$vp" 2>/dev/null | tr -d '\r')
   if [[ "$code" == *200* ]]; then
@@ -383,17 +397,37 @@ fi
 
 # Reaching all three Vendors is recorded, not gated (ADR 0003), so one is picked
 # for the run and the rest are noted. Re-run with --vendor to cover another.
+# Cleared before the probe decides, because $CONF carries the last run's Vendor
+# and a stale name must not outlive a Host that stopped serving it.
+VENDOR_KIND=""
 if (( ${#FOUND_KINDS[@]} > 0 )); then
-  VENDOR_KIND=""
   if [[ -n "$VENDOR_PICK" ]]; then
     for i in "${!FOUND_KINDS[@]}"; do
       [[ "${FOUND_KINDS[$i]}" == "$VENDOR_PICK" ]] && { VENDOR_KIND="$VENDOR_PICK"; VENDOR_URL="${FOUND_URLS[$i]}"; }
     done
-    [[ -z "$VENDOR_KIND" ]] && warn "--vendor $VENDOR_PICK is not serving; falling back to the first that is"
-  fi
-  if [[ -z "$VENDOR_KIND" ]]; then
+    # An asked-for Vendor that is not serving stops the run. This used to warn
+    # and fall back, and the capture then landed under the name that had been
+    # asked for: captures/opencode/llamaswap/ held the LM Studio run for a day
+    # that way, and a Vendor coverage claim rested on it. A warning in a
+    # scrolling log is not a label on an artefact.
+    if [[ -z "$VENDOR_KIND" ]]; then
+      if printf '%s\n' "${ALL_KINDS[@]}" | grep -qx "$VENDOR_PICK"; then
+        fail "--vendor $VENDOR_PICK is not serving on the Host" \
+          "Start it on the Host, or drop --vendor to use whichever answers." \
+          "Serving now: ${FOUND_KINDS[*]}"
+      else
+        fail "--vendor $VENDOR_PICK is not a Vendor this script probes" \
+          "Known: ${ALL_KINDS[*]}"
+      fi
+    fi
+  else
     VENDOR_KIND="${FOUND_KINDS[0]}"; VENDOR_URL="${FOUND_URLS[0]}"
   fi
+fi
+
+# Skipped when --vendor named a Vendor that is not serving. The preflight gate
+# below reports it and exits, rather than probing a Vendor nobody chose.
+if [[ -n "$VENDOR_KIND" ]]; then
   say "Using $VENDOR_KIND at $VENDOR_URL"
   if (( ${#FOUND_KINDS[@]} > 1 )); then
     note "  others serving: ${FOUND_KINDS[*]} — re-run with --vendor <kind> to cover them"
