@@ -60,6 +60,14 @@ _Avoid_: LLM, checkpoint
 A program that turns a Model into an agent — running the tool-calling loop, managing context, and deciding what to do next. OpenCode and Pi are Harnesses. Sending a prompt straight to a Vendor with no agency is modelled as a passthrough Harness, not as a separate path.
 _Avoid_: agent, framework, scaffold, runner
 
+**Harness Adapter**:
+The code that speaks one Harness's protocol and turns what it says into Events. It writes the five Kinds a Harness is the authority on, answers the Harness when it blocks on a question, and chooses the arguments the Harness is launched with. It does not own the process: the Daemon spawns it, holds its stdin, drains its stderr and kills it. An Adapter may decide what belongs with what, and may never report something that did not happen.
+_Avoid_: driver, plugin, connector, backend, translator
+
+**Gate**:
+A Harness Adapter's ability to hold one Tool Call of a given `toolKind` until the Daemon has decided. Declared per Adapter, not discovered from the Harness, because no Harness reports it. OpenCode has no Gate for `read`, and a passthrough Harness has no Gates at all.
+_Avoid_: hook, interceptor, permission, guard
+
 **Session**:
 One run of one Harness against one Model on one Host. The unit whose lifecycle a Daemon manages, and the unit an Event belongs to.
 _Avoid_: conversation, chat, instance, job
@@ -99,5 +107,5 @@ The directory on a Host outside which no Session may operate. Configured per Hos
 _Avoid_: sandbox, jail, base path
 
 **Approval Policy**:
-The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused. One decision per `toolKind`, so five slots that are always all set. Chosen when the Session starts and changeable while it runs, so answering an approval with "always allow" flips one slot. Every value it ever holds is an `ApprovalPolicySet` Event. A passthrough Session has no tools and so has no Approval Policy.
+The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused. One decision per `toolKind`, so five slots that are always all set. Chosen when the Session starts and changeable while it runs, so answering an approval with "always allow" flips one slot. Every value it ever holds is an `ApprovalPolicySet` Event. A slot with no Gate may only be set to `auto`; setting it to `wait` or `refuse` fails, when the Session starts and on every change while it runs. A passthrough Session has no tools and so has no Approval Policy.
 _Avoid_: permissions, confirmation mode, safety setting
