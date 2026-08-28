@@ -1,4 +1,4 @@
-# The Vendor interface has no Health method, and every capability it reports is three-valued
+# The Vendor Adapter has no Health method, and every capability it reports is three-valued
 
 A Vendor could have answered `Health()` with a struct describing whether it is idle, loading or
 busy, and how much memory it holds. Instead there is no health method at all. A Vendor is reachable
@@ -14,17 +14,31 @@ the interface has no version gate anywhere.
 
 ## What the sources decide
 
-Four facts fix the shape, and one of them corrects the ticket.
+Five facts fix the shape, and one of them corrects the ticket. The research behind three of them is
+[`docs/research/vendor-discovery-apis.md`](../research/vendor-discovery-apis.md), which answered #3.
 
-**llama.cpp has a per-Model catalogue after all.** The ticket says llama.cpp "exposes only
-per-server capability via `/props.chat_template_caps` — there is no per-model catalogue at all",
-which is true of bare `llama-server -m`. ADR 0002 already decided that is not the Vendor. llama-swap
-is, and it answers `GET /v1/models` with every Model in its config, loaded or not. This repo's own
-capture confirms it on the Host: `probe llamacpp http://127.0.0.1:8080/v1/models -> HTTP 200`, in
-`captures/pi-vendors/llamacpp/manifest.txt`, and the same manifest records the other half of the
-same fact, `GET http://127.0.0.1:8080/props -> HTTP 404`, which is the 404 ADR 0002 predicted. So the
-granularity mismatch is not catalogue against no catalogue. All three Vendors list Models. Two of
-them attach capability metadata to the listing and one does not.
+**llama.cpp has a per-Model catalogue, and ADR 0002 is why.** The ticket says llama.cpp "exposes
+only per-server capability via `/props.chat_template_caps` — there is no per-model catalogue at
+all", which is true of bare `llama-server -m`. ADR 0002 already decided that is not the Vendor.
+llama-swap is, and it fronts a configured set of Models that are addressable one at a time. ADR 0002
+says so four ways: llama-swap "can hold several Models resident through its `matrix` config", `ttl`
+"must be `0` on every Model", `GET /running` reports what is loaded, and the per-Model view is
+`GET /upstream/<model>/props`. It answers a bare `/props` with HTTP 404 "because it fronts several
+Models and cannot tell which one is meant", which this repo's capture confirms on the Host:
+`GET http://127.0.0.1:8080/props -> HTTP 404`, in
+`docs/research/captures/pi-vendors/llamacpp/manifest.txt`. A Vendor that can be asked about one
+Model by id has a catalogue. So the granularity mismatch is not catalogue against no catalogue. All
+three Vendors have a Model set, two of them attach capability metadata to it, and one does not.
+
+**Which call returns that set is not established, and this ADR does not guess.**
+`vendor-discovery-apis.md` researched bare `llama-server` and never mentions llama-swap, and ADR 0002
+names `/running`, `/upstream/<model>/props` and `POST /api/models/unload/:model_id` and no listing
+endpoint at all. The same capture records `probe llamacpp http://127.0.0.1:8080/v1/models -> HTTP
+200`, which proves something answers there and says nothing about the body — that manifest's
+`vendor-models.json` was never written, which is finding R8 below. Naming the listing call is
+therefore the first thing the fixtures have to settle, and nothing in the interface waits on the
+answer: the Models are enumerable and their capabilities are `Unknown` until loaded, whichever call
+returns them.
 
 **Reading llama.cpp's capability answer costs a Model load.** `chat_template_caps` lives at
 `/upstream/<model>/props`, and ADR 0002 records that fetching it is what starts a cold Model. Cold
@@ -50,20 +64,22 @@ passthrough was never available and the only open question is where the parser l
 ```go
 package vendor
 
-// Vendor is one program serving Models on this Host's loopback. One value per
-// configured Vendor, made at Daemon start and shared by every Session.
+// Adapter is everything one Vendor contributes. One value per configured Vendor,
+// made at Daemon start and shared by every Session. The Vendor is the program on
+// the Host; this is the code that speaks to it.
 //
 // There is no Health method. A Vendor is reachable exactly when one of these calls
 // returns without error, and the Daemon derives its view from that rather than
 // asking a second time in a second way.
-type Vendor interface {
+type Adapter interface {
 	// Endpoint is fixed for the life of the Daemon. It is what a Harness config is
 	// pointed at and what the passthrough Adapter dials.
 	Endpoint() Endpoint
 
-	// Catalogue lists every Model this Vendor can serve, loaded or not, from one
-	// call. It changes when the user pulls or deletes a Model, so the Daemon caches
-	// it and the Client may show it Stale.
+	// Catalogue lists every Model this Vendor can serve, loaded or not. It changes
+	// when the user pulls or deletes a Model, so the Daemon caches it and the Client
+	// may show it Stale. It is one call on Ollama and LM Studio; on llama-swap it is
+	// the listing, plus Resident, plus one /upstream/<id>/props per resident Model.
 	Catalogue(ctx context.Context) ([]Model, error)
 
 	// Resident reports what is in memory now. It changes constantly, so it is never
@@ -117,19 +133,15 @@ type Model struct {
 
 	Caps Capabilities
 
-	// Context is the Model's trained maximum, and 0 when the Vendor does not say.
-	// It is not what a resident Model was loaded with; that is on Resident, and
-	// showing this one while the other is in force is the lie the picker must not
-	// tell.
-	Context int
+	// TrainedContext is the Model's maximum. Showing it while a Resident instance is
+	// running a smaller LoadedContext is the lie the picker must not tell.
+	TrainedContext int
 
-	// Quant is a label such as "Q4_K_M", empty when the Vendor does not say.
-	// llama-swap never says.
+	// Quant is a label such as "Q4_K_M". llama-swap never reports one.
 	Quant string
 
-	// Bytes is the size on disk, 0 when the Vendor does not say. It is not resident
-	// memory.
-	Bytes int64
+	// DiskBytes is the size of the weights on disk.
+	DiskBytes int64
 }
 
 // Support is a Vendor's answer about one capability. Unknown is an answer and not a
@@ -169,17 +181,25 @@ type Resident struct {
 	// instances of one Model, which the Daemon never causes and must still read.
 	ModelID string
 
-	// Context is what the runner was actually loaded with, 0 when the Vendor does not
-	// say.
-	Context int
+	// LoadedContext is what the runner was actually started with, which is not
+	// TrainedContext.
+	LoadedContext int
 
-	// VRAM is resident bytes on the GPU, 0 when the Vendor does not say. Ollama alone
-	// says, and comparing it against Model.Bytes is how partial CPU offload is seen.
+	// VRAM is resident bytes on the GPU. Ollama alone reports it, and comparing it
+	// against Model.DiskBytes is how partial CPU offload is seen.
 	VRAM int64
 }
 ```
 
-Five methods, and four of them are one HTTP call.
+Every numeric and string field above is 0 or empty when the Vendor does not say, and every
+`Support` field is `Unknown`. The two spellings of "not said" are deliberate. A capability is a
+question with three answers, and `false` would be a claim; a context length of 0 and an empty
+quantisation label are not claims about anything, because no Model has either. So the cheaper
+spelling is used wherever the zero value is already impossible as a real answer.
+
+`Endpoint.Kind` is read in one place: the Daemon reads the Host config and calls the matching
+adapter's constructor. Nothing downstream branches on it, which is why `ReadStream` below does not
+take one.
 
 ## Health is what happens to a call
 
@@ -334,10 +354,18 @@ Five rules, each safe on all three:
 
 1. **A line beginning `:` is ignored.** llama.cpp writes `":\n\n"` as a keep-alive ping when no token
    has been produced for `sse_ping_interval`. It is valid SSE that a line-oriented proxy chokes on.
-2. **A line that is bare JSON with no `data: ` prefix is an error frame.** This is Ollama's
-   mid-stream error and nothing else produces it. The Vendor's own message goes into `Frame.Text`.
-3. **A 200 whose body is an object with an `error` key rather than a completion is an error frame.**
-   This is LM Studio's router miss, `lmstudio-bug-tracker#618`, open since 2025-04-25.
+2. **Any JSON object carrying an `error` key, framed or not, is an error frame.** One rule covers
+   all three error bodies ADR 0005 named. llama.cpp sends a correct
+   `data: {"error": {...}}` — `format_oai_sse(json{{"error", res_json}})` — and is the only Vendor
+   that frames it properly. Ollama writes the same object with no `data: ` prefix at all, from
+   `BaseWriter.writeError`. LM Studio answers a router miss with a bare string under HTTP 200,
+   `lmstudio-bug-tracker#618`, open since 2025-04-25. Reading the key rather than the framing is
+   what makes the three one rule, and llama.cpp's `type` values outside the OpenAI vocabulary
+   (`not_supported_error`, `exceed_context_size_error`) travel in `Frame.Text` with the rest of the
+   Vendor's own words.
+3. **A line with no `data: ` prefix that is not a comment is still read as a frame.** This is the
+   second half of Ollama's defect: the object is unframed, so a reader that requires the prefix
+   never reaches rule 2.
 4. **Reasoning is read from `reasoning` or `reasoning_content`, whichever is present.** The names are
    disjoint and no Vendor sends both, so reading all of them deletes the version matrix that
    declaring one name per Vendor would need — LM Studio moved the field out of `content` in 0.3.23,
@@ -392,7 +420,7 @@ latency, this is what it has to reopen first.
 
 ## Who calls it, and from where
 
-The Daemon, on the Host, over loopback. Nothing else ever holds a `Vendor` value. The Hub sees the
+The Daemon, on the Host, over loopback. Nothing else ever holds an `Adapter` value. The Hub sees the
 results and the Client sees what the Hub merged, which is `CONTEXT.md`'s rule that a Client talks
 only to the Hub, never to a Daemon or a Vendor.
 
@@ -423,7 +451,7 @@ error mid-body, LM Studio's bare string under 200, and llama.cpp's comment ping 
 the cases a hand-written reader gets wrong.
 
 **The fixtures do not exist in this repo yet, and this is the second time that gap has been found.**
-`captures/pi-vendors/README.md` records it: none of the three directories holds a `vendor-models.json`
+`docs/research/captures/pi-vendors/README.md` records it: none of the three directories holds a `vendor-models.json`
 although every manifest reports `HTTP 200` for the fetch, because a native curl was handed an MSYS
 path, returned the body, and wrote nothing. That is finding R8 — a 200 is not proof the artefact
 arrived — and it is why the manifests read `vendor-reported ctx: none` on all three Vendors. So the
@@ -496,12 +524,23 @@ land them: check the file, not the status line.
   response beside the Event stream, carrying a Model catalogue that predates every Session, with one
   answer that may be replayed Stale and one that may not.
 - [#11](https://github.com/VictorJohnOkoh/Capstone/issues/11) draws `Unknown` and `No` differently in
-  the Model picker, or a llama-swap Host shows no usable Models at all. It shows `Model.Context`
-  against `Resident.Context` when they differ, and it renders a catalogue Stale with the time it was
+  the Model picker, or a llama-swap Host shows no usable Models at all. It shows `Model.TrainedContext`
+  against `Resident.LoadedContext` when they differ, and it renders a catalogue Stale with the time it was
   true, which ADR 0004 already asked for.
 - The passthrough Adapter in ADR 0006 becomes a five-way switch over `Frame` with a one-to-one
   mapping onto `Sink`. That is the confirmation ADR 0006 asked for that passthrough is an Adapter
   rather than a path.
+- **A passthrough Session still keeps no raw capture.** ADR 0006 left that call here, on the
+  grounds that a passthrough Session has no Harness and so no transcript. The answer is no.
+  `ReadStream` drops nothing a Frame does not carry, and the one thing a raw body would hold that
+  the Events do not — the Vendor's original error text — already reaches the log, because
+  `FrameError` carries the Vendor's own words into `Error{vendor_error}`. The absence ADR 0006
+  named stays an absence.
+- **`vendor.Capabilities` and `harness.Capabilities` are different types with one name.**
+  ADR 0006's is what a Harness can do and is declared; this one is what a Model can do and is read
+  from the Vendor. They never appear in the same expression and Go qualifies both, so this is a
+  note rather than a rename. `CONTEXT.md` defines **Capability** for the Model sense only, which
+  is the sense the Client's picker draws.
 - `docs/research/captures/vendors/` does not exist and is the first thing the `vendor` package needs:
   one catalogue body and one resident body per Vendor, plus three malformed SSE bodies. R8's rule
   applies to collecting them — the last attempt reported `HTTP 200` and wrote nothing.

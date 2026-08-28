@@ -53,7 +53,7 @@ A program on a Host that serves model inference over a local API. Ollama, LM Stu
 _Avoid_: provider, backend, engine, runtime
 
 **Vendor Adapter**:
-The code that speaks one Vendor's API and answers five questions about it: where it answers, what Models it can serve, what is resident now, and load and unload. It promises nothing about idle, loading or busy, because no two Vendors expose the same ones. The Daemon holds the cache, the admission policy and everything else the Vendor will not say.
+The code that speaks one Vendor's API. It answers three questions — where the Vendor answers, what Models it can serve, what is resident now — and takes two commands, load and unload. It promises nothing about idle, loading or busy, because no two Vendors expose the same ones. The Daemon holds the cache, the admission policy and everything else the Vendor will not say.
 _Avoid_: driver, client, connector, provider
 
 **Model**:
@@ -61,8 +61,8 @@ A specific set of weights a Vendor can serve, selected before a Session begins. 
 _Avoid_: LLM, checkpoint
 
 **Capability**:
-One thing a Model can do — hold a conversation, call tools, reason, or see. A Vendor Adapter answers each one `yes`, `no` or `unknown`, and `unknown` is an answer rather than a missing value. llama-swap reports `unknown` for every Model it has not loaded, and so does any Vendor version that does not carry the field.
-_Avoid_: feature, flag, support level
+One thing a Model can do — hold a conversation, call tools, reason, or see. A Vendor Adapter answers each one `Yes`, `No` or `Unknown`, and `Unknown` is an answer rather than a missing value. llama-swap reports `Unknown` for every Model it has not loaded, and so does any Vendor version that does not carry the field. A Harness's Capabilities are a different thing, declared rather than read; see **Gate**.
+_Avoid_: feature, flag
 
 **Harness**:
 A program that turns a Model into an agent — running the tool-calling loop, managing context, and deciding what to do next. OpenCode and Pi are Harnesses. Sending a prompt straight to a Vendor with no agency is modelled as a passthrough Harness, not as a separate path.
