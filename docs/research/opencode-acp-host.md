@@ -15,11 +15,11 @@ output.
 | --- | --- |
 | Host | `Victor@ZenitoBurrito:22`, Windows 11, reached over SSH |
 | Client | `MINGW64_NT-10.0-26200 -PC`, a different machine |
-| Harness | OpenCode 1.18.23, `opencode acp` |
+| Harness | OpenCode 1.18.23, `opencode acp`. The llama-swap re-capture is 1.18.25 |
 | Spawned as | `C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe acp` |
 | Vendor | Ollama, then repeated against LM Studio and llama-swap |
 | Models | one per Vendor, listed under [Vendor coverage](#vendor-coverage) |
-| Date | 2026-08-27, 19:23 to 22:47 +01:00 |
+| Date | 2026-08-27, 19:23 to 22:47 +01:00. llama-swap re-captured 2026-08-28, 20:23 |
 
 Three runs per Vendor, one per tool class, so the counts cannot be confused with
 each other. No TTY on either side. The supervisor owned stdin.
@@ -143,8 +143,8 @@ Agent capabilities, identical in every run against every Vendor:
 
 ## Configuration discovery
 
-Recorded, not gated. **ADR 0003's per-Session config assumption holds**, with one
-qualification the ADR did not state.
+Recorded, not gated. **ADR 0003's per-Session config assumption holds**, with two
+qualifications the ADR did not state.
 
 `opencode models`, run from the Session's working directory, lists the provider
 written beside it:
@@ -158,10 +158,25 @@ lmstudio/gpt-oss-20b
 ```
 
 The working-directory `opencode.json` **merges** with the user's global config
-rather than replacing it. The Model chosen at Session start does land, and two
-Sessions on different Models cannot fight over one file — both claims in ADR 0003
-survive. But a per-Session config does **not isolate** a Session: every provider
-in the user's global config stays visible and reachable from inside it.
+rather than replacing it. Two Sessions on different Models cannot fight over one
+file, so that claim in ADR 0003 survives. A per-Session config does **not isolate**
+a Session: every provider in the user's global config stays visible and reachable
+from inside it.
+
+**The Model chosen at Session start lands, but does not always win.** The file's
+`model` key was honoured in the 2026-08-28 llama-swap run, where `session/new`
+reported `currentValue: capstone/qwen3.5-9b`. It was overridden in all six
+2026-08-27 runs, which reported `currentValue: opencode/big-pickle`, a hosted
+OpenCode Zen model, while their own config named a `capstone/` Model. OpenCode Zen
+was configured on the Host then and is absent from the later run's provider list,
+so something in the global config outranked the working-directory one. Nothing in
+either capture ever calls a method to set the option.
+
+So writing the file is not enough to know which Model answers. `session/new`
+reports what the Session will actually use, and that is the field to read.
+[ADR 0006](../adr/0006-the-harness-adapter-interface.md) makes reading it back part
+of the adapter's `Start`, and has the Daemon log the Model it confirmed rather than
+the one it asked for.
 
 ## Vendor coverage
 
@@ -174,24 +189,63 @@ pass all three gates.
 | LM Studio | `qwen/qwen3.5-9b` | `edit` 1/1/1, `execute` 1/1/1, `read` 1/1/0 | pass |
 | llama-swap | `qwen3.5-9b` | `edit` 1/1/1, `execute` 1/1/1, `read` 1/1/0 | pass |
 
-Same shape every time, and `read` silent every time.
+Same shape every time, and `read` silent every time. The llama-swap row is the
+2026-08-28 re-capture, on OpenCode 1.18.25; the other two are 2026-08-27, on
+1.18.23. See [The llama-swap row was wrong for a day](#the-llama-swap-row-was-wrong-for-a-day).
 
-**The Event vocabulary is Vendor-independent.** Compared frame by frame, all
-three agree exactly:
+**The Event vocabulary is Vendor-independent, with one exception.** Compared
+frame by frame:
 
 ```
 methods        fs/write_text_file, initialize, session/close, session/new,
                session/prompt, session/request_permission, session/update
 sessionUpdate  agent_message_chunk, agent_thought_chunk, available_commands_update,
-               tool_call, tool_call_update, usage_update
+               tool_call, tool_call_update
 kinds          edit, execute, read
 stopReason     end_turn
 ```
 
-The only difference is `failed`, which appears in the Ollama statuses because one
-read there failed on a model error. It is a difference in what happened, not in
-the vocabulary. This is the property Pi was proven to have, so the Event model
-can keep Vendor identity in metadata.
+All three agree on every line above. **`usage_update` is the exception**: Ollama
+and LM Studio emit it, and the llama-swap run does not. Two things differ between
+that run and the others, the Vendor and the OpenCode version, so which one causes
+it is not established here.
+
+It costs nothing. Per-Prompt token counts come from the `session/prompt`
+**response**, which carries `usage` in all three, and `usage_update` is a
+context-window notification carrying `used`, `size` and a `cost` that is always
+zero on a local Vendor. But it does set a rule for the adapter, the mirror of the
+one Hermes' out-of-schema `usage_update` already set: an adapter must tolerate a
+native kind that is absent, as well as one it does not recognise.
+
+The other difference is `failed`, which appears in the Ollama statuses because one
+read there failed on a model error. That is a difference in what happened, not in
+the vocabulary. So the Event model can still keep Vendor identity in metadata.
+
+### The llama-swap row was wrong for a day
+
+**Between 2026-08-27 and 2026-08-28, `captures/opencode/llamaswap/` held the LM
+Studio run**, and this table's third row rested on it. The two directories were
+byte-identical across all three `*-frames.jsonl` and `*-raw.log` files, shared
+OpenCode session ids that are minted fresh per `session/new`
+(`ses_fbaced840ffecF2q3xGDWdrzPa` for the edit run in both), shared frame
+timestamps to the microsecond, and the `llamaswap/manifest.txt` of the day read
+`Vendor: lmstudio at http://127.0.0.1:1234` where llama-swap is on `:8080`.
+
+The cause was the capture script's Vendor fallback. llama-swap was not serving,
+`--vendor llamaswap` fell back to the first Vendor that was, and the run was filed
+under the Vendor that had been **asked for** rather than the one that **answered**.
+The fallback warns and carries on, which is the whole problem: a warning in a
+scrolling log is not a label on an artefact.
+
+This is the sixth adjacent-check failure in this repo's research and the second in
+this capture alone. It generalises past capture scripts, and
+[ADR 0006](../adr/0006-the-harness-adapter-interface.md) takes it as a rule for the
+Daemon: a Session records the Vendor and Model that served it, never the ones it
+was configured with.
+
+The 2026-08-28 re-capture is a real llama-swap run, over SSH to the same Host, and
+it passes all three gates. It is distinct from `lmstudio/` by sha256, by session id
+and by timestamp, and its `session/new` reports `currentValue: capstone/qwen3.5-9b`.
 
 **Each run used to overwrite the last.** Every capture landed in one directory,
 so LM Studio overwrote Ollama and llama-swap overwrote LM Studio, and the first

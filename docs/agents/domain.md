@@ -21,7 +21,8 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 │   ├── 0002-llama-swap-is-the-llama-cpp-vendor.md
 │   ├── 0003-opencode-replaces-hermes-as-the-second-harness.md
 │   ├── 0004-host-state-is-connection-liveness.md
-│   └── 0005-the-event-model.md
+│   ├── 0005-the-event-model.md
+│   └── 0006-the-harness-adapter-interface.md
 └── scripts/
 ```
 
