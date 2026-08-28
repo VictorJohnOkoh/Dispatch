@@ -32,6 +32,20 @@ _Avoid_: management channel, SSH layer
 The path a prompt and its response travel. For a Harness-backed Session this is entirely internal to one Host, because a Harness always reaches a Vendor on the same Host over localhost.
 _Avoid_: inference channel, API layer
 
+### Reachability
+
+**Host State**:
+The Hub's view of one Host, and the only place that view exists. One of `Connecting`, `Ready`, `Down` (carrying a cause of `unreachable` or `no-daemon`), or `Incompatible`. Derived from the liveness of the Hub's Event stream to that Host, never stored.
+_Avoid_: status, availability, online, offline, health
+
+**Handshake**:
+The protocol version check the Hub and a Daemon run when the connection opens. Passing it makes a Host `Ready`; failing it makes the Host `Incompatible`, which the Hub never retries.
+_Avoid_: negotiation, version check, hello
+
+**Stale**:
+Last-known Host content the Client keeps showing while the Host is not `Ready`, stamped with the time it was true. A Host is never hidden for being unreachable.
+_Avoid_: cached, outdated, offline data
+
 ### Inference and agency
 
 **Vendor**:
