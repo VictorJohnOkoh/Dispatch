@@ -1,0 +1,8 @@
+provider  model               context  max-out  thinking  images
+llamacpp  gpt-oss-20b         128K     16.4K    no        no    
+llamacpp  qwen2.5-coder-1.5b  128K     16.4K    no        no    
+llamacpp  qwen3.5-9b          128K     16.4K    no        no    
+llamacpp  qwen3.8-27b         128K     16.4K    no        no    
+lmstudio  gpt-oss-20b         128K     16.4K    no        no    
+lmstudio  qwen/qwen3.5-9b     128K     16.4K    no        no    
+ollama    qwen3.5:9b          128K     16.4K    no        no    

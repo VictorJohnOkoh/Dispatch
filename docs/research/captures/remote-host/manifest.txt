@@ -1,0 +1,22 @@
+=== Remote Host capture: 2026-08-25T16:41:16+01:00 ===
+Client: MINGW64_NT-10.0-26200 -PC 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys
+Host:   Victor@192.168.4.49:22 (windows)
+Vendor: ollama at http://127.0.0.1:11434
+Hermes: INSTALLED BUT WILL NOT RUN OVER SSH (exit 1): error: uv trampoline failed to spawn Python child process
+Pi:     0.84.3
+
+Vendor reachability: loopback only — no network exposure
+  from Host loopback (http://127.0.0.1:11434/api/tags): HTTP 200
+  from Host real NIC (http://192.168.4.49:11434/api/tags): HTTP 000
+  from Client        (http://192.168.4.49:11434/api/tags): HTTP 000000
+capture-pi.sh exit code: 0
+
+LIMITS OF THIS RUN
+  The Host is windows, not bare-metal Linux. The Hermes stdin deadlock
+  (C7) and phantom denial (C9) were disproved only under WSL2, and this
+  run does NOT lift that caveat — a native Linux kernel and its pipe
+  implementation remain untested.
+  What this run DOES establish: a separate machine reached over SSH key
+  auth, and a Vendor reached over a real network interface.
+
+Finished: 2026-08-25T17:04:38+01:00

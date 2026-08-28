@@ -1,0 +1,146 @@
+{
+  "label": "read",
+  "captured_at": "2026-08-27T21:47:22.317920+00:00",
+  "agent_cmd": "C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe acp",
+  "cwd": "C:\\Users\\Victor\\capstone-opencode\\work",
+  "prompt": "Read the file notes.txt in this directory and reply with only the single word it contains.",
+  "client_capabilities": {
+    "fs": true,
+    "terminal": false
+  },
+  "permission_policy": "allow",
+  "close_stdin_after_prompt": false,
+  "close_stdin_on_tool_call": false,
+  "close_stdin_on_permission": false,
+  "capture_exit_code": 0,
+  "agent_exit_code": 0,
+  "session_id": "ses_fbaceeba0ffehUcVpAgAdkcOPs",
+  "stop_reason": "end_turn",
+  "usage": {
+    "inputTokens": 363,
+    "outputTokens": 5,
+    "totalTokens": 10608,
+    "cachedReadTokens": 10240
+  },
+  "initialize_result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "promptCapabilities": {
+        "embeddedContext": true,
+        "image": true
+      },
+      "sessionCapabilities": {
+        "close": {},
+        "fork": {},
+        "list": {},
+        "resume": {}
+      }
+    },
+    "authMethods": [
+      {
+        "description": "Run `opencode auth login` in the terminal",
+        "name": "Login with opencode",
+        "id": "opencode-login"
+      }
+    ],
+    "agentInfo": {
+      "name": "OpenCode",
+      "version": "1.18.23"
+    }
+  },
+  "new_session_result": {
+    "sessionId": "ses_fbaceeba0ffehUcVpAgAdkcOPs",
+    "configOptions": [
+      {
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "opencode/big-pickle",
+        "options": [
+          {
+            "value": "lmstudio/gpt-oss-20b",
+            "name": "LM Studio/GPT-OSS 20B"
+          },
+          {
+            "value": "lmstudio/qwen2.5-coder-1.5b-instruct",
+            "name": "LM Studio/Qwen2.5 Coder 1.5B Instruct"
+          },
+          {
+            "value": "lmstudio/qwen/qwen3.5-9b",
+            "name": "LM Studio/Qwen3.5 9B"
+          },
+          {
+            "value": "lmstudio/qwen3.8-27b",
+            "name": "LM Studio/Qwen3.8 27B"
+          },
+          {
+            "value": "opencode/big-pickle",
+            "name": "OpenCode Zen/Big Pickle"
+          },
+          {
+            "value": "opencode/hy3-free",
+            "name": "OpenCode Zen/Hy3 Free"
+          },
+          {
+            "value": "opencode/mimo-v2.5-free",
+            "name": "OpenCode Zen/MiMo V2.5 Free"
+          },
+          {
+            "value": "opencode/muse-spark-1.2-contributor-free",
+            "name": "OpenCode Zen/Muse Spark 1.2 Free"
+          },
+          {
+            "value": "opencode/nemotron-3-ultra-free",
+            "name": "OpenCode Zen/Nemotron 3 Ultra Free"
+          },
+          {
+            "value": "opencode/nemotron-3.5-lightning-free",
+            "name": "OpenCode Zen/Nemotron 3.5 Lightning Free"
+          },
+          {
+            "value": "capstone/qwen/qwen3.5-9b",
+            "name": "Capstone Vendor (lmstudio)/qwen/qwen3.5-9b"
+          }
+        ]
+      },
+      {
+        "id": "mode",
+        "name": "Session Mode",
+        "category": "mode",
+        "type": "select",
+        "currentValue": "build",
+        "options": [
+          {
+            "value": "build",
+            "name": "build",
+            "description": "The default agent. Executes tools based on configured permissions."
+          },
+          {
+            "value": "plan",
+            "name": "plan",
+            "description": "Plan mode. Disallows all edit tools."
+          }
+        ]
+      }
+    ]
+  },
+  "session_update_kinds": {
+    "available_commands_update": 1,
+    "agent_thought_chunk": 21,
+    "agent_message_chunk": 2,
+    "tool_call": 1,
+    "tool_call_update": 2,
+    "usage_update": 1
+  },
+  "agent_methods": {
+    "session/update": 28
+  },
+  "permission_request_count": 0,
+  "permission_requests": []
+}

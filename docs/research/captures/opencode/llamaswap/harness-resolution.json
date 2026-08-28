@@ -1,0 +1,28 @@
+{
+  "name": "opencode",
+  "chosen": "C:\\Users\\Victor\\AppData\\Roaming\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe",
+  "chosen_spawn": "C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe",
+  "shell_only": [
+    "opencode"
+  ],
+  "tried": [
+    {
+      "path": "C:\\Users\\Victor\\AppData\\Roaming\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe",
+      "direct_spawn_ok": true,
+      "exit_code": 0,
+      "said": "1.18.23"
+    },
+    {
+      "path": "C:\\Users\\Victor\\AppData\\Roaming\\npm\\opencode.CMD",
+      "direct_spawn_ok": true,
+      "exit_code": 0,
+      "said": "1.18.23"
+    },
+    {
+      "path": "opencode",
+      "direct_spawn_ok": false,
+      "exit_code": null,
+      "said": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+    }
+  ]
+}

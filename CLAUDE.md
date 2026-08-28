@@ -10,7 +10,9 @@ Good Example:
 - For a function that adds 3 numbers together should be commented with "# adds 2 numbers together and returns the sum" <br>
 Bad Example:
 - For a function that adds 3 numbers together "Takes in 3 integers, performs the addition operation and returns the result as an integer" 
-When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language
+## Speech Pattern
+When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language.
+Dumb down complex topics/options afterwards by describing them using more colloquial language
 ## Agent skills
 
 ### Issue tracker
