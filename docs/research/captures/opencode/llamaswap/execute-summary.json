@@ -1,6 +1,6 @@
 {
   "label": "execute",
-  "captured_at": "2026-08-27T21:47:31.223634+00:00",
+  "captured_at": "2026-08-28T19:24:15.778636+00:00",
   "agent_cmd": "C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe acp",
   "cwd": "C:\\Users\\Victor\\capstone-opencode\\work",
   "prompt": "Run the shell command: echo capstone-probe. Then reply with exactly what it printed.",
@@ -14,13 +14,13 @@
   "close_stdin_on_permission": false,
   "capture_exit_code": 0,
   "agent_exit_code": 0,
-  "session_id": "ses_fbacec760ffeUO8FGezAAJB60t",
+  "session_id": "ses_fb62b9a73ffeTnqOvDRNjeU0hP",
   "stop_reason": "end_turn",
   "usage": {
-    "inputTokens": 119,
-    "outputTokens": 5,
-    "totalTokens": 10364,
-    "cachedReadTokens": 10240
+    "inputTokens": 20,
+    "outputTokens": 27,
+    "totalTokens": 10177,
+    "cachedReadTokens": 10130
   },
   "initialize_result": {
     "protocolVersion": 1,
@@ -50,22 +50,30 @@
     ],
     "agentInfo": {
       "name": "OpenCode",
-      "version": "1.18.23"
+      "version": "1.18.25"
     }
   },
   "new_session_result": {
-    "sessionId": "ses_fbacec760ffeUO8FGezAAJB60t",
+    "sessionId": "ses_fb62b9a73ffeTnqOvDRNjeU0hP",
     "configOptions": [
       {
         "id": "model",
         "name": "Model",
         "category": "model",
         "type": "select",
-        "currentValue": "opencode/big-pickle",
+        "currentValue": "capstone/qwen3.5-9b",
         "options": [
+          {
+            "value": "lmstudio/prism-ml/bonsai-27b",
+            "name": "LM Studio/Bonsai 27B"
+          },
           {
             "value": "lmstudio/gpt-oss-20b",
             "name": "LM Studio/GPT-OSS 20B"
+          },
+          {
+            "value": "lmstudio/qwen3.8-27b@q4_0",
+            "name": "LM Studio/Mtp Qwen3.8 27B"
           },
           {
             "value": "lmstudio/qwen2.5-coder-1.5b-instruct",
@@ -76,36 +84,32 @@
             "name": "LM Studio/Qwen3.5 9B"
           },
           {
-            "value": "lmstudio/qwen3.8-27b",
+            "value": "lmstudio/qwen3.8-27b@q3_k_s",
             "name": "LM Studio/Qwen3.8 27B"
           },
           {
-            "value": "opencode/big-pickle",
-            "name": "OpenCode Zen/Big Pickle"
+            "value": "ollama/qwen3:latest",
+            "name": "Ollama/Qwen 3"
           },
           {
-            "value": "opencode/hy3-free",
-            "name": "OpenCode Zen/Hy3 Free"
+            "value": "ollama/qwen3.5:9b",
+            "name": "Ollama/Qwen 3.5 9B"
           },
           {
-            "value": "opencode/mimo-v2.5-free",
-            "name": "OpenCode Zen/MiMo V2.5 Free"
+            "value": "llamacpp/prism-ml/bonsai-27b",
+            "name": "Llamacpp/Bonsai 27B"
           },
           {
-            "value": "opencode/muse-spark-1.2-contributor-free",
-            "name": "OpenCode Zen/Muse Spark 1.2 Free"
+            "value": "llamacpp/gpt-oss-20b",
+            "name": "Llamacpp/GPT OSS 20B"
           },
           {
-            "value": "opencode/nemotron-3-ultra-free",
-            "name": "OpenCode Zen/Nemotron 3 Ultra Free"
+            "value": "llamacpp/qwen/qwen3.5-9b",
+            "name": "Llamacpp/Qwen 3.5 9B"
           },
           {
-            "value": "opencode/nemotron-3.5-lightning-free",
-            "name": "OpenCode Zen/Nemotron 3.5 Lightning Free"
-          },
-          {
-            "value": "capstone/qwen/qwen3.5-9b",
-            "name": "Capstone Vendor (lmstudio)/qwen/qwen3.5-9b"
+            "value": "capstone/qwen3.5-9b",
+            "name": "Capstone Vendor (llamaswap)/qwen3.5-9b"
           }
         ]
       },
@@ -132,21 +136,21 @@
   },
   "session_update_kinds": {
     "available_commands_update": 1,
+    "agent_thought_chunk": 37,
     "tool_call": 1,
     "tool_call_update": 4,
-    "agent_message_chunk": 1,
-    "usage_update": 1
+    "agent_message_chunk": 4
   },
   "agent_methods": {
-    "session/update": 8,
+    "session/update": 47,
     "session/request_permission": 1
   },
   "permission_request_count": 1,
   "permission_requests": [
     {
-      "sessionId": "ses_fbacec760ffeUO8FGezAAJB60t",
+      "sessionId": "ses_fb62b9a73ffeTnqOvDRNjeU0hP",
       "toolCall": {
-        "toolCallId": "chatcmpl-tool-ac13d044df719148",
+        "toolCallId": "IVOWUuXcYT0W5sEA3W5kSHkHNzJgav2k",
         "title": "echo capstone-probe",
         "kind": "execute",
         "status": "pending",

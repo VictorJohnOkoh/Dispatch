@@ -1,5 +1,5 @@
 {
-  "capture_dir": "C:\\Users\\Victor\\Documents\\Projects\\CapStone\\docs\\research\\captures\\opencode",
+  "capture_dir": "C:\\Users\\Victor\\Documents\\Projects\\CapStone\\docs\\research\\captures\\opencode\\llamaswap",
   "runs": [
     {
       "label": "edit",
@@ -67,7 +67,7 @@
   "gates": {
     "gate1_tool_call_on_host": {
       "verdict": "pass",
-      "note": "Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin; Vendor lmstudio, Model qwen/qwen3.5-9b"
+      "note": "Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin; Vendor llamaswap, Model qwen3.5-9b"
     },
     "gate2_permission_per_class": {
       "verdict": "pass",

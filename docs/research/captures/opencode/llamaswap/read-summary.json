@@ -1,6 +1,6 @@
 {
   "label": "read",
-  "captured_at": "2026-08-27T21:47:22.317920+00:00",
+  "captured_at": "2026-08-28T19:24:01.671820+00:00",
   "agent_cmd": "C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe acp",
   "cwd": "C:\\Users\\Victor\\capstone-opencode\\work",
   "prompt": "Read the file notes.txt in this directory and reply with only the single word it contains.",
@@ -14,13 +14,13 @@
   "close_stdin_on_permission": false,
   "capture_exit_code": 0,
   "agent_exit_code": 0,
-  "session_id": "ses_fbaceeba0ffehUcVpAgAdkcOPs",
+  "session_id": "ses_fb62c4386ffe3Z2zQ6GWz5jgLp",
   "stop_reason": "end_turn",
   "usage": {
-    "inputTokens": 363,
-    "outputTokens": 5,
-    "totalTokens": 10608,
-    "cachedReadTokens": 10240
+    "inputTokens": 70,
+    "outputTokens": 28,
+    "totalTokens": 10250,
+    "cachedReadTokens": 10152
   },
   "initialize_result": {
     "protocolVersion": 1,
@@ -50,22 +50,30 @@
     ],
     "agentInfo": {
       "name": "OpenCode",
-      "version": "1.18.23"
+      "version": "1.18.25"
     }
   },
   "new_session_result": {
-    "sessionId": "ses_fbaceeba0ffehUcVpAgAdkcOPs",
+    "sessionId": "ses_fb62c4386ffe3Z2zQ6GWz5jgLp",
     "configOptions": [
       {
         "id": "model",
         "name": "Model",
         "category": "model",
         "type": "select",
-        "currentValue": "opencode/big-pickle",
+        "currentValue": "capstone/qwen3.5-9b",
         "options": [
+          {
+            "value": "lmstudio/prism-ml/bonsai-27b",
+            "name": "LM Studio/Bonsai 27B"
+          },
           {
             "value": "lmstudio/gpt-oss-20b",
             "name": "LM Studio/GPT-OSS 20B"
+          },
+          {
+            "value": "lmstudio/qwen3.8-27b@q4_0",
+            "name": "LM Studio/Mtp Qwen3.8 27B"
           },
           {
             "value": "lmstudio/qwen2.5-coder-1.5b-instruct",
@@ -76,36 +84,32 @@
             "name": "LM Studio/Qwen3.5 9B"
           },
           {
-            "value": "lmstudio/qwen3.8-27b",
+            "value": "lmstudio/qwen3.8-27b@q3_k_s",
             "name": "LM Studio/Qwen3.8 27B"
           },
           {
-            "value": "opencode/big-pickle",
-            "name": "OpenCode Zen/Big Pickle"
+            "value": "ollama/qwen3:latest",
+            "name": "Ollama/Qwen 3"
           },
           {
-            "value": "opencode/hy3-free",
-            "name": "OpenCode Zen/Hy3 Free"
+            "value": "ollama/qwen3.5:9b",
+            "name": "Ollama/Qwen 3.5 9B"
           },
           {
-            "value": "opencode/mimo-v2.5-free",
-            "name": "OpenCode Zen/MiMo V2.5 Free"
+            "value": "llamacpp/prism-ml/bonsai-27b",
+            "name": "Llamacpp/Bonsai 27B"
           },
           {
-            "value": "opencode/muse-spark-1.2-contributor-free",
-            "name": "OpenCode Zen/Muse Spark 1.2 Free"
+            "value": "llamacpp/gpt-oss-20b",
+            "name": "Llamacpp/GPT OSS 20B"
           },
           {
-            "value": "opencode/nemotron-3-ultra-free",
-            "name": "OpenCode Zen/Nemotron 3 Ultra Free"
+            "value": "llamacpp/qwen/qwen3.5-9b",
+            "name": "Llamacpp/Qwen 3.5 9B"
           },
           {
-            "value": "opencode/nemotron-3.5-lightning-free",
-            "name": "OpenCode Zen/Nemotron 3.5 Lightning Free"
-          },
-          {
-            "value": "capstone/qwen/qwen3.5-9b",
-            "name": "Capstone Vendor (lmstudio)/qwen/qwen3.5-9b"
+            "value": "capstone/qwen3.5-9b",
+            "name": "Capstone Vendor (llamaswap)/qwen3.5-9b"
           }
         ]
       },
@@ -132,14 +136,13 @@
   },
   "session_update_kinds": {
     "available_commands_update": 1,
-    "agent_thought_chunk": 21,
-    "agent_message_chunk": 2,
+    "agent_thought_chunk": 44,
     "tool_call": 1,
     "tool_call_update": 2,
-    "usage_update": 1
+    "agent_message_chunk": 11
   },
   "agent_methods": {
-    "session/update": 28
+    "session/update": 59
   },
   "permission_request_count": 0,
   "permission_requests": []
