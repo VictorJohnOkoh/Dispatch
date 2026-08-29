@@ -6,8 +6,9 @@ them. No package imports another at its own level, which is the whole proof that
 and is checkable with one `go list` command.
 
 The invariant the tree exists to hold is `CONTEXT.md`'s: a Daemon knows only its own Host and never
-learns about its peers. Two fences make that a type error and one makes it a compile error. The
-remaining hole is named at the end rather than hidden.
+learns about its peers. One fence is a compile error, one fails at startup, and one has no failure mode
+at all because there is nothing to fail. The hole the three leave is named at the end rather than
+hidden.
 
 ## What the earlier ADRs already decided
 
@@ -16,7 +17,7 @@ them.
 
 | package | named by | what it holds |
 | --- | --- | --- |
-| `vendor` | ADR 0007 | `Adapter`, `Endpoint`, `Model`, `Capabilities`, `Frame`, `ReadStream`. A leaf: "`vendor` is a leaf, `harness` imports `vendor` and `event`, and nothing imports `harness`" |
+| `vendors` | ADR 0007 | `Adapter`, `Endpoint`, `Model`, `Capabilities`, `Frame`, `ReadStream`. A leaf, and renamed below. ADR 0007: "`vendor` is a leaf, `harness` imports `vendor` and `event`, and nothing imports `harness`" |
 | `harness` | ADR 0006 | `Adapter`, `Run`, `Sink`, `SessionSpec`, `Pipes`, `Files`. The process supervisor, the ledger of open Tool Calls and the transcript writer sit outside it |
 | `session` | ADR 0008 | `State` and the fold that derives it |
 | `admission` | ADR 0008 | `Policy`, `Request`, `Refusal`, and `SingleSession` |
@@ -44,7 +45,7 @@ dispatch/
                                   StopReason, Usage, SessionID. Types and nothing else
     protocol/                     the ten paths, the seven frame types, the wire envelope,
                                   the Handshake, cursor parse and format, the status codes
-    vendor/                       Adapter, Endpoint, Model, Capabilities, ReadStream, and
+    vendors/                      Adapter, Endpoint, Model, Capabilities, ReadStream, and
                                   ollama.go, lmstudio.go, llamaswap.go
     harness/                      Adapter, Run, Sink, SessionSpec, Spawner, Pipes, Files,
                                   and pi.go, acp.go, passthrough.go
@@ -81,9 +82,27 @@ second vocabulary beside it.
 Go 1.24 is the floor, not a preference. ADR 0007's own test example calls `t.Context()`, which arrived
 in 1.24.
 
+### `vendors`, not `vendor`, and the reason is the go command
+
+ADR 0007 wrote `package vendor`. That name cannot survive contact with the tooling, and this is the kind
+of thing only the ticket that assembles the tree would ever find.
+
+`vendor` is a reserved directory name to the go command. It is where module dependencies are vendored,
+and the tool treats any `vendor` path element specially: patterns like `./...` skip it. So
+`go test ./...` would run every package's tests except the Vendor Adapters', `go list -deps
+./internal/vendor/...` would print nothing, and neither would say why. A package that silently drops out
+of the test run is worse than one that fails to build.
+
+Renaming the directory to `vendors` costs one letter and removes the class. It also costs ADR 0007's
+`package vendor` line, which is corrected here rather than left to be discovered by whoever runs the
+first `go test ./...`. **`vendor` is a leaf** stays true word for word; only the spelling moves.
+
+Two smaller names go the same way for the same reason. Nothing here may be called `testdata`, and no
+directory may begin with `.` or `_`, because the go command ignores all three.
+
 ### The adapters are files, not sub-packages
 
-`vendor/ollama.go` rather than `vendor/ollama/`. Three Vendor adapters share `Endpoint`, `Model`,
+`vendors/ollama.go` rather than `vendors/ollama/`. Three Vendor adapters share `Endpoint`, `Model`,
 `Capabilities` and `ReadStream`, and three Harness adapters share `Sink`, `SessionSpec` and `Pipes`. If
 each adapter were its own package, every one of those types would have to be exported across an import
 that buys one thing: a rule stopping the Ollama adapter importing the llama-swap adapter. Nothing wants
@@ -113,10 +132,10 @@ Shared between the roles: `protocol`, and `event` and `session` for the Hub's fi
 | `protocol` | serves it | speaks it, in both directions |
 | `event` | writes it | reads it, in `web` only |
 | `session` | folds it | folds it, in `web` only |
-| `vendor`, `harness`, `workspace`, `admission`, `eventlog` | yes | never |
+| `vendors`, `harness`, `workspace`, `admission`, `eventlog` | yes | never |
 | `hub/internal/hostset` | cannot | yes |
 
-The Hub imports neither `vendor` nor `harness` nor `eventlog`. It holds nothing durable, per ADR 0009,
+The Hub imports neither `vendors` nor `harness` nor `eventlog`. It holds nothing durable, per ADR 0009,
 and it never speaks to a Vendor or spawns a process. So the two role packages overlap on the wire and
 almost nowhere else, which is what makes a second Client cheap: a TUI is a different `web`, against the
 same `protocol`.
@@ -134,7 +153,11 @@ type Daemon struct {
 	LogPath       string
 	Vendors       []VendorProfile  // this Host's Vendors, on this Host's loopback
 	Harnesses     []HarnessProfile // an absolute executable path each, per ADR 0006
-	Policy        [event.NumToolKinds]event.Decision // the Approval Policy defaults
+	// PolicyDefault is a default per slot and never a policy. ADR 0008 rejected a fixed
+	// default array outright, because a slot with no Gate may only be Auto and a fixed
+	// array fails that on the Harness that ships. So the Daemon computes the Session's
+	// policy by clipping this against that Harness's Gates, at Session start.
+	PolicyDefault [event.NumToolKinds]event.Decision
 }
 
 // Hub is the only type in the system that holds more than one Host.
@@ -147,6 +170,12 @@ type Hub struct {
 A Daemon reads a `Daemon`. There is nowhere in that struct to put a peer, so a peer cannot arrive by
 configuration. This is the strongest of the three fences because it needs no discipline at all: the
 failure is `unknown field`, at startup, in the one place a human would put the mistake.
+
+ADR 0008's clip is the one piece of policy that cannot live here, and the reason places it exactly. It
+reads `harness.Capabilities.Gates`, which is chosen per Session, so it belongs in `daemon` beside the
+start path and not in `config` beside the value it clips. That keeps the rule this ADR is really making:
+**config holds values, and every rule that reads one lives where the rule can see the rest of the
+world.**
 
 ### Fence two: no type the Daemon serves has a Host field
 
@@ -168,9 +197,12 @@ type Event struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// HostEvent is the Client's leg. The Hub makes one from an Event and a Host id, and
-// no Daemon ever constructs one or receives one.
-type HostEvent struct {
+// HostFrame is the Client's leg, and its name is the point. CONTEXT.md says the Hub
+// may add a Host id to a Frame and may never add one to an Event, so the thing that
+// gains a host field is a Frame that carries an Event, not an Event with one more
+// field. It flattens on the wire because ADR 0009 put host beside the other five,
+// and no Daemon ever constructs one or receives one.
+type HostFrame struct {
 	Event
 	Host string `json:"host"`
 }
@@ -184,9 +216,9 @@ against this. It is simply unable to receive it.
 `event.Event` carries `Payload any` and a typed `Kind`, and it exists on the write path and in the
 fold. `protocol.Event` carries `json.RawMessage` and a string, and it exists on the read path. They
 meet in the SQLite row, whose five columns are already the wire shape. So a replay reads rows and
-writes them out with no JSON parsing at all, and so does the Hub. The payload is parsed in exactly two
-places in the whole system, three if the Hub renders a first paint: where the Daemon writes it, where
-the browser draws it, and in `web`.
+writes them out with no JSON parsing at all, and so does the Hub. The payload is parsed in three places in the whole
+system and would be parsed in two if the Hub served an empty shell. The Daemon parses it to write it,
+the browser parses it to draw it, and `web` parses it for the first paint.
 
 ### Fence three: `hub/internal/hostset` is a compile error from the Daemon's half
 
@@ -211,9 +243,13 @@ The closing check is one line, and it belongs in CI rather than in a document:
 go list -deps ./internal/daemon/... | grep -q /internal/hub && exit 1
 ```
 
-So: two fences are type errors, one is a compile error, and one review-level rule is enforced by a
-grep. The honest summary is that a Daemon cannot **learn** about a peer structurally, and cannot
-**mention** one without a build break in the sub-tree that holds the word.
+So the three fences fail in three different ways, and it is worth being exact about which. Fence three
+is a compile error. Fence one is a startup error, `unknown field`, in the file a human would have put
+the mistake in. Fence two has no failure at all: there is no field to carry a peer, so the bytes land
+nowhere and nothing has to notice. The last rule is enforced by a grep.
+
+The honest summary is that a Daemon cannot **learn** about a peer, by three separate mechanisms, and
+cannot **mention** one without a build break in the sub-tree that holds the word.
 
 ## Depth, package by package
 
@@ -224,7 +260,7 @@ they have to learn.
 | --- | --- | --- | --- |
 | `eventlog` | 6 methods | SQLite, WAL, gapless `Seq` inside the insert, the 4 KiB flush, which Events are open, the cursor's lag, `log_id`, resync detection, subscriber fan-out | deep, the deepest here |
 | `workspace` | 1 method | resolve before compare, the walk to the deepest existing ancestor, `EvalSymlinks`, the `..` check on the remainder, case folding on Windows | deep |
-| `vendor` | 5 methods | three native APIs, llama-swap's per-Model `/props` walk, LM Studio's Auto-Evict, the five normalisation rules, Ollama's unframed mid-stream error | deep |
+| `vendors` | 5 methods | three native APIs, llama-swap's per-Model `/props` walk, LM Studio's Auto-Evict, the five normalisation rules, Ollama's unframed mid-stream error | deep |
 | `harness` | 2 methods, plus 3 on `Run` | two wire protocols, blocking gates, correlation repair, tool-name to `ToolKind` | deep |
 | `hostset` | 3 methods | SSH dialling, `direct-tcpip`, two keepalives, the Handshake, backoff with a 60s reset, the four Host States | deep |
 | `daemon` | `New` and an `http.Handler` | the whole Host role | deep |
@@ -235,6 +271,7 @@ they have to learn.
 | `protocol` | 2 envelopes, 7 frames, 10 paths | nothing | shallow, kept |
 | `config` | 2 structs and `Load` | file reading and validation | shallow, kept |
 | `hub` | `New` and an `http.Handler` | nothing of its own | shallow, and correct |
+| `cmd/dispatch` | `main` | nothing. Five lines of wiring | shallow, and not a module |
 
 **`hub` is shallow and that is the right answer, not a defect.** It is a composition root for a role,
 the same job `cmd/dispatch` does for the process. The Hub has exactly two faces, the Daemons and the
@@ -249,7 +286,12 @@ filesystem. Splitting by outward face gives four packages that all need the Sess
 would import each other or import a fifth package holding it, which is the shallow layer this ADR spent
 a section deleting.
 
-Four of the six shallow ones are vocabulary rather than modules. Apply the deletion test to `event`:
+Seven packages come out shallow, and they are shallow for four different reasons, which is why the word
+on its own is not a verdict. `event`, `protocol` and `session` are vocabulary. `config` is a loader.
+`hub` and `cmd/dispatch` are composition roots. `admission` is the only one that is shallow the way the
+word usually means it, and it is argued below.
+
+Apply the deletion test to `event`:
 delete it and the sixteen payload structs reappear in `eventlog`, `daemon`, `session` and `web`,
 four copies that must agree. A package whose whole job is that four things agree is doing its job even
 with no functions in it.
@@ -259,7 +301,7 @@ and the deletion test says why: `web` folds Events too, to draw a Session row on
 If the fold lived in `daemon`, the Hub would import the Daemon to render a list, and the roles would
 stop being two things.
 
-**`admission` is genuinely shallow today and I am keeping it anyway.** One method, one implementation,
+**`admission` is genuinely shallow today and it is kept anyway.** One method, one implementation,
 three lines of body. Under the usual rule that one adapter is a hypothetical seam, it should not exist.
 ADR 0008 bought it against a named future: a count limit reads `len(req.Live)` and a VRAM policy calls
 `req.Vendor.Catalogue` and `req.Vendor.Resident`, and both fit `Request` with no new field. That is a
@@ -275,11 +317,11 @@ found in the first draft of the tree and four are gone.
 opens a temp file in a millisecond, so a fake would be slower to write, less true, and would still need
 the real one tested behind it. There is no storage interface anywhere in this design.
 
-**A `daemon.Service` between the HTTP handlers and the Session registry.** Deleted. ADR 0009 made a
+**A middle layer in `daemon`, between the HTTP handlers and the Session registry.** Deleted. ADR 0009 made a
 command an intention whose answer arrives as an Event, so a handler decodes a body, calls one method,
 and writes a status code. A layer between those two lines forwards and does nothing else.
 
-**A Vendor facade in the Daemon, wrapping `vendor.Adapter` with the cache and the admission rules.**
+**A Vendor facade in the Daemon, wrapping `vendors.Adapter` with the cache and the admission rules.**
 Deleted. ADR 0007 put the cache and the policy in the Daemon on purpose. `daemon/vendors.go` is the
 place that holds them, and wrapping the Adapter as well would make the Daemon reach through itself.
 
@@ -303,9 +345,11 @@ type, a response type and a test on the Hub as well. The one-protocol decision i
 pass-through into a router, and a router that never parses a payload is not a shallow layer. It is the
 component doing its whole job.
 
-`hub` is thin on purpose and it is still deep, because the deletion test on it is brutal: delete the
-Hub and SSH dialling, reconnection, backoff, the Handshake, cursor splitting, `id:` rewriting and Host
-State reappear in the browser, where none of them can run.
+The handler being thin is not the Hub being thin. Delete the Hub role and SSH dialling, reconnection,
+backoff, the Handshake, cursor splitting, `id:` rewriting and Host State all reappear in the browser,
+where none of them can run. That work is in `hostset` and `web`, which is exactly why the depth table
+scores those two deep and `hub` itself shallow. A composition root that is thin above two deep packages
+is the shape to want. A thin layer above one is the shape to delete.
 
 ## Dependency direction, and where the interfaces live
 
@@ -320,7 +364,7 @@ in this tree.
 `harness.Adapter` takes a `SessionSpec` and a `Sink`, and returns a `Run` with a `Capabilities`. Every
 one of those is named by the adapters and by the Daemon. So a package holding them exists whatever
 happens to `Adapter`, and once it exists, moving `Adapter` to the Daemon buys nothing and costs a
-second definition that has to be kept in step. Same argument for `vendor.Adapter` and for
+second definition that has to be kept in step. Same argument for `vendors.Adapter` and for
 `admission.Policy`.
 
 `harness.Sink` is the consumer-side case in the same file. The Adapter calls it and the Daemon
@@ -344,18 +388,18 @@ no line ever names a package on its own level.
 
 ```
 L0   event      →  (nothing)
-     vendor     →  (nothing)
+     vendors     →  (nothing)
      workspace  →  (nothing)
      protocol   →  (nothing)
 
-L1   harness    →  event, vendor
-     admission  →  event, vendor
+L1   harness    →  event, vendors
+     admission  →  event, vendors
      session    →  event
      eventlog   →  event, protocol
      hostset    →  protocol
-     config     →  event, vendor
+     config     →  event, vendors
 
-L2   daemon     →  event, protocol, vendor, harness, workspace, admission, session, eventlog
+L2   daemon     →  event, protocol, vendors, harness, workspace, admission, session, eventlog
      web        →  event, protocol, session
 
 L3   hub        →  protocol, hostset, web
@@ -365,7 +409,7 @@ L4   cmd        →  config, daemon, hub
 
 | level | packages | may import |
 | --- | --- | --- |
-| L0 | `event`, `vendor`, `workspace`, `protocol` | nothing in this module |
+| L0 | `event`, `vendors`, `workspace`, `protocol` | nothing in this module |
 | L1 | `harness`, `admission`, `session`, `eventlog`, `hostset`, `config` | L0 |
 | L2 | `daemon`, `web` | L0, L1 |
 | L3 | `hub` | L0, L1, L2 |
@@ -376,7 +420,7 @@ there are none, so the graph is acyclic by construction rather than by inspectio
 in one command, which matters more than the proof:
 
 ```
-go list -deps ./internal/event/... ./internal/vendor/... \
+go list -deps ./internal/event/... ./internal/vendors/... \
               ./internal/workspace/... ./internal/protocol/... \
   | grep VictorJohnOkoh   # must print only the four themselves
 ```
@@ -387,10 +431,10 @@ Four edges are worth reading off the list because each says something.
 two things. `hostset` is at L1 and imports `protocol`, because the Handshake and the `hello` frame are
 protocol rather than Hub policy. `eventlog` imports both `event` and `protocol`, which is the
 two-envelope split of the write path and the read path landing inside one package. And `config` sits at
-L1 rather than L0 because it imports `event` and `vendor` for the types its fields hold, which is the
+L1 rather than L0 because it imports `event` and `vendors` for the types its fields hold, which is the
 one direction config traffic is allowed to go.
 
-The absences are louder than the edges. `hub` does not import `event`, `session`, `vendor`, `harness`,
+The absences are louder than the edges. `hub` does not import `event`, `session`, `vendors`, `harness`,
 `workspace`, `admission` or `eventlog`. `daemon` does not import `hostset`, and cannot. And nothing at
 all imports `config` except `cmd`.
 
@@ -405,7 +449,7 @@ Eight of the fourteen packages contain no goroutine, no channel and no mutex.
 | `session` | none | none | none. `Fold` is a pure function over a slice |
 | `workspace` | none | none | none. `Contain` touches the filesystem and returns a string |
 | `admission` | none | none | none |
-| `vendor` | none | none | none. Every call blocks. `ReadStream` is a loop on the caller's `io.Reader` |
+| `vendors` | none | none | none. Every call blocks. `ReadStream` is a loop on the caller's `io.Reader` |
 | `config` | none | none | none |
 | `harness` | one reader per `Run`, started by `Start` and joined by `Close` | none across the interface | none. One `Run` is one goroutine |
 | `eventlog` | none | one buffered channel per subscriber | one mutex |
@@ -468,7 +512,7 @@ Almost everything, and the map's **Testing strategy without a GPU** entry resolv
 `workspace`'s `t.TempDir()` with symlinks in it. `session.Fold` takes a slice of Events built by hand
 and returns a state. `admission.SingleSession` takes a `Request` built by hand.
 
-**Tier two, fixtures.** `vendor` through a caller-supplied `http.RoundTripper` answering from recorded
+**Tier two, fixtures.** `vendors` through a caller-supplied `http.RoundTripper` answering from recorded
 bodies, which ADR 0007 already specified and whose fixtures do not exist yet, that is finding R8.
 `harness` through the scripted transport ADR 0006 specified, driven by this repo's own `*-frames.jsonl`.
 `eventlog` against a real SQLite file in `t.TempDir()`, including the crash cases, because killing a
@@ -500,25 +544,31 @@ implementations of one rule is exactly the kind of duplication that drifts.
 
 The mitigation is small and it is the only one available: the fold's cases are a JSON file, and both
 test suites read it. One fixture, two implementations, and a new Event Kind that changes the fold breaks
-both suites or neither. Anything more clever, generating the JS from the Go or running the fold on the
-server for every frame, costs more than the five states are worth.
+both suites or neither. Anything more clever, generating the JS from the Go or making the Hub fold
+every frame before it forwards it, costs more than the five states are worth.
 
 ## Configuration enters at `cmd` and goes no deeper
 
 One rule, no exceptions: **no package under `internal/` imports `internal/config`.**
 
 `main.go` reads the file, validates it, and constructs plain values. `workspace.NewRoot` takes a path.
-`vendor.NewOllama` takes an `Endpoint` and an `http.Client`. `daemon.New` takes a `workspace.Root`, a
-slice of `vendor.Adapter`, a slice of `harness.Adapter`, an `admission.Policy`, an `*eventlog.Log` and a
+`vendors.NewOllama` takes an `Endpoint` and an `http.Client`. `daemon.New` takes a `workspace.Root`, a
+slice of `vendors.Adapter`, a slice of `harness.Adapter`, an `admission.Policy`, an `*eventlog.Log` and a
 `*slog.Logger`. Nothing below `cmd` can read a setting that was not handed to it, which means nothing
 below `cmd` needs a config file to be tested.
 
-The one direction that is allowed is `config` importing `vendor`, so `config.VendorProfile` can decode
-straight into a `vendor.Endpoint` and a `vendor.Kind`. That is config depending on the vocabulary, never
+The one direction that is allowed is `config` importing `vendors`, so `config.VendorProfile` can decode
+straight into a `vendors.Endpoint` and a `vendors.Kind`.
+
+`WorkspaceRoot` stays a plain `string` beside it, and the inconsistency is the rule rather than an
+exception to it. A `vendors.Endpoint` is a value, so config can hold one. A `workspace.Root` is a
+resolved path, and resolving it reads the filesystem, follows symlinks and can fail. Config decodes
+into every type that is only data and into none that has to touch the world first. So `main.go` reads
+the string and calls `workspace.NewRoot`, which is the same shape as everything else it constructs. That is config depending on the vocabulary, never
 the vocabulary depending on config, and it is why `config` sits at L1 rather than L0.
 
 The file format is now a small decision rather than a load-bearing one, and it belongs to
-[#13](https://github.com/VictorJohnOkoh/Capstone/issues/13). My recommendation is JSON, because the
+[#13](https://github.com/VictorJohnOkoh/Capstone/issues/13). The recommendation is JSON, because the
 stdlib parses it, an unknown field can be made an error with one call, and two small files do not
 justify a dependency. The cost is that a human edits it without comments, and the answer to that is a
 `daemon.example.json` beside it rather than a parser.
@@ -535,16 +585,22 @@ replayed to the Client and never deleted. The operational log is a text file for
 loses nothing the Client would have shown. ADR 0008 already sent the first entry there: an admission
 refusal writes no Event because no Session exists, so it goes to the operational log.
 
-The logger enters where config enters, and the same fact falls out of the concurrency table: **the
-packages with no goroutines also take no logger.** A pure function has nothing to report. A
-`*slog.Logger` appears in `daemon`, `hub`, `hostset` and `cmd`, which is the same list as the
-goroutines, and that agreement is a good sign rather than a coincidence.
+The logger enters where config enters, and it lands in `daemon`, `hub`, `hostset` and `cmd`. That is
+almost the same list as the goroutines and the difference is the interesting part. `harness` runs one
+reader goroutine per `Run` and still takes no logger, because everything it has to say it says through
+`Sink`, and ADR 0006 already made the Adapter unable to report a fact that is not an Event. So the rule
+is not "no goroutines, no logger". It is that a package logs only where it holds something the Event log
+cannot: a process, a socket, or a decision that produced no Session.
 
-Metrics and tracing are not in v1, and the reason is specific rather than a deferral. A Session's Event
-log already is its trace: ordered, timestamped on one clock, complete, and durable. Adding a second
-timeline over the same events would produce two answers to when something happened. What is missing is
-Host-level and process-level, memory, goroutine counts, SSH reconnect rates, and `net/http/pprof` on the
-Daemon's loopback listener covers all of it for one import.
+What the tree decides is the split above, which is structural: two logs, one rule, and no contest
+between them. What it does not decide is the tooling, and #12 was only asked to make that specifiable.
+So the rest is a recommendation for #13 rather than a decision here.
+
+The recommendation is no metrics and no tracing in v1. A Session's Event log already is its trace,
+ordered, timestamped on one clock, complete and durable, and a second timeline over the same events
+would give two answers to when something happened. What that leaves uncovered is Host-level and
+process-level, memory, goroutine counts and SSH reconnect rates, and `net/http/pprof` on the Daemon's
+loopback listener covers all of it for one import.
 
 ## Considered options
 
@@ -556,7 +612,7 @@ Daemon's loopback listener covers all of it for one import.
 - **A flat `internal/` with no nested `internal`.** Simpler to read and one directory shallower.
   Rejected: it turns fence three from a compile error into a review comment, and the whole ticket asked
   whether the violation is impossible or merely impolite. One directory is a cheap price for an answer.
-- **Sub-packages per adapter, `vendor/ollama/`, `harness/acp/`.** Rejected above. It exports four types
+- **Sub-packages per adapter, `vendors/ollama/`, `harness/acp/`.** Rejected above. It exports four types
   across an import to prevent a mistake nobody would make.
 - **The Hub imports `daemon` and runs one in-process for the local Host.** Tempting, because the common
   case is one machine, and it deletes a hop. Rejected: it makes the Hub-to-Daemon leg optional, which
@@ -568,7 +624,8 @@ Daemon's loopback listener covers all of it for one import.
 - **An `eventlog` interface with an in-memory implementation.** Rejected: two implementations of a log
   whose correctness is entirely about durability, ordering and crash behaviour, where the fake has none
   of those properties and would pass every test the real one fails.
-- **A `daemon.Service` layer.** Rejected above. It is the pass-through the ticket named.
+- **A middle layer in `daemon` between the handlers and the registry.** Rejected above. It is the
+  pass-through the ticket named.
 
 ## Consequences
 
@@ -594,6 +651,16 @@ Daemon's loopback listener covers all of it for one import.
 - **ADR 0007's "nothing imports `harness`" is corrected** to "nothing at `harness`'s own level imports
   `harness`". The original is false as soon as the Daemon exists, and the corrected version is the rule
   the whole graph runs on.
+- **ADR 0007's `package vendor` is corrected to `package vendors`**, because the go command reserves
+  `vendor` as a path element and `./...` skips it. Left alone it would have removed the Vendor Adapter
+  tests from every `go test ./...` without an error message. Nothing else about that ADR moves.
+- This ADR names one type ADR 0006 used without naming. That ADR writes `Auto`, `Wait` and `Refuse`
+  and never says what they are values of, so the type is `event.Decision` and it lives in `event`
+  because `ApprovalPolicySet` carries it.
+- The Host id reaches the Client on `protocol.HostFrame`, named a Frame rather than an Event on
+  purpose. `CONTEXT.md` allows the Hub to add a Host id to a Frame and forbids it on an Event, so a
+  type called `HostEvent` would have contradicted the ubiquitous language in its name while obeying it
+  in its behaviour.
 - The Session State fold exists twice, in `session` and in the Client's JS, sharing one JSON fixture. It
   is the only duplicated logic in the design and it is duplicated because the Client applies live Events
   itself, which #11 settled.

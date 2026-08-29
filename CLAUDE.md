@@ -39,12 +39,12 @@ in the last column when you do.
 | 0002 | llama-swap is how llama.cpp becomes a Vendor, and the Daemon still owns admission control | llama.cpp, VRAM admission | 3 KB |
 | 0003 | OpenCode replaces Hermes as the second Harness, and Hermes becomes a test fixture | the Harness list, test fixtures | 6 KB |
 | 0004 | The Hub owns a four-state Host State, and presence is connection liveness | Hub, Host State, presence | 12 KB |
-| 0005 | Fourteen Event kinds, a per-Daemon sequence number, and text that streams as Deltas the log never keeps | the Event model, Deltas, the log | 28 KB |
+| 0005 | Fourteen Event kinds (0008 raised it to sixteen), a per-Daemon sequence number, and text that streams as Deltas the log never keeps | the Event model, Deltas, the log | 28 KB |
 | 0006 | The Daemon owns the Harness process and the Adapter owns the conversation | Harness Adapters, process supervision | 28 KB |
 | 0007 | The Vendor Adapter has no Health method, and every capability it reports is three-valued | Vendor Adapters, capability reporting | 33 KB |
 | 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed | Session lifecycle, admission, Approval Policy | 44 KB |
 | 0009 | One protocol that differs by a Host id, a merged stream to the Client, and an Event that is written before it is sent | the wire protocol, the SQLite log, replay, retention | 51 KB |
-| 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import | the package tree, imports, concurrency ownership, testing tiers, where config enters | 35 KB |
+| 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import | the package tree, imports, concurrency ownership, testing tiers, where config enters | 41 KB |
 
-Everything after 0004 is long. The ten together are about 63,000 tokens, which is why
+Everything after 0004 is long. The ten together are about 65,000 tokens, which is why
 they are indexed here and not read by default.
