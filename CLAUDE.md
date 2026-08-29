@@ -44,6 +44,7 @@ in the last column when you do.
 | 0007 | The Vendor Adapter has no Health method, and every capability it reports is three-valued | Vendor Adapters, capability reporting | 33 KB |
 | 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed | Session lifecycle, admission, Approval Policy | 44 KB |
 | 0009 | One protocol that differs by a Host id, a merged stream to the Client, and an Event that is written before it is sent | the wire protocol, the SQLite log, replay, retention | 51 KB |
+| 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import | the package tree, imports, concurrency ownership, testing tiers, where config enters | 35 KB |
 
-Everything after 0004 is long. The nine together are about 54,000 tokens, which is why
+Everything after 0004 is long. The ten together are about 63,000 tokens, which is why
 they are indexed here and not read by default.
