@@ -65,8 +65,4 @@ stream is the state of the Host. A stream that drops moves the Host to `Connecti
 keeps showing the last thing it knew. Repeated failures move it to `Down`. Reconnect, replay and
 restart all use the same mechanism, which is the Event log.
 
-## Where the detail is
 
-- `CONTEXT.md` for the words this project uses.
-- `docs/adr/` for the decisions and why the other options lost.
-- `docs/research/` for the captures the decisions are built on.
