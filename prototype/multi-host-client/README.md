@@ -71,10 +71,12 @@ gets crowded. In B the Host card header carries them once and every Session unde
 inherits them. That is the strongest argument for B, and I did not expect the
 argument to come from the failure case.
 
-**The four choices are really two.** Once the Model list is scoped to one Host, the
-Vendor is a prefix on the Model name and nobody picks it separately. The Harness has
-a sensible default. So the flow is Host and Model, with the Harness as an override.
-C's wizard looked heavy the moment I drew it: four steps for two selects. No wizard.
+**Only two of the four choices carry information.** Once the Model list is scoped to
+one Host, the Vendor is a prefix on the Model name and nobody picks it separately,
+and the Harness has a sensible default. Drawing it, I read that as an argument
+against the wizard. The decision below went the other way, and the reason is worth
+recording: four deliberate steps beat two selects when the thing being started runs
+for an hour on a machine in another room.
 
 **Tool Calls have no parent and no child, so no variant can draw a tree.** The
 issue says tool calls and their results are structurally nested. The only nesting
@@ -91,18 +93,22 @@ is the Harness going quiet, and the user does nothing about it.
 refused to invent an approval that never happened. On screen that refusal is legible,
 which I was not sure of before.
 
-## The recommendation
+## The decision
 
-The Session is the primary object, so A. The user drives Sessions. A Host is a place
-a Session runs, and it only becomes interesting when it breaks.
+**The primary object is the conversation. C.** Chosen after seeing all three side by
+side. I had argued for A, on the grounds that the user drives Sessions and a Host
+only becomes interesting when it breaks. Seeing them beside each other did not
+support that: a list of every Session on every machine is a thing to administer, and
+the work happens in one conversation at a time.
 
-Two things to take from B. The Host card is where Host facts belong, once, instead of
-repeated on every row, so A needs a Hosts view one click away rather than only the
-strip at the top. And B's operations table is the best of the three tool call
-renderings for scanning what a Prompt actually did, so fold it into A's step list.
+**B's Host card comes with it, read only.** A Hosts view holds the cause, the stamp,
+the Vendors and the resident Models once per machine, instead of repeating them on
+every Session row. It shows machines. It does not start Sessions.
 
-Nothing to take from C. Its toast is only needed because it hides the other Sessions,
-which is a problem A does not have.
+**The wizard stays.** Four steps, Host then Model then Harness then Approval Policy,
+opened from the rail. Starting does not live on the Host card.
 
-Flip through before this is settled. The useful disagreement is usually "A, but with
-that bit of B".
+What C costs, taken on purpose. It hides every Session but one, so the toast is
+load bearing rather than decoration: it is the only path a `ToolCallRequested` on
+another Host has to reach the user. Whatever replaces it in real code has to keep
+that job, and the rail's Asking pill is not enough on its own.
