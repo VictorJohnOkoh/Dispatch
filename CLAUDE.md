@@ -26,3 +26,23 @@ The five canonical triage roles, each label string equal to its name. See `docs/
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+Read `CONTEXT.md` first. It is the ubiquitous language and it is small.
+
+Each ADR's title is its decision, so the table below is the decision. Treat it as the
+answer. Open the full file only when you change that area, and expect to pay the size
+in the last column when you do.
+
+| ADR | Decision | Open it to change | Size |
+|---|---|---|---|
+| 0001 | A resident Daemon on each Host owns Session lifecycle, not the SSH connection | Daemon startup, SSH, transport | 1 KB |
+| 0002 | llama-swap is how llama.cpp becomes a Vendor, and the Daemon still owns admission control | llama.cpp, VRAM admission | 3 KB |
+| 0003 | OpenCode replaces Hermes as the second Harness, and Hermes becomes a test fixture | the Harness list, test fixtures | 6 KB |
+| 0004 | The Hub owns a four-state Host State, and presence is connection liveness | Hub, Host State, presence | 12 KB |
+| 0005 | Fourteen Event kinds, a per-Daemon sequence number, and text that streams as Deltas the log never keeps | the Event model, Deltas, the log | 28 KB |
+| 0006 | The Daemon owns the Harness process and the Adapter owns the conversation | Harness Adapters, process supervision | 28 KB |
+| 0007 | The Vendor Adapter has no Health method, and every capability it reports is three-valued | Vendor Adapters, capability reporting | 33 KB |
+| 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed | Session lifecycle, admission, Approval Policy | 44 KB |
+
+Everything after 0004 is long. The eight together are about 41,000 tokens, which is why
+they are indexed here and not read by default.
