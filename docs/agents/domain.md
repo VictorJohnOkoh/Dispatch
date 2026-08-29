@@ -7,26 +7,16 @@ This is a **single-context** repo: one `CONTEXT.md` and one `docs/adr/` at the r
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root — the glossary and ubiquitous language.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
+- **`docs/adr/`** — the ADR index in `CLAUDE.md` gives every decision in one line.
+  Read the index first. Open a full ADR only when you change the area it covers;
+  0005 onward run 28 KB to 44 KB each.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
 ## File structure
 
-```
-/
-├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-resident-daemon-on-host.md
-│   ├── 0002-llama-swap-is-the-llama-cpp-vendor.md
-│   ├── 0003-opencode-replaces-hermes-as-the-second-harness.md
-│   ├── 0004-host-state-is-connection-liveness.md
-│   ├── 0005-the-event-model.md
-│   ├── 0006-the-harness-adapter-interface.md
-│   ├── 0007-the-vendor-adapter-interface.md
-│   └── 0008-session-lifecycle-admission-and-containment.md
-└── scripts/
-```
+`CONTEXT.md` and `docs/adr/` sit at the repo root, with `scripts/` alongside.
+The ADR index in `CLAUDE.md` lists the files, so it is not repeated here.
 
 If this repo ever splits into multiple bounded contexts, the layout becomes a root `CONTEXT-MAP.md` pointing at one `CONTEXT.md` per context, with context-scoped `src/<context>/docs/adr/` alongside the system-wide `docs/adr/`. Until then, ignore that shape.
 
