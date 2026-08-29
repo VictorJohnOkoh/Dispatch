@@ -23,7 +23,8 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 │   ├── 0004-host-state-is-connection-liveness.md
 │   ├── 0005-the-event-model.md
 │   ├── 0006-the-harness-adapter-interface.md
-│   └── 0007-the-vendor-adapter-interface.md
+│   ├── 0007-the-vendor-adapter-interface.md
+│   └── 0008-session-lifecycle-admission-and-containment.md
 └── scripts/
 ```
 

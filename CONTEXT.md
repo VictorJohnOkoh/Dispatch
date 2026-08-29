@@ -77,15 +77,23 @@ A Harness Adapter's ability to hold one Tool Call of a given `toolKind` until th
 _Avoid_: hook, interceptor, permission, guard
 
 **Session**:
-One run of one Harness against one Model on one Host. The unit whose lifecycle a Daemon manages, and the unit an Event belongs to.
+One run of one Harness against one Model on one Host. The unit whose lifecycle a Daemon manages, and the unit an Event belongs to. One Session is one Harness process, and a Session never survives the Daemon that supervised it.
 _Avoid_: conversation, chat, instance, job
+
+**Session State**:
+What a Session is doing now. One of `Starting`, `Idle`, `Working`, `Asking`, or `Ended` carrying a reason of `stopped`, `failed` or `lost`. Derived by folding the Session's own Events, never stored, so every transition is caused by an Event and none is internal.
+_Avoid_: status, phase, lifecycle stage, running
+
+**Admission**:
+The Daemon's decision on whether one more Session may start on its Host. Runs before the Session exists, so a refusal writes no Event and produces no Session. Per Host, because a Daemon never learns about its peers. A refused start is an error naming the Session that holds the slot, never a queue position.
+_Avoid_: scheduling, throttling, rate limit, capacity check
 
 **Event**:
 One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. Native output that no Event Kind covers is dropped, and the Harness's raw bytes are kept in a per-Session transcript file beside the log. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history, and a Session's whole state is derivable by folding it.
 _Avoid_: message, chunk, token, log line
 
 **Event Kind**:
-The type of one Event, from a closed set of fourteen. Written by the Harness adapter: `Reasoning`, `AssistantMessage`, `ToolCallRequested`, `ToolCallEnded`, `PromptCompleted`. Written by the Daemon: `SessionStarted`, `ApprovalPolicySet`, `PromptSubmitted`, `ApprovalRequested`, `ApprovalDecided`, `Error`, `SessionEnded`, `HubDetached`, `HubAttached`. A Kind exists when at least two of Pi, OpenCode and passthrough produce the fact and the Client draws it, or when it records a Daemon decision that changes how a Session behaves.
+The type of one Event, from a closed set of sixteen. Written by the Harness adapter: `Reasoning`, `AssistantMessage`, `ToolCallRequested`, `ToolCallEnded`, `PromptCompleted`. Written by the Daemon: `SessionStarted`, `SessionReady`, `ApprovalPolicySet`, `PromptSubmitted`, `ApprovalRequested`, `ApprovalDecided`, `Error`, `SessionEnded`, `HubDetached`, `HubAttached`, `DaemonStarted`. A Kind exists when at least two of Pi, OpenCode and passthrough produce the fact and the Client draws it, or when it records a Daemon decision that changes how a Session behaves.
 _Avoid_: event type, message type, tag
 
 **Envelope**:
@@ -105,15 +113,15 @@ One submission from the user and all the work a Session does because of it. Boun
 _Avoid_: turn, request, query, exchange
 
 **Tool Call**:
-One attempt by a Harness to run one tool, identified by a tool call id that correlates a `ToolCallRequested` Event with its `ToolCallEnded`. Every Tool Call ends: when a Harness reports no result, the Daemon writes `ToolCallEnded` with outcome `unknown` as the Prompt completes. `toolKind` is one of `read`, `edit`, `execute`, `fetch`, `other`.
+One attempt by a Harness to run one tool, identified by a tool call id that correlates a `ToolCallRequested` Event with its `ToolCallEnded`. Every Tool Call ends: when a Harness reports no result, the Daemon writes `ToolCallEnded` with outcome `unknown` as the Prompt completes or as the Session ends, whichever comes first. `toolKind` is one of `read`, `edit`, `execute`, `fetch`, `other`.
 _Avoid_: tool use, function call, action, invocation
 
 ### Containment
 
 **Workspace Root**:
-The directory on a Host outside which no Session may operate. Configured per Host; enforced by the Daemon when a Session's working directory is chosen.
+The directory on a Host outside which no Session may operate. Configured per Host, and enforced by one function in the Daemon that resolves a path with symlinks followed before it compares. It runs twice: on the working directory when a Session starts, and on every path a Harness delegates back for a write. It bounds those two things and nothing else. A Harness runs as an ordinary process, so its own reads and its shell commands are not bounded by it.
 _Avoid_: sandbox, jail, base path
 
 **Approval Policy**:
-The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused. One decision per `toolKind`, so five slots that are always all set. Chosen when the Session starts and changeable while it runs, so answering an approval with "always allow" flips one slot. Every value it ever holds is an `ApprovalPolicySet` Event. A slot with no Gate may only be set to `auto`; setting it to `wait` or `refuse` fails, when the Session starts and on every change while it runs. A passthrough Session has no tools and so has no Approval Policy.
+The per-Session rule governing whether a Harness's tool call executes immediately, waits for the user's decision, or is refused. One decision per `toolKind`, so five slots that are always all set. Chosen when the Session starts and changeable while it runs, so answering an approval with "always allow" flips one slot. Every value it ever holds is an `ApprovalPolicySet` Event. A slot with no Gate may only be set to `auto`; setting it to `wait` or `refuse` fails, when the Session starts and on every change while it runs. Only the user sets it, and the Host config carries a default it may always override. The default is `auto` for `read`, `wait` for the other four, and `auto` for any slot with no Gate. A change applies to Tool Calls requested after it, never to a question already open. It guarantees what the Daemon allowed, never what the Harness ran. A passthrough Session has no tools and so has no Approval Policy.
 _Avoid_: permissions, confirmation mode, safety setting
