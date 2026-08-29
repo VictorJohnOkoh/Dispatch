@@ -12,8 +12,8 @@ HOSTS = [
         "cause": None,
         "seen": NOW,
         "vendors": [
-            {"name": "llama-swap", "reachable": True, "resident": ["capstone/qwen3.5-9b"]},
-            {"name": "Ollama", "reachable": True, "resident": []},
+            {"name": "llama-swap", "resident": ["capstone/qwen3.5-9b"]},
+            {"name": "Ollama", "resident": []},
         ],
     },
     {
@@ -24,7 +24,7 @@ HOSTS = [
         "cause": None,
         "seen": NOW,
         "vendors": [
-            {"name": "LM Studio", "reachable": True, "resident": ["glm-4-9b"]},
+            {"name": "LM Studio", "resident": ["glm-4-9b"]},
         ],
     },
     {
@@ -35,7 +35,18 @@ HOSTS = [
         "cause": "no-daemon",
         "seen": "14:02",
         "vendors": [
-            {"name": "Ollama", "reachable": True, "resident": ["llama3.1:8b"]},
+            {"name": "Ollama", "resident": ["llama3.1:8b"]},
+        ],
+    },
+    {
+        "id": "garage",
+        "label": "Garage rig",
+        "addr": "victor@garage.lan",
+        "state": "Connecting",
+        "cause": None,
+        "seen": "14:35",
+        "vendors": [
+            {"name": "llama-swap", "resident": ["capstone/devstral-24b"]},
         ],
     },
     {
@@ -72,6 +83,7 @@ MODELS = {
                 ("Ollama", "llama3.1:8b")],
     "shed": [("LM Studio", "glm-4-9b"), ("LM Studio", "qwen2.5-coder-7b")],
     "laptop": [("Ollama", "llama3.1:8b")],
+    "garage": [("llama-swap", "capstone/devstral-24b")],
     "oldbox": [],
 }
 
@@ -173,8 +185,22 @@ S_DEAD = [
     ev(9302, "s-6612", "13:41", "SessionEnded", reason="failed"),
 ]
 
+# garage / s-88c1 - the Host is Connecting, so this is the last display, held
+S_HELD = [
+    ev(210, "s-88c1", "14:12", "SessionStarted", harness="OpenCode", vendor="llama-swap",
+       model="capstone/devstral-24b", cwd="~/src/dispatch"),
+    ev(211, "s-88c1", "14:12", "ApprovalPolicySet", setBy="user", **POLICY),
+    ev(212, "s-88c1", "14:12", "SessionReady", model="capstone/devstral-24b"),
+    ev(213, "s-88c1", "14:30", "PromptSubmitted", text="explain the admission rule"),
+    ev(214, "s-88c1", "14:31", "AssistantMessage", complete=True,
+       text="Admission runs before the Session exists, so a refusal writes no Event."),
+    ev(215, "s-88c1", "14:31", "PromptCompleted", stopReason="end_turn",
+       usage={"in": 190, "out": 88}),
+]
+
 SESSIONS = [
     {"id": "s-7f3a2c", "host": "desktop", "events": S_FOCUS},
+    {"id": "s-88c1", "host": "garage", "events": S_HELD},
     {"id": "s-4d10", "host": "shed", "events": S_SHED},
     {"id": "s-22ae", "host": "laptop", "events": S_STALE},
     {"id": "s-91b0", "host": "desktop", "events": S_PASS},
@@ -228,9 +254,15 @@ def live_sessions():
     return [s for s in SESSIONS if state_of(s["events"])[0] != "Ended"]
 
 
-# a Session on a Host that is not Ready is shown as it last was, stamped
+# a Session on a Host that is Down is shown as it last was, dimmed and stamped
 def is_stale(s):
-    return host(s["host"])["state"] != "Ready"
+    return host(s["host"])["state"] in ("Down", "Incompatible")
+
+
+# Connecting holds the last display with a mark instead of dimming it (ADR 0004),
+# because the blink is usually over before seven seconds
+def is_reconnecting(s):
+    return host(s["host"])["state"] == "Connecting"
 
 
 # the last Prompt and everything the Session did because of it

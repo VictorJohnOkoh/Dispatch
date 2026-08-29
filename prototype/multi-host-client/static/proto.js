@@ -30,13 +30,22 @@ function delta(d) {
   applied[d.seq] = seen + 1;
 }
 
-// the Session left Working, so the box that refuses a second Prompt has to go
-function reopenComposer() {
+// the box that refuses a Prompt goes when the reason for it goes: the Session left
+// Working, or the Host came back. An Ended Session keeps its box either way.
+function reopenComposer(hostCameBack) {
   const box = one(".composer.off");
-  if (!box || box.textContent.indexOf("Working") < 0) return;
+  if (!box) return;
+  const reason = hostCameBack ? "Reconnecting" : "Working";
+  if (box.textContent.indexOf(reason) < 0) return;
   box.className = "composer";
   box.innerHTML = '<input placeholder="Send a Prompt"><button>Send</button>';
 }
+
+// the same mapping the server renders, so a live outcome is coloured like a replayed one
+const OUTCOME = {
+  ok: ["done", "ok"], error: ["failed", "bad"],
+  refused: ["refused", "bad"], unknown: ["no result reported", "unknown"],
+};
 
 function callRow(id, words, cls) {
   const el = one(`[data-call="${id}"]`);
@@ -61,24 +70,43 @@ function event(e) {
     callRow(p.toolCallId, p.decision + " by " + p.by, p.decision === "allowed" ? "running" : "bad");
     clearDemand(e.host, e.session);
   } else if (e.kind === "ToolCallEnded") {
-    callRow(p.toolCallId, p.content, p.outcome === "ok" ? "ok" : "bad");
+    const [words, cls] = OUTCOME[p.outcome];
+    callRow(p.toolCallId, words, cls);
+    const res = one(`[data-call="${p.toolCallId}"] .result`);
+    if (res) res.textContent = p.content;
   }
   countTitle();
 }
 
+// A Host State change reaches every Session that lives on that Host, because
+// Working on a Ready Host and Working on a Host that stopped answering are not
+// the same row.
 function host(f) {
-  const words = {
-    Ready: "Ready", Connecting: "Reconnecting",
-    Down: f.cause === "no-daemon" ? "Machine is up, Daemon is not running"
-                                  : "Machine is off or off the network",
-    Incompatible: "Daemon speaks protocol 1, Hub needs 2",
-  }[f.state];
-  all(`[data-host-state="${f.host}"]`).forEach((el) => (el.textContent = words));
+  const key = f.state === "Down" ? "Down/" + f.cause : f.state;
+  all(`[data-host-state="${f.host}"]`).forEach((el) => (el.textContent = WORDING[key]));
   all(`[data-host-dot="${f.host}"]`).forEach((el) => {
     el.className = "dot " + f.state.toLowerCase();
   });
-  const card = one(`[data-host-card="${f.host}"]`);
-  if (card) card.classList.toggle("wobbly", f.state === "Connecting");
+  const gone = f.state === "Down" || f.state === "Incompatible";
+  one(`[data-host-card="${f.host}"]`)?.classList.remove("ready", "connecting", "down",
+    "incompatible");
+  one(`[data-host-card="${f.host}"]`)?.classList.add(f.state.toLowerCase());
+  all(`[data-host="${f.host}"]`).forEach((row) => {
+    row.classList.toggle("reconnecting", f.state === "Connecting");
+    row.classList.toggle("stale", gone);
+    if (row.classList.contains("focus")) closeComposer(f.state, gone);
+  });
+}
+
+// the composer follows the Host, not only the Session
+function closeComposer(state, gone) {
+  const box = one("[data-composer]");
+  if (!box) return;
+  if (state === "Ready") return reopenComposer(true);
+  box.className = "composer off";
+  box.textContent = gone
+    ? "This Host is not answering. You are looking at history."
+    : "Reconnecting to this Host. Nothing is lost, and the gap replays.";
 }
 
 // Each variant demands attention its own way. This is the whole disagreement.
@@ -141,7 +169,6 @@ es.addEventListener("delta", (m) => delta(JSON.parse(m.data)));
 es.addEventListener("event", (m) => event(JSON.parse(m.data)));
 es.addEventListener("host", (m) => host(JSON.parse(m.data)));
 
-// arrow keys switch variant
 addEventListener("keydown", (e) => {
   if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   const keys = ["A", "B", "C"];

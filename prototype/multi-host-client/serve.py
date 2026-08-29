@@ -6,8 +6,8 @@
 Server-rendered HTML and a little vanilla JS, faking all data. No Daemon, no Hub,
 no persistence. The stream at /stream replays a fixed script so the interesting
 Frames arrive while you watch: Deltas into an open message, a PromptCompleted, an
-ApprovalRequested on a Host you are not looking at, and a Host that drops to
-Connecting and comes back.
+ApprovalRequested on a Host you are not looking at, a Host that drops to Connecting
+and comes back, and a Host that was Connecting and gives up.
 """
 
 import json
@@ -48,7 +48,12 @@ SCRIPT = [
                                 "detail": "in ~/src/notes"}}),
     (14.0, "host", {"host": "desktop", "state": "Connecting", "cause": None}),
     (20.0, "host", {"host": "desktop", "state": "Ready", "cause": None}),
+    (26.0, "host", {"host": "garage", "state": "Down", "cause": "unreachable"}),
 ]
+
+# Seq never skips and is the log's primary key, so a command allocates rather
+# than repeats one
+next_seq = 622
 
 # Frames a command produced, waiting for the open stream to pick them up
 injected = []
@@ -78,6 +83,8 @@ class Handler(BaseHTTPRequestHandler):
         if variant not in render.RENDER:
             variant = "A"
         focus = q.get("focus", ["s-7f3a2c"])[0]
+        if not any(x["id"] == focus for x in w.SESSIONS):
+            return self.send_error(404, "no such Session")
         body = render.page(variant, render.RENDER[variant](focus))
         self.reply(200, "text/html; charset=utf-8", body.encode())
 
@@ -87,16 +94,18 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("content-length", 0))
             body = json.loads(self.rfile.read(n) or "{}")
             decision = body.get("decision", "refused")
+            global next_seq
             injected.append(("event", {
-                "seq": 622, "session": "s-4d10", "host": "shed", "at": "14:38",
+                "seq": next_seq, "session": "s-4d10", "host": "shed", "at": "14:38",
                 "kind": "ApprovalDecided",
                 "payload": {"toolCallId": "tc-9", "decision": decision, "by": "user"}}))
             injected.append(("event", {
-                "seq": 623, "session": "s-4d10", "host": "shed", "at": "14:38",
+                "seq": next_seq + 1, "session": "s-4d10", "host": "shed", "at": "14:38",
                 "kind": "ToolCallEnded",
                 "payload": {"toolCallId": "tc-9",
                             "outcome": "ok" if decision == "allowed" else "refused",
                             "content": "build/ removed" if decision == "allowed" else "refused"}}))
+            next_seq += 2
         self.reply(202, "application/json", b"{}")
 
     def static(self, name):

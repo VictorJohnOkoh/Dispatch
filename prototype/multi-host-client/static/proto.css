@@ -34,6 +34,12 @@ code { display: block; background: #101318; color: #9fb0c4; padding: 6px 8px;
 
 /* Stale: last-known content, kept in place and stamped. Never hidden. */
 .stale { opacity: .55; }
+/* Connecting keeps the content at full strength and marks the edge, because the
+   blink is usually over before the seven seconds that make it Down. */
+.reconnecting { box-shadow: inset 2px 0 0 var(--connecting); }
+.qrow.reconnecting header::after { content: "reconnecting"; font-size: 11px;
+  color: var(--connecting); }
+.rrow.reconnecting b::after { content: " *"; color: var(--connecting); }
 .stamp { font-size: 11px; color: var(--connecting); border: 1px dashed #4a412a;
   padding: 0 6px; border-radius: 4px; }
 .gap { color: var(--connecting); font-size: 12px; }
@@ -96,7 +102,6 @@ code { display: block; background: #101318; color: #9fb0c4; padding: 6px 8px;
 .starter summary { color: var(--dim); font-size: 12px; cursor: pointer; }
 
 /* ---------------------------------------------------- B: the machine room */
-.vB body, .vB { }
 .room { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px; padding: 12px 18px 90px; margin-right: 420px; }
 .hcard { background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
@@ -144,7 +149,6 @@ code { display: block; background: #101318; color: #9fb0c4; padding: 6px 8px;
 .ops .res { color: var(--dim); }
 
 /* ---------------------------------------------------- C: the desk */
-.vC body, .vC { }
 .rail { position: fixed; left: 0; top: 0; bottom: 0; width: 270px; overflow: auto;
   background: var(--panel); border-right: 1px solid var(--line); padding: 12px; }
 .rail h1 { margin-bottom: 10px; }

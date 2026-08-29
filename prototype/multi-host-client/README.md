@@ -23,7 +23,7 @@ What is the user looking at? Three answers, one route, `?variant=`.
 
 ## The faked world
 
-Four Hosts, one in each Host State, and five Sessions.
+Five Hosts, covering every Host State and both causes of `Down`, and six Sessions.
 
 - Desktop is `Ready` and holds the Session in focus. Its message is still open, so
   Deltas arrive when you attach.
@@ -32,14 +32,18 @@ Four Hosts, one in each Host State, and five Sessions.
   looking at.
 - Laptop is `Down{no-daemon}`. Its Session was `Working` at 14:02 and may still be.
   Everything about it is Stale.
+- Garage rig is `Connecting`. Its Session keeps its content at full strength with a
+  mark on the edge, because ADR 0004 lets `Connecting` absorb a blink. At 26 seconds
+  it gives up and becomes `Down{unreachable}`, and only then does it dim.
 - Old box is `Incompatible`.
 - Desktop also holds an `Ended{failed}` Session and a passthrough Session with no
   tools, so no Approval Policy.
 
 The stream at `/stream` replays a fixed script: Deltas, a `PromptCompleted`, the
-`ApprovalRequested` from Shed box, then Desktop drops to `Connecting` at 14 seconds
-and comes back at 20. Allow or Deny does a real `POST` that answers `202` with an
-empty body, and both `ApprovalDecided` and `ToolCallEnded` come back on the stream.
+`ApprovalRequested` from Shed box, Desktop dropping to `Connecting` at 14 seconds and
+returning at 20, and Garage rig giving up at 26. Allow or Deny does a real `POST`
+that answers `202` with an empty body, and both `ApprovalDecided` and `ToolCallEnded`
+come back on the stream.
 That is ADR 0009's rule, that a command is only an intention.
 
 The one piece of real logic is `world.state_of`, which folds a Session's Events into
@@ -71,6 +75,13 @@ argument to come from the failure case.
 Vendor is a prefix on the Model name and nobody picks it separately. The Harness has
 a sensible default. So the flow is Host and Model, with the Harness as an override.
 C's wizard looked heavy the moment I drew it: four steps for two selects. No wizard.
+
+**Tool Calls have no parent and no child, so no variant can draw a tree.** The
+issue says tool calls and their results are structurally nested. The only nesting
+the Event model has is a call and its end, and a Prompt and the calls inside it.
+`ToolCallRequested` carries no parent id, so a Client that drew a tool call inside
+another tool call would be inventing a relation no Event states. All three variants
+therefore show two levels, and that is the ceiling rather than a shortcut.
 
 **`ToolCallEnded{outcome: unknown}` should be grey, not red.** Drawing it, the pull
 to make it look like a failure was strong. "no result reported" is not a failure, it

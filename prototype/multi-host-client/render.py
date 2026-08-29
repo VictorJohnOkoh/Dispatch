@@ -11,14 +11,12 @@ Each variant owns its own layout. Nothing is shared but the CSS tokens, the
 switcher and the small helpers that shape data.
 """
 
+import json
 from html import escape as esc
 
 import world as w
 
 VARIANTS = {"A": "Queue", "B": "Machine room", "C": "Desk"}
-
-STATE_DOT = {"Ready": "ready", "Connecting": "connecting", "Down": "down",
-             "Incompatible": "incompatible"}
 
 
 def page(variant, body):
@@ -30,9 +28,14 @@ def page(variant, body):
 <body class="v{variant}">
 {body}
 {switcher(variant)}
-<script>window.VARIANT = "{variant}";</script>
+<script>window.VARIANT = "{variant}"; window.WORDING = {wording()};</script>
 <script src="/static/proto.js"></script>
 </body>"""
+
+
+# ADR 0004's wording, sent to the browser so the map lives in one file
+def wording():
+    return json.dumps({k: v[1] for k, v in w.HOST_WORDING.items()})
 
 
 def switcher(variant):
@@ -53,9 +56,7 @@ def tool_calls(events):
         if not cid:
             continue
         c = calls.setdefault(cid, {"asked": None, "decided": None, "ended": None})
-        if e["kind"] == "ToolCallRequested":
-            c["req"] = e
-        elif e["kind"] == "ApprovalRequested":
+        if e["kind"] == "ApprovalRequested":
             c["asked"] = e
         elif e["kind"] == "ApprovalDecided":
             c["decided"] = e
@@ -76,13 +77,8 @@ def call_status(c):
     return ("running", "running")
 
 
-def host_line(h):
-    cls, words = w.host_wording(h)
-    return cls, words
-
-
 def presence_dot(h):
-    return f'<i class="dot {STATE_DOT[h["state"]]}" data-host-dot="{h["id"]}"></i>'
+    return f'<i class="dot {h["state"].lower()}" data-host-dot="{h["id"]}"></i>'
 
 
 def stale_stamp(s):
@@ -114,12 +110,12 @@ def variant_a(focus):
     bad = [h for h in hosts if h["state"] not in ("Ready", "Connecting")]
     strip = "".join(
         f'<span class="hchip" data-host-card="{h["id"]}">{presence_dot(h)}{h["label"]}'
-        f'<em data-host-state="{h["id"]}">{host_line(h)[1]}</em></span>' for h in hosts)
+        f'<em data-host-state="{h["id"]}">{w.host_wording(h)[1]}</em></span>' for h in hosts)
 
     rows = []
     for s in sorted(w.SESSIONS, key=sort_key):
         h = w.host(s["host"])
-        cwd, spec = session_head(s)
+        cwd, line = session_head(s)
         st = w.state_of(s["events"])[0]
         gist = "the Hub stopped listening here"
         for e in reversed(s["events"]):
@@ -129,12 +125,12 @@ def variant_a(focus):
                 gist = said
                 break
         rows.append(f"""
-<article class="qrow{' stale' if w.is_stale(s) else ''}{' focus' if s['id'] == focus else ''}"
+<article class="qrow{' stale' if w.is_stale(s) else ''}{' reconnecting' if w.is_reconnecting(s) else ''}{' focus' if s['id'] == focus else ''}"
          data-session-row="{s['id']}" data-host="{h['id']}">
   <header onclick="location.search='?variant=A&amp;focus={s['id']}'">
     {state_pill(s)}
     <b>{esc(cwd)}</b>
-    <span class="meta">{spec}</span>
+    <span class="meta">{line}</span>
     <span class="hchip small">{presence_dot(h)}{h['label']}</span>
     {stale_stamp(s) if w.is_stale(s) else ''}
   </header>
@@ -146,7 +142,7 @@ def variant_a(focus):
     warn = ""
     if bad:
         warn = ('<p class="hostwarn">' + " &middot; ".join(
-            f'<b>{h["label"]}</b> {host_line(h)[1]}' for h in bad) + "</p>")
+            f'<b>{h["label"]}</b> {w.host_wording(h)[1]}' for h in bad) + "</p>")
 
     return f"""
 <header class="topbar">
@@ -212,14 +208,18 @@ def steps(s):
 def composer(s):
     st = w.state_of(s["events"])[0]
     if w.is_stale(s):
-        return ('<div class="composer off">This Host is not answering. '
+        return ('<div class="composer off" data-composer>This Host is not answering. '
                 "You are looking at history.</div>")
+    if w.is_reconnecting(s):
+        return ('<div class="composer off" data-composer>Reconnecting to this Host. '
+                "Nothing is lost, and the gap replays.</div>")
     if st == "Ended":
-        return '<div class="composer off">This Session ended. Its history stays.</div>'
+        return '<div class="composer off" data-composer>This Session ended. Its history stays.</div>'
     if st in ("Working", "Asking"):
-        return ('<div class="composer off">Working &mdash; a second Prompt is refused'
-                ' <button>Interrupt</button></div>')
-    return '<div class="composer"><input placeholder="Send a Prompt"><button>Send</button></div>'
+        return ('<div class="composer off" data-composer>Working &mdash; a second Prompt is'
+                ' refused <button>Interrupt</button></div>')
+    return ('<div class="composer" data-composer><input placeholder="Send a Prompt">'
+            '<button>Send</button></div>')
 
 
 # A resolves the four choices as defaults with an override
@@ -242,14 +242,14 @@ def start_defaults():
 def variant_b(focus):
     cards = []
     for h in w.HOSTS:
-        cls, words = host_line(h)
+        cls, words = w.host_wording(h)
         ss = w.sessions_on(h["id"])
         vend = "".join(
             f'<li>{v["name"]} <span>{", ".join(v["resident"]) or "nothing resident"}</span></li>'
             for v in h["vendors"]) or "<li>no Vendor answered</li>"
         rows = "".join(f"""
     <tr class="{'stale' if w.is_stale(s) else ''}{' focus' if s['id'] == focus else ''}"
-        data-session-row="{s['id']}" onclick="location.search='?variant=B&amp;focus={s['id']}'">
+        data-session-row="{s['id']}" data-host="{h['id']}" onclick="location.search='?variant=B&amp;focus={s['id']}'">
       <td>{state_pill(s)}</td><td>{esc(w.spec(s)["cwd"])}</td>
       <td class="meta">{w.spec(s)["harness"]}</td>
       <td class="meta">{esc(w.spec(s)["model"])}</td>
@@ -272,7 +272,7 @@ def variant_b(focus):
   {start_form(h)}
 </section>""")
 
-    drawer = ops(w.session(focus)) if focus else '<p class="meta">Pick a Session.</p>'
+    drawer = ops(w.session(focus))
     return f"""
 <header class="topbar"><h1>Hosts</h1></header>
 <main class="room">{''.join(cards)}</main>
@@ -318,7 +318,7 @@ def ops(s):
 # B resolves the four choices as a dense form, with the Host already chosen
 def start_form(h):
     if h["state"] != "Ready":
-        return f'<div class="startform off">Cannot start: {host_line(h)[1].lower()}</div>'
+        return f'<div class="startform off">Cannot start: {w.host_wording(h)[1].lower()}</div>'
     models = "".join(f'<option>{v} &middot; {m}</option>' for v, m in w.MODELS[h["id"]])
     harn = "".join(f"<option>{x}</option>" for x in w.HARNESSES)
     return (f'<div class="startform"><select>{models}</select>'
@@ -335,20 +335,21 @@ def variant_c(focus):
         oh = w.host(o["host"])
         rail.append(f"""
   <a class="rrow{' on' if o['id'] == focus else ''}{' stale' if w.is_stale(o) else ''}"
-     href="?variant=C&amp;focus={o['id']}" data-session-row="{o['id']}">
+     href="?variant=C&amp;focus={o['id']}" data-session-row="{o['id']}"
+     data-host="{oh['id']}">
     {presence_dot(oh)}<b>{esc(w.spec(o)["cwd"])}</b>
     <span class="meta">{oh['label']}</span>{state_pill(o)}</a>""")
 
     band = ""
     if w.is_stale(s):
-        band = (f'<div class="band">{h["label"]}: {host_line(h)[1].lower()} since '
+        band = (f'<div class="band">{h["label"]}: {w.host_wording(h)[1].lower()} since '
                 f'{h["seen"]}. This Session may still be running. You see history.</div>')
 
     return f"""
 <nav class="rail"><h1>Dispatch</h1>{''.join(rail)}<button class="new">New Session</button></nav>
 <main class="desk">
   <header class="dhead">{presence_dot(h)}<b>{h['label']}</b>
-    <span data-host-state="{h['id']}">{host_line(h)[1]}</span>
+    <span data-host-state="{h['id']}">{w.host_wording(h)[1]}</span>
     <span class="meta">{esc(w.spec(s)["cwd"])} &middot; {w.spec(s)["harness"]}
     &middot; {esc(w.spec(s)["model"])}</span>{state_pill(s)}</header>
   {band}
@@ -409,7 +410,7 @@ def turn(s):
 def wizard():
     hosts = "".join(
         f'<button class="wopt"{" disabled" if h["state"] != "Ready" else ""}>'
-        f'{h["label"]}<em>{host_line(h)[1]}</em></button>' for h in w.HOSTS)
+        f'{h["label"]}<em>{w.host_wording(h)[1]}</em></button>' for h in w.HOSTS)
     return f"""
 <dialog class="wiz" id="wiz">
   <ol class="wsteps"><li class="on">Host</li><li>Model</li><li>Harness</li><li>Policy</li></ol>
