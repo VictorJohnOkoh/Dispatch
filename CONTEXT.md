@@ -39,7 +39,7 @@ The Hub's view of one Host, and the only place that view exists. One of `Connect
 _Avoid_: status, availability, online, offline, health
 
 **Handshake**:
-The protocol version check the Hub and a Daemon run when the connection opens. Passing it makes a Host `Ready`; failing it makes the Host `Incompatible`, which the Hub never retries.
+The protocol version check the Hub and a Daemon run when the connection opens. The Hub names the one version it requires; the Daemon serves it or answers `426` with the set it can serve, which is `{1}` today. Passing it makes a Host `Ready`; failing it makes the Host `Incompatible`, which the Hub never retries. It runs on the Event stream, not on an endpoint of its own.
 _Avoid_: negotiation, version check, hello
 
 **Stale**:
@@ -89,7 +89,7 @@ The Daemon's decision on whether one more Session may start on its Host. Runs be
 _Avoid_: scheduling, throttling, rate limit, capacity check
 
 **Event**:
-One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. Native output that no Event Kind covers is dropped, and the Harness's raw bytes are kept in a per-Session transcript file beside the log. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history, and a Session's whole state is derivable by folding it.
+One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. Native output that no Event Kind covers is dropped, and the Harness's raw bytes are kept in a per-Session transcript file beside the log. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history, and a Session's whole state is derivable by folding it. An Event is durable before it is sent, and nothing is ever deleted from the log, so a Session stays readable for as long as the Host keeps its file. An open message is written out every 4 KiB, so a crash keeps what it had rather than losing the message.
 _Avoid_: message, chunk, token, log line
 
 **Event Kind**:
@@ -101,8 +101,20 @@ The five fields every Event carries whatever its Kind: Sequence Number, Session 
 _Avoid_: header, metadata, wrapper
 
 **Sequence Number**:
-The Daemon-wide counter that orders every Event on one Host. Starts at 1, never skips, and is both the Event log's primary key and the `Last-Event-ID` offset. Unique inside one Daemon and nowhere else, so the Hub tracks one per Host.
-_Avoid_: offset, index, event id, cursor
+The Daemon-wide counter that orders every Event on one Host. Starts at 1, never skips, and is the Event log's primary key. Unique inside one Daemon and nowhere else, so the Hub tracks one per Host. A reader detects a lost Event by subtracting Sequence Numbers and resumes on a **Cursor**, which is built from them and is not the same number while a message is still arriving.
+_Avoid_: offset, index, event id
+
+**Frame**:
+One thing sent on an Event stream. An Event is one Frame; a Delta, a Vendor push, a Resync and a keepalive are Frames that are not Events. The Hub may add a Host id to a Frame and may never add one to an Event, so a Frame lives for one connection and an Event lives in the log.
+_Avoid_: packet, envelope, record
+
+**Cursor**:
+Where a reader may resume an Event stream, carried as `Last-Event-ID`. It is the highest Sequence Number below every open appendable Event, so it is not the last Sequence Number a reader saw and it lags a message that is still arriving. That lag is what makes an unfinished message replay whole after a reconnect. A Daemon's Cursor is one number; a Client's carries one per Host, because its stream is merged.
+_Avoid_: offset, position, checkpoint, watermark
+
+**Resync**:
+The Daemon's answer to a Cursor its log cannot serve, either higher than it ever allocated or carrying the identity of a log that has been replaced. A Frame on the stream rather than an error, so the Host stays `Ready`, and the Client answers it by discarding what it holds for that Host and refetching. Nothing is deleted from the log, so a Cursor is never too old.
+_Avoid_: reset, invalid cursor, error
 
 **Delta**:
 A frame on the Event stream that adds text to an `AssistantMessage` or `Reasoning` Event the log already holds. Never stored, never given a Sequence Number, and never carrying information its Event will not eventually hold. The final Delta of an Event carries the whole text and replaces rather than appends, so a Client that dropped one repairs itself.
