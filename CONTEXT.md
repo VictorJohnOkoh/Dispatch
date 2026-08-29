@@ -1,4 +1,4 @@
-# Remote Harness Orchestrator
+# Dispatch
 
 A single-user system for driving AI agent harnesses that run on separate, more powerful machines the user owns, with the model backing each harness chosen at launch time.
 
