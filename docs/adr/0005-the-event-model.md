@@ -188,7 +188,13 @@ corroboration. This is the same rule #9 inherits for the Approval Policy.
 
 `unknown` is the synthesised one. **When the Daemon writes `PromptCompleted`, it first writes
 `ToolCallEnded{outcome: unknown}` for every tool call still open in that Session.** One trigger, one
-place, no per tool kind special case. Hermes' nine quiet `read` and `edit` calls close there, and a
+place, no per tool kind special case.
+
+> **Corrected by ADR 0008: two triggers, not one.** Synthesis also fires at `SessionEnded`. A Session
+> that ends mid-Prompt, which is every crash, every stop and every Daemon restart, would otherwise
+> leave calls open forever and break this section's own invariant. The truncation shape below already
+> assumed the second trigger without naming it. One place and no per tool kind special case still
+> hold. Hermes' nine quiet `read` and `edit` calls close there, and a
 Client renders "no result reported" instead of a spinner that never stops.
 
 The prompt's completion is the trigger because it is the only honest one. The next `tool_call` is not
