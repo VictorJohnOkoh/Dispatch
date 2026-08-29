@@ -9,7 +9,7 @@ This is a **single-context** repo: one `CONTEXT.md` and one `docs/adr/` at the r
 - **`CONTEXT.md`** at the repo root — the glossary and ubiquitous language.
 - **`docs/adr/`** — the ADR index in `CLAUDE.md` gives every decision in one line.
   Read the index first. Open a full ADR only when you change the area it covers;
-  0005 onward run 28 KB to 44 KB each.
+  0005 onward run 28 KB to 45 KB each.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 

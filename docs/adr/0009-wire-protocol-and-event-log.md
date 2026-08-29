@@ -17,7 +17,7 @@ never written, so the per-token path touches no disk at all.
 
 ## What was already decided
 
-Five earlier ADRs hand this one its constraints. None of them is reopened here.
+Four earlier ADRs and the map hand this one its constraints. None of them is reopened here.
 
 | from | what it fixes |
 | --- | --- |
@@ -25,7 +25,7 @@ Five earlier ADRs hand this one its constraints. None of them is reopened here.
 | ADR 0005 | The five-field envelope. `Seq` is per Daemon, gapless, allocated inside the write transaction. Deltas are never stored. |
 | ADR 0007 | A Model catalogue is a request and a response, not an Event. A `Catalogue` may be shown Stale; a `Resident` list may not. |
 | ADR 0008 | Five Session states, all folded from the log. Admission runs before any Event exists. The boot sweep writes four kinds per abandoned Session. |
-| The map | HTTP for commands, SSE for Events, `Last-Event-ID` carrying the log offset. Daemons bind loopback only. The Client is server-rendered HTML and a little vanilla JS. |
+| The map | HTTP for commands, SSE for Events, `Last-Event-ID` resuming the Event stream. Daemons bind loopback only. The Client is server-rendered HTML and a little vanilla JS. |
 
 ADR 0004 also left one question open by name. What happens when a `Last-Event-ID` is unknown to the
 Daemon because its log rotated. It is answered in [Resync](#resync-is-a-frame-not-an-error).
@@ -146,11 +146,12 @@ is the whole argument ADR 0008 made against a queue.
 
 ### Retries need no request ids
 
-Five of the six commands are idempotent for free, because the Session state machine already refuses
-the duplicate. A retried Prompt lands in `Working` and gets `409`. A retried approval finds no open
-question and gets `409`. A retried interrupt finds no Prompt in flight and gets `409`. A second stop
-joins the first, which ADR 0008 decided, so both get `202`. A retried policy set writes a second
-`ApprovalPolicySet` with the same values, which folds to the same answer.
+Five of the six commands are idempotent for free, three because the Session state machine refuses the
+duplicate and two because repeating them changes nothing. A retried Prompt lands in `Working` and
+gets `409`. A retried approval finds no open question and gets `409`. A retried interrupt finds no
+Prompt in flight and gets `409`. A second stop joins the first, which ADR 0008 decided, so both get
+`202`. A retried policy set writes a second `ApprovalPolicySet` with the same values, which folds to
+the same answer.
 
 `POST /v1/sessions` is the exception, and it is not idempotent. A retry after a lost response starts a
 second Session. Admission refuses it today, so the exception costs nothing while one Session at a time
@@ -185,7 +186,7 @@ which ADR 0005 already said, so a Client comparing a `Seq` from one Host against
 comparing two unrelated counters. It never does, because every fold is per Session and a Session
 lives on one Host.
 
-### Five frame types
+### Five frame types, and a sixth the Hub adds
 
 ```
 : keepalive
@@ -208,7 +209,7 @@ data: {"seq":9413,"n":41,"text":"I'll rename it and update the two callers.","fi
 | frame | carries | `id:` |
 | --- | --- | --- |
 | `event` | one Event: the envelope's other four fields, plus its payload | only when it advances the cursor |
-| `delta` | text for an open appendable Event | never |
+| `delta` | text for an open appendable Event | on the final Delta only |
 | `vendors` | this Host's Vendor reachability and its resident Models | never |
 | `resync` | your cursor is outside the log | never |
 | keepalive | nothing. An SSE comment line, every 10 seconds | never |
@@ -218,7 +219,9 @@ The Client's leg adds `host` for Host State, and every frame above gains a `host
 The keepalive is a **comment** rather than a named frame, and that is not a detail. The Hub reads raw
 SSE and sees comments, so it gets the liveness signal ADR 0004 asked for. A browser's `EventSource`
 discards comments before any handler runs, so the Client is never handed a measurement it has no
-business making. One frame, correctly invisible to one of its two readers.
+business making. One frame, correctly invisible to one of its two readers. The Hub sends its own to
+the browser on the same 10 second beat, because an idle connection through anything in the middle
+should not be allowed to look alive.
 
 `vendors` is how ADR 0004's push survives ADR 0005's envelope. ADR 0004 said the Daemon polls its own
 Vendors and pushes changes onto the Host stream. ADR 0005 said every Event carries a Session id, and
@@ -226,10 +229,20 @@ a Vendor's reachability belongs to no Session. Both hold once the push is a fram
 Event: no `Seq`, never stored, never replayed. That is the same shape as a Delta, for the same
 reason.
 
-This also splits ADR 0007's two freshness contracts across two mechanisms that match them exactly. **A
+**The first `vendors` frame on a newly opened stream carries the whole current state rather than a
+change.** Without that rule a Client attaching between two changes has nothing to draw and no
+endpoint to ask, which is a Host row that stays blank until a Model happens to load. It is one branch
+in the Daemon and it is what keeps `vendors` a push rather than a push plus a fetch.
+
+This splits ADR 0007's two freshness contracts across two mechanisms that match them exactly. **A
 `Resident` list is pushed, because it is worthless when old. A `Catalogue` is fetched from
 `GET /v1/models`, because it is large, it changes when a human pulls a Model, and it may be shown
 Stale.**
+
+Pushing a `Resident` list is not the caching ADR 0007 forbids, and the reason is the reachability
+field beside it. What that ADR refused was a Client showing a remembered list while nobody is
+answering. Here the same frame carries whether the Vendor answered, so a Vendor that stops answering
+produces a push that empties the row rather than a memory that outlives it.
 
 ### The cursor lags an open message on purpose
 
@@ -244,7 +257,15 @@ would keep a permanently empty message with no way to ask for the rest.
 
 So:
 
-> The cursor is the highest `Seq` below every open appendable Event.
+> The cursor is the highest `Seq` below every open appendable Event. An appendable Event is open from
+> the frame that announces it until its final Delta arrives or its Session ends, whichever comes
+> first.
+
+The second half of that is not a footnote. A Session that dies mid-message never produces a final
+Delta, and without the clause the cursor would be pinned behind that Event forever and every
+reconnect would replay the whole Session from there. `SessionEnded` closes an open message the same
+way it closes an open Tool Call, which is the second synthesis trigger ADR 0008 added to ADR 0005,
+applied to the other appendable thing.
 
 An open `AssistantMessage` or `Reasoning` frame carries no `id:`. Its Deltas carry none. The **final**
 Delta carries the `id:`, because that is the moment the log holds the Event's whole text. A Client
@@ -257,12 +278,37 @@ degenerates to "the last completed Event". It is written as a minimum because a 
 policy puts two Sessions on one stream, and the cursor then has to lag behind the older of two open
 messages. The cost is a handful of replayed Events on reconnect.
 
-Two consequences to keep straight. A Session that dies mid-message never produces a final Delta, so
-that Event never advances the cursor by itself. The `Error` and `SessionEnded` that follow carry
-`id:` and move it past. The message stays `complete: false`, and the Client draws the torn message
-ADR 0005 defined. And a Client checks for lost Events on `data.seq`, never on the cursor. ADR 0005's
-gapless counter is what makes loss detectable by subtraction, and the cursor is deliberately not that
-number.
+A Client checks for lost Events on `data.seq`, never on the cursor. ADR 0005's gapless counter is what
+makes loss detectable by subtraction, and the cursor is deliberately not that number.
+
+### The Hub rewrites `id:`, and that is what lets the browser hold the cursor
+
+A browser's `EventSource` keeps exactly one `Last-Event-ID`, which is the last `id:` it saw. On a
+merged stream one Host's `id:` would overwrite every other Host's, and a reconnect would resume one
+Host correctly and silently restart the rest.
+
+So the compound cursor is not something the Client assembles. **The Hub replaces the `id:` field on
+every frame it forwards with the whole cursor across every Host**, and re-emits it whenever any one
+Host's number moves:
+
+```
+event: event
+id: desktop=9412,laptop=98
+data: {"host":"desktop","seq":9412,"session":"s-7f3a2c","at":1756412093118000,"kind":"PromptSubmitted","payload":{"text":"rename the handler"}}
+```
+
+The browser then does the whole job unaided. It stores that string, sends it back on reconnect, and
+the Client's JavaScript never tracks a cursor at all. The Hub splits the string, hands each Daemon a
+plain integer, and the Daemon's half of the protocol stays the single number it has been throughout.
+
+The cost is the `id:` line growing with the Host count, about ten bytes per Host on every frame that
+advances anything. Three Hosts is thirty bytes against a payload measured in hundreds. A frame that
+advances no cursor still carries no `id:` at all, so Deltas and keepalives, which are the frames
+there are most of, pay nothing.
+
+A Host id is therefore part of a wire format, so it is constrained rather than free text. **A Host id
+matches `[A-Za-z0-9_-]+`.** The Hub rejects a profile at config load that does not, which is better
+than an escaping rule nobody would test.
 
 ### The Handshake
 
@@ -333,7 +379,6 @@ CREATE TABLE events (
 ) STRICT;
 
 CREATE INDEX events_by_session ON events (session, seq);
-CREATE INDEX events_by_kind    ON events (kind, session);
 
 CREATE TABLE meta (
   id   INTEGER PRIMARY KEY CHECK (id = 1),
@@ -348,9 +393,16 @@ The split was already written down. **The envelope is columns and the payload is
 the payoff for having fixed the envelope first.
 
 The test for promoting anything out of the payload is whether the Daemon ever puts it in a `WHERE`
-clause. Four things pass. `seq` orders and resumes. `session` scopes every read. `at` is what
+clause. Four of the five pass. `seq` orders and resumes. `session` scopes every read. `at` is what
 retention would compare if it worked by age. `kind` answers the one structural question the Daemon
-asks the log, which is which Sessions have no `SessionEnded`.
+asks the log, which is which Sessions have no `SessionEnded`. `payload` is the fifth, and nothing
+ever filters on it.
+
+**`kind` is a column and not an index**, which is the one place the two are worth separating. Only
+one query reads it, the boot sweep below, and it runs once per boot over a log with a few hundred
+thousand rows in it. That is a full scan measured in milliseconds, against an index that would be
+maintained on every insert for the rest of the Daemon's life. The write path is the thing this design
+protects, so the scan wins.
 
 `toolCallId` is the field that looks like it should be a column and is not. The ledger of open Tool
 Calls belongs to a live Session, and ADR 0008 keeps it in the Daemon's memory. After a restart every
@@ -363,7 +415,7 @@ cursor is a range scan on the table's own key.
 
 `kind` is text rather than an integer enum. It costs about a dozen bytes a row, and it buys ADR 0005's
 compatibility rule something real. A log written by a newer Daemon and read by an older one shows
-`"SessionReady"` rather than `11`, so an unknown kind is a neutral row a human can also read. An
+`"SessionReady"` rather than `15`, so an unknown kind is a neutral row a human can also read. An
 integer needs a mapping table to stay right forever, and the first time it is not, the log is
 undecodable rather than merely unfamiliar.
 
@@ -372,7 +424,7 @@ agree with a writer about a text format.
 
 **One table, not two.** A `sessions` table was the obvious second one, and every column it would hold
 is either derived state that ADR 0005 and ADR 0008 both forbid storing, or a copy of what
-`SessionStarted` already carries. The boot sweep is one query against the `kind` index:
+`SessionStarted` already carries. The boot sweep is one query, and it is the scan just argued for:
 
 ```sql
 SELECT DISTINCT session FROM events
@@ -544,9 +596,9 @@ stream is for. `GET /v1/sessions/{id}/events` is, and it is a paged read of one 
 part at all.
 
 That rule also settles what the Hub does when a Client attaches with a cursor older than the Hub's own
-position on a Host. The Hub does not buffer and has no store, so it reopens that Host's stream at the
-older cursor. Repositioning is the reconnect it already knows how to do, and it is bounded by one
-Client disconnect, because anything further back is a resync.
+on a Host. The Hub does not buffer and has no store, so it reopens that Host's stream at the older
+cursor. Reopening is the reconnect it already knows how to do, and it is bounded by one Client
+disconnect, because anything further back is a resync.
 
 ### After a Daemon restart
 
@@ -601,6 +653,15 @@ weeks. One user's Sessions are text, a few megabytes a week at most, on a machin
 retention window*. A cursor pointing before it is a resync. That is the boundary, it has one name,
 and it is the same name the log-rotation case already had.
 
+One coupling is worth writing down, because it is invisible until it breaks. **Deleting a Session
+leaves the surviving log gapless only because admission runs one Session at a time**, which makes a
+Session's Events a contiguous run of `Seq` and a deletion a truncation at the front. Two concurrent
+Sessions interleave their `Seq`, and deleting the older one then punches holes through the newer
+one's range, so a reader subtracting `Seq` would report loss that never happened. Loosening admission
+means retention has to delete by `Seq` boundary rather than by Session, or ADR 0005's gapless
+promise stops holding. This is the same shape as ADR 0008's note about the per-Session
+`opencode.json`: something that is safe only while one Session at a time is the policy.
+
 ## Considered options
 
 - **Two protocols, one for the Client and one for the Daemon.** Each fits its own view exactly.
@@ -618,7 +679,7 @@ and it is the same name the log-rotation case already had.
   Hub becomes a pure path router with one difference instead of three. Rejected: six connections per
   origin over HTTP/1.1, no HTTP/2 without TLS, and the map rules out self-rolled TLS. A six-Host user
   starves their own commands, silently.
-- **The Hub buffering Events so a Client can rewind further than the Hub's own position.** Rejected: a
+- **The Hub buffering Events so a Client can rewind further than the Hub's own cursor.** Rejected: a
   second store with a second retention policy, holding a copy of what the Daemon already holds
   durably.
 - **A `host` field inside the Event envelope.** It would make a merged stream trivial. Rejected: ADR
@@ -669,8 +730,10 @@ and it is the same name the log-rotation case already had.
   types and the endpoint set are shared between the roles; the Host id belongs to the Hub alone and
   never appears in the Daemon's types, which is one structural way a Daemon is stopped from learning
   about peers.
-- The log is one SQLite file per Host, two tables, four real columns, two indexes. Everything else in
-  it is JSON that only the Daemon and the Client parse.
+- The log is one SQLite file per Host: two tables, one index, and five columns on `events` of which
+  four are ever filtered on. Everything else in it is JSON that only the Daemon and the Client parse.
+- Retention deleting whole Sessions keeps the log gapless only while admission allows one Session at
+  a time. Loosening admission reopens it, alongside the `opencode.json` coupling ADR 0008 named.
 - The write path is two disk writes per assistant message and zero per token. That number is what
   makes "committed before sent" affordable, and it is worth rechecking if Deltas ever gain a durable
   cousin.
@@ -690,7 +753,23 @@ and it is the same name the log-rotation case already had.
 - ADR 0007's request-and-response path is `GET /v1/models` for a `Catalogue` that may be Stale, and
   the `vendors` frame for a `Resident` list that may not.
 
-Nothing here reopens ADR 0005. The envelope is unchanged, `Seq` stays per Daemon, and Deltas stay out
-of the log. What this ADR adds is where the boundary falls between a stored Event and a sent frame,
-and it falls in the one place that keeps both documents true: the Hub writes to frames and never to
-Events.
+**ADR 0005 is amended in one sentence, and the amendment is worth naming rather than smoothing over.**
+That ADR says `Seq` "is both the Event log's primary key and the `Last-Event-ID` offset", which reads
+as an identity. It is not one any more. `Seq` is still the primary key, and the cursor is still built
+from `Seq` and from nothing else, but the two are different numbers while a message is arriving.
+
+The lag is what buys ADR 0005's own repair rule its last case. That ADR made the final Delta carry
+the whole text so a Client that dropped a Delta fixes itself, and it works perfectly while the
+connection holds. It cannot cover a Client that was away when the final Delta went out, because
+Deltas are not replayed. Making the cursor lag hands that case back to the log, which is where every
+other recovery in this design already ends up. So the amendment is that document's argument
+continued, not reversed.
+
+`CONTEXT.md` follows, and **Sequence Number** loses `cursor` from its list of words to avoid. That
+entry was right to forbid the confusion when the two were one number. Now that they are two, the
+useful warning is that they are not interchangeable, which is what the entry says instead.
+
+The rest of ADR 0005 stands. The envelope is unchanged and gains no sixth field. `Seq` stays per
+Daemon, gapless, allocated inside the write transaction. Deltas stay out of the log. What this ADR
+adds is where the boundary falls between a stored Event and a sent frame, and it falls in the one
+place that keeps both documents true: the Hub writes to frames and never to Events.
