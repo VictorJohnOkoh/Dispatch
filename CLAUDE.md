@@ -43,7 +43,7 @@ in the last column when you do.
 | 0006 | The Daemon owns the Harness process and the Adapter owns the conversation | Harness Adapters, process supervision | 28 KB |
 | 0007 | The Vendor Adapter has no Health method, and every capability it reports is three-valued | Vendor Adapters, capability reporting | 33 KB |
 | 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed | Session lifecycle, admission, Approval Policy | 44 KB |
-| 0009 | One protocol that differs by a Host id, a merged stream to the Client, and an Event that is written before it is sent | the wire protocol, the SQLite log, replay, retention | 44 KB |
+| 0009 | One protocol that differs by a Host id, a merged stream to the Client, and an Event that is written before it is sent | the wire protocol, the SQLite log, replay, retention | 51 KB |
 
-Everything after 0004 is long. The nine together are about 53,000 tokens, which is why
+Everything after 0004 is long. The nine together are about 54,000 tokens, which is why
 they are indexed here and not read by default.

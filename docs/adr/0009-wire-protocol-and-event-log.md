@@ -186,7 +186,7 @@ which ADR 0005 already said, so a Client comparing a `Seq` from one Host against
 comparing two unrelated counters. It never does, because every fold is per Session and a Session
 lives on one Host.
 
-### Five frame types, and a sixth the Hub adds
+### Six frame types, and a seventh the Hub adds
 
 ```
 : keepalive
@@ -208,6 +208,7 @@ data: {"seq":9413,"n":41,"text":"I'll rename it and update the two callers.","fi
 
 | frame | carries | `id:` |
 | --- | --- | --- |
+| `hello` | the protocol version, the `logId`, and the log's highest `Seq`. Exactly one, first | never |
 | `event` | one Event: the envelope's other four fields, plus its payload | only when it advances the cursor |
 | `delta` | text for an open appendable Event | on the final Delta only |
 | `vendors` | this Host's Vendor reachability and its resident Models | never |
@@ -323,6 +324,24 @@ The Hub marks the Host `Incompatible` and stops. ADR 0004 decided that `Incompat
 and this is the failure that earns it. A version mismatch cannot fix itself, so retrying would hammer
 a Host that can never come `Ready`. The Client shows both numbers, and the user updates one machine.
 
+When the version passes, the Daemon answers with the identity of the log the Hub is about to read
+from:
+
+```
+event: hello
+data: {"protocol":1,"logId":"3f9c2a71","latest":9420}
+```
+
+That is a sixth frame type on the Daemon's leg, and it is the only one that arrives exactly once per
+connection. The Hub compares `logId` against the one it holds for that Host and throws away its
+cursor if it differs, which is the case [the counter section](#the-counter-and-the-identity-of-the-log-it-counts)
+exists for. `latest` lets the Hub tell a cursor that is merely behind from one that is impossible
+before it sends a single byte of replay.
+
+Putting this on the stream rather than on its own endpoint is the same argument as the version check
+itself. The stream is the connection ADR 0004 measures, so anything a connection needs to establish
+belongs on the connection.
+
 The version is one integer, and the Daemon holds the set it can serve. In v1 that set is `{1}`, so
 today the check is an exact match. The set exists rather than a single number because widening it
 later costs one line, and a Daemon that refuses a Hub it could have served is a Host the user has to
@@ -381,8 +400,9 @@ CREATE TABLE events (
 CREATE INDEX events_by_session ON events (session, seq);
 
 CREATE TABLE meta (
-  id   INTEGER PRIMARY KEY CHECK (id = 1),
-  high INTEGER NOT NULL         -- the highest Seq ever allocated on this Host
+  id        INTEGER PRIMARY KEY CHECK (id = 1),
+  log_id    TEXT    NOT NULL,   -- random, written once when the file is created
+  swept_to  INTEGER NOT NULL    -- the highest Seq the last boot sweep examined
 ) STRICT;
 ```
 
@@ -394,9 +414,9 @@ the payoff for having fixed the envelope first.
 
 The test for promoting anything out of the payload is whether the Daemon ever puts it in a `WHERE`
 clause. Four of the five pass. `seq` orders and resumes. `session` scopes every read. `at` is what
-retention would compare if it worked by age. `kind` answers the one structural question the Daemon
-asks the log, which is which Sessions have no `SessionEnded`. `payload` is the fifth, and nothing
-ever filters on it.
+the Client shows against every row and what any later date-range read would compare. `kind` answers
+the one structural question the Daemon asks the log, which is which Sessions have no `SessionEnded`.
+`payload` is the fifth, and nothing ever filters on it.
 
 **`kind` is a column and not an index**, which is the one place the two are worth separating. Only
 one query reads it, the boot sweep below, and it runs once per boot over a log with a few hundred
@@ -431,48 +451,63 @@ SELECT DISTINCT session FROM events
 WHERE session NOT IN (SELECT session FROM events WHERE kind = 'SessionEnded');
 ```
 
-### Two writes per message, not one per token
+### A message flushes every 4 KiB, so a crash keeps what it had
 
 ADR 0005 made `AssistantMessage` and `Reasoning` appendable and left this ADR the write path. The
 answer:
 
-> The Daemon accumulates an open message's text in memory and writes it once, when the message
-> completes.
+> The Daemon accumulates an open message's text in memory and writes it out every 4 KiB, and again
+> when the message completes.
 
-So an assistant message is two writes. An `INSERT` with empty text when the Harness starts producing
-it, which allocates the `Seq` and lets the frame go out, then one `UPDATE` when the final Delta
-arrives. Pi sent 143 frames for one short turn, and rewriting the row's JSON on each of them is the
-write amplification ADR 0005 kept Deltas out of the log to avoid. Doing it in SQLite instead would
-have given all of it back.
+An `INSERT` with empty text opens the Event, which allocates the `Seq` and lets the frame go out.
+Then an `UPDATE` each time 4 KiB of new text has arrived, and a last one on the final Delta.
 
-**A crash mid-message loses that message's text, and the row keeps `complete: false`.** That is the
-cost, stated rather than buried. Three things make it the right one. The crash ends the Session
-anyway, so the loss is always the last message of a Session that is over. The raw bytes are in the
-per-Session transcript file ADR 0005 already requires, so nothing is gone for a human reading back.
-And the Client already draws `complete: false` as a torn message, so the shape needs no new handling.
+**The threshold is a size and not a duration, and that is the point.** A timer is a knob whose
+correct value depends on how fast the Model is, which is the thing nobody knows in advance. A size
+bounds the loss in the unit anyone actually cares about, and it self-scales: a fast Model flushes
+often, a slow one rarely, and neither needs configuring.
 
-Flushing on a timer was the alternative, and it loses on the argument this project keeps making. It
-is a knob, its correct value is unknowable, and it pays out only in the case where the Session is
-already dead.
+4 KiB is chosen so the ordinary case pays nothing. A typical assistant message is one to three
+kilobytes, so it never reaches the threshold and still costs exactly the two writes this section
+originally promised. The extra writes appear only on genuinely long output, which is where the
+protection is wanted.
 
-### The counter across a boot and a prune
+Long output does pay a quadratic cost, because SQLite rewrites the whole row on each `UPDATE`. A
+64 KiB message flushes sixteen times and writes about 544 KiB in total. That is eight times the
+message and it is still forty times cheaper than the per-Delta alternative, which for Pi's 143 frames
+on one short turn would have rewritten the row 143 times. Spilling the tail into a second
+append-only table would make it linear, and it is not worth a second table and a coalescing step for
+a cost that only appears on messages an order of magnitude larger than any that has been captured.
 
-`Seq` is gapless from 1 and per Daemon, so it has to survive both a restart and a retention pass.
+**A crash now keeps everything up to the last flush**, and the row stays `complete: false`, so the
+Client draws the torn message ADR 0005 already defined. Under `synchronous = NORMAL` that holds for
+a process crash, which is the Harness dying or the Daemon panicking, because the write-ahead log
+survives the process. A machine crash can still lose the last flush or two, and the argument in
+[The write path](#the-write-path) is why that is left alone.
+
+This creates the one place where a frame carries what the log does not yet hold, and it is worth
+naming rather than leaving implicit:
+
+> A Delta may carry text that is not yet durable. The window is bounded at 4 KiB, and it is the only
+> exception to committed-before-sent anywhere in this design.
+
+Closing it completely would mean writing every Delta, which is the amplification ADR 0005 kept
+Deltas out of the log to avoid. What the bound buys is that a Client which renders text and then
+replays sees at worst the last few paragraphs come back shorter, instead of the whole message
+emptying.
+
+### The counter, and the identity of the log it counts
+
+`Seq` is gapless from 1 and per Daemon, and because nothing is ever deleted the log itself is the
+counter's memory:
 
 ```
-next = max(coalesce(max(seq), 0), meta.high) + 1
+next = coalesce(max(seq), 0) + 1
 ```
 
-`meta.high` is written at boot and after every retention pass, never per Event. A crash between the
-last Event and the meta row can only leave the stored number too low, and taking the larger of the
-two covers that. Zero cost on the write path, one row of durable state.
-
-The case it exists for is narrow and nasty. Retention deletes whole Sessions, so a log whose Sessions
-have all aged out is an empty table. Without `meta.high` the counter restarts at 1, and a Hub
-reconnecting with a cursor of 40 receives Events 41 to 50 that are **different Events** from the ones
-it saw at 41 to 50 before. Not a gap, not an error, just quietly wrong history. The resync rule below
-catches a cursor above the log's maximum but not one landing inside a reused range, so it is not
-enough on its own.
+That is the whole rule, and it is this simple only because the table never shrinks. An earlier draft
+carried a durable high-water mark in `meta` to survive a retention pass emptying the table. Keeping
+every Session deletes the problem rather than defending against it, so the column went with it.
 
 The counter advances only on a committed insert. There is exactly one writer, so this is a serialised
 increment rather than a concurrency problem. A failed write consumes no number. It cancels the
@@ -481,6 +516,36 @@ an Event.
 
 Reloading the counter is ADR 0008's inherited requirement, and it runs before `DaemonStarted` is
 written.
+
+**`meta.log_id` is what stops a replaced log from being read as the same one.** A `Seq` means nothing
+without knowing which log allotted it. If the file is deleted, restored from a backup, or the Host is
+reimaged, a fresh log starts at 1 while the Hub still holds a cursor of 900. A cursor above the
+maximum is caught by the resync rule below. A cursor of 40 against a fresh log that has reached 50 is
+not: it would replay ten Events that are not the ten it saw before, as quietly wrong history rather
+than an error.
+
+So the Daemon generates a random `log_id` when it creates the file and sends it in the Handshake. The
+Hub compares it against the one it holds for that Host and discards its cursor when it differs. One
+column, one field, and it covers every way a log can be replaced rather than the single way retention
+used to empty it.
+
+### Bounding the boot sweep
+
+ADR 0008's sweep asks the log which Sessions have no `SessionEnded`. Written as a full scan that
+question gets slower every day a log that is never pruned keeps growing, so it is bounded instead.
+
+`meta.swept_to` is the highest `Seq` the last sweep examined, written once per boot. The sweep reads
+only `seq > swept_to`, because of an invariant the sweep itself maintains:
+
+> After a sweep, no Session at or below `swept_to` is missing a `SessionEnded`.
+
+Every Session live when the Daemon died is closed by that boot's sweep, and every Session that starts
+afterwards has a `Seq` above the mark. So the candidates are always in the tail, and the scan is
+bounded by one Daemon's uptime rather than by the log's whole history.
+
+This is why the `kind` column stays a column and still needs no index. The scan is over one Daemon's
+run, not over years of history, so it stays the milliseconds the earlier argument claimed, and the
+write path keeps paying nothing.
 
 ## The write path
 
@@ -508,7 +573,9 @@ disk sees two writes per assistant message and nothing at all per token, and the
 nothing on the path carrying the most bytes.
 
 The raw transcript is a separate file with its own rotation, which ADR 0005 explicitly kept out of
-this ADR's retention. Nothing here writes it and nothing here prunes it.
+this ADR's scope. It rotates even though the Event log does not, because it holds every byte a
+Harness ever printed rather than the Events the Client draws. Nothing here writes it and nothing here
+prunes it.
 
 ## Replay
 
@@ -562,18 +629,19 @@ is no shared cursor, no per-Session reader registry, and nothing that has to kno
 exist. The Daemon fans one write out to every live subscriber and answers every catch-up from the
 same table.
 
-Retention is the only thing that could have made a reader race a deletion, and it does not, because
-it runs at boot.
+Nothing deletes rows, so no reader can ever race a deletion. That was a real hazard while an earlier
+draft pruned old Sessions, and keeping everything removes it rather than scheduling around it.
 
 ### Resync is a frame, not an error
 
-ADR 0004 left this open. When a `Last-Event-ID` names a `Seq` the log cannot serve, either below the
-oldest surviving row or above the highest allocated, the Daemon opens the stream anyway and makes its
-first frame:
+ADR 0004 left this open. Two things make a cursor unservable, and since nothing is ever deleted both
+are rare rather than routine. The `Seq` is above the highest the log has allotted, or the Hub holds a
+cursor from a different `log_id`, which is a log that was deleted, restored or reimaged. Either way
+the Daemon opens the stream anyway and makes its first frame:
 
 ```
 event: resync
-data: {"oldest":9001,"latest":9420}
+data: {"logId":"3f9c2a71","latest":9420}
 ```
 
 The Client throws away what it holds for that Host, refetches with `GET /v1/sessions`, and continues
@@ -621,46 +689,53 @@ That asymmetry is ADR 0004's and it is deliberate. `HubDetached` says the Hub st
 a Daemon that crashed observed nothing at all. `DaemonStarted` is the marker on that side, and the
 two together cover both shapes of gap.
 
-## Retention
+## Retention: the log keeps everything
 
-**Whole ended Sessions, the most recent 200 kept, pruned at boot.**
+**Nothing is ever deleted. There is no retention pass, no window, and no age.**
 
-By Session, because a Session is the unit a fold makes sense over. Deleting a Session's first three
-hundred Events would leave a transcript that folds to nonsense: tool calls with no requests, a policy
-nobody set, a Prompt with no words in it. A Session is either wholly readable or wholly gone, and
-that is a sentence the Client can act on.
+The Event log is a Session's history, and ADR 0005 made it the same object as its transport and its
+replay buffer. Deleting an old Session to save disk throws away the only one of those three jobs that
+gets more valuable with time. A transcript from three months ago is the thing a user goes looking
+for; the replay buffer for it stopped mattering the moment the Session ended.
 
-By count rather than by age. A count bounds the disk without a clock, and a user who runs nothing for
-a month comes back to their history rather than to an empty log. Age deletes the work someone was in
-the middle of thinking about, which is the opposite of what a history is for.
+The arithmetic says it costs little enough to keep. Heavy use is about a hundred Prompts a day, and a
+Prompt with its Reasoning, its assistant text and five Tool Calls comes to roughly 25 KB of payload.
+That is 2.5 MB a day, and about 600 MB in a working year, on a machine chosen for having a GPU in it.
+SQLite reads a file that size without noticing, because every query here is a range scan on
+`(session, seq)` or on the rowid.
 
-Never a Session without a `SessionEnded`, whatever its age. A live Session is not old, it is slow, and
-ADR 0008 was clear that the Daemon concludes nothing from how long something has taken.
+**One backstop, and it is a backstop rather than a policy.** No single Event payload exceeds 256 KiB.
+The Daemon truncates the text and sets `truncated: true`, and the Client says so where it draws it.
+This exists for one shape of accident: a Tool Call whose result is a whole build log or a large file.
+In practice a Harness truncates tool output before it sends it, because its own context window forces
+it to, so the cap should essentially never fire. It is here so that "keep everything" has a bound at
+all rather than resting on every Harness continuing to be well behaved.
 
-200, with no configuration knob, following ADR 0008's admission argument. A knob nobody sets is
-complexity with a default attached. The number lives in one constant.
+The cap applies to an open message as it accumulates, not only when it is stored. Otherwise a live
+Client would see text through Deltas that a replaying one never gets, which is the disagreement
+between a fold and the log that the whole write path exists to prevent.
 
-**At boot, not on a timer.** The Daemon already holds an exclusive write to the log at boot and no
-reader is attached, so retention cannot race a replay. A background pruner would have to know which
-ranges a live reader is scanning, or accept a reader hitting a deleted range mid-scan, and the resync
-path would then fire during ordinary operation rather than only after a real rotation. One scheduling
-decision removes a class of bug instead of managing it.
+**What this does to the guarantee is make it simpler.** Replay is at-least-once and ordered across
+the entire log, with no window and no boundary to explain. The earlier draft had to say
+"at-least-once *within the retention window*", and that qualifier is gone.
 
-The cost is real and small. A Daemon that runs for six weeks never prunes, and the log grows for six
-weeks. One user's Sessions are text, a few megabytes a week at most, on a machine with a GPU in it.
+Three things fall out that were previously costs:
 
-**What retention does to the guarantee**, plainly: replay is at-least-once and ordered *within the
-retention window*. A cursor pointing before it is a resync. That is the boundary, it has one name,
-and it is the same name the log-rotation case already had.
+- **Resync shrinks to two causes.** A cursor above the log's maximum, or a `log_id` that changed.
+  There is no longer an "older than retention kept" case, which was the one that would have fired
+  during ordinary use.
+- **The gapless promise stops being coupled to admission.** The earlier draft had to note that
+  deleting whole Sessions kept the log gapless only while admission ran one Session at a time, since
+  two concurrent Sessions interleave their `Seq` and deleting the older one would punch holes through
+  the newer one's range. Nothing is deleted, so nothing punches holes, and loosening admission later
+  costs this design nothing.
+- **The `meta` high-water mark is gone**, because the table never empties and `max(seq)` is always
+  the truth.
 
-One coupling is worth writing down, because it is invisible until it breaks. **Deleting a Session
-leaves the surviving log gapless only because admission runs one Session at a time**, which makes a
-Session's Events a contiguous run of `Seq` and a deletion a truncation at the front. Two concurrent
-Sessions interleave their `Seq`, and deleting the older one then punches holes through the newer
-one's range, so a reader subtracting `Seq` would report loss that never happened. Loosening admission
-means retention has to delete by `Seq` boundary rather than by Session, or ADR 0005's gapless
-promise stops holding. This is the same shape as ADR 0008's note about the per-Session
-`opencode.json`: something that is safe only while one Session at a time is the policy.
+The honest cost, since there is one. The log grows without limit, and the only ways to reclaim the
+space are deleting the file, which `log_id` turns into a clean resync rather than corrupt history, or
+adding an explicit user-driven delete later. That is a feature someone asks for, not a default that
+quietly throws work away.
 
 ## Considered options
 
@@ -692,20 +767,29 @@ promise stops holding. This is the same shape as ADR 0008's note about the per-S
   a WAL page also kills every Harness on the Host, so the Events it loses describe Sessions that are
   `lost` on the next boot anyway.
 - **Writing an open message's text on every Delta.** The log then holds a partial message across a
-  crash. Rejected: 143 row rewrites for one short Pi turn, which is the amplification Deltas exist to
-  avoid.
-- **Flushing an open message on a timer.** Bounds the loss. Rejected: a knob with no knowable correct
-  value, paying out only when the Session is already over.
+  crash, with no loss at all. Rejected: 143 row rewrites for one short Pi turn, which is the
+  amplification Deltas exist to avoid.
+- **Writing an open message's text only when it completes.** Two writes per message and nothing
+  wasted. Rejected: a crash loses the whole message, and that message is often the longest and most
+  expensive thing in the Session.
+- **Flushing an open message on a timer.** Rejected: the correct interval depends on how fast the
+  Model generates, which is the one thing that varies most and is known least in advance.
+- **Flushing an open message every 4 KiB.** Chosen. Bounds the loss in the unit that matters, needs
+  no clock, and never fires at all on an ordinary one to three kilobyte message.
+- **Spilling an open message's tail into a second append-only table.** Makes long output linear
+  instead of quadratic. Rejected: a second table and a coalescing step, for a cost that only shows up
+  on messages far larger than any in the captures.
 - **A `sessions` table beside `events`.** Rejected: every column is either state ADR 0005 and ADR 0008
   forbid storing, or a copy of `SessionStarted`.
 - **`toolCallId` as a real column.** Rejected: the open-call ledger lives in memory for a live Session
   and is folded from Events after a restart, so nothing ever queries it.
-- **Retention by age.** Rejected: it deletes what a user left a month ago and came back to, and it
-  needs a clock to bound a disk.
-- **Retention deleting the oldest Events rather than the oldest Sessions.** Rejected: a half-deleted
-  Session folds to nonsense, and the guarantee stops being statable in a sentence.
-- **A background retention pass.** Rejected: it races live readers, and moving it to boot deletes the
-  race rather than managing it.
+- **Retention by age, or by a count of Sessions.** Bounds the disk. Rejected: the log is a history,
+  and a history that deletes itself is the one job of the three ADR 0005 gave it that gets more
+  valuable with age. About 600 MB a working year is affordable on a machine bought for its GPU.
+- **Retention deleting the oldest Events rather than the oldest Sessions.** Rejected on its own terms
+  before retention went entirely: a half-deleted Session folds to nonsense.
+- **No payload cap either.** Rejected: it leaves one unbounded case, a Tool Call returning a whole
+  build log, resting on every Harness continuing to truncate its own tool output.
 - **Failing the stream request when a cursor is unknown.** Rejected: it flaps the Host to `Down` for a
   log rotation, telling the user to go and check a machine that is working.
 - **Idempotency keys on commands.** Rejected: the Session state machine already refuses five of the
@@ -720,30 +804,37 @@ promise stops holding. This is the same shape as ADR 0008's note about the per-S
   as ADR 0004 requires, and a Hub restart recovers everything from the Clients' own `Last-Event-ID`
   values and the Daemons' logs.
 - [#11](https://github.com/VictorJohnOkoh/Capstone/issues/11) inherits one `EventSource` for every
-  Host, six frame types, and a cursor it lets the browser manage rather than tracking itself. It
+  Host, seven frame types, and a cursor it lets the browser manage rather than tracking itself. It
   applies Events by `Seq` and ignores repeats, checks for loss on `data.seq` and never on the cursor,
   and answers a `resync` frame by refetching rather than by showing an error. Its first paint is
   server-rendered by the Hub, and the `GET` endpoints exist so it can resync without a page reload.
 - #11 also gets the answer to how an approval on another Host interrupts. Every Host's Events are on
   the one stream the Client already holds, so nothing has to be subscribed to per Session.
+- The Hub holds a `logId` per Host beside its cursor, and drops the cursor when the Daemon's `hello`
+  reports a different one. That is the whole defence against a log that was deleted or restored.
 - [#12](https://github.com/VictorJohnOkoh/Capstone/issues/12) gets another package boundary. The frame
   types and the endpoint set are shared between the roles; the Host id belongs to the Hub alone and
   never appears in the Daemon's types, which is one structural way a Daemon is stopped from learning
   about peers.
 - The log is one SQLite file per Host: two tables, one index, and five columns on `events` of which
   four are ever filtered on. Everything else in it is JSON that only the Daemon and the Client parse.
-- Retention deleting whole Sessions keeps the log gapless only while admission allows one Session at
-  a time. Loosening admission reopens it, alongside the `opencode.json` coupling ADR 0008 named.
-- The write path is two disk writes per assistant message and zero per token. That number is what
-  makes "committed before sent" affordable, and it is worth rechecking if Deltas ever gain a durable
-  cousin.
-- A machine crash can lose the last few Events, and a crash mid-message loses that message's text.
-  Both are named costs, both land on a Session that is `lost` on the next boot, and both leave the raw
-  transcript file untouched.
-- Sessions older than the most recent 200 are gone, including from the Client. There is no archive and
-  no export.
+- Keeping every Session removes two couplings the earlier draft had. The gapless promise no longer
+  depends on admission running one Session at a time, and no reader can race a deletion.
+- The write path is two disk writes for an ordinary assistant message and zero per token, plus one
+  more per 4 KiB on a long one. That number is what makes "committed before sent" affordable.
+- A Delta is the one frame that may carry text the log does not yet hold, bounded at 4 KiB. It is the
+  only exception to committed-before-sent in the design, and it is named rather than implied.
+- A process crash keeps an open message up to its last 4 KiB flush. A machine crash can still lose
+  the last few Events, which lands on a Session that is `lost` on the next boot either way, and the
+  raw transcript file is untouched by both.
+- The log grows without limit, at roughly 600 MB a working year under heavy use. Reclaiming that
+  space means deleting the file, which `log_id` turns into a clean resync rather than corrupt
+  history, or adding a user-driven delete later.
+- A Tool Call result over 256 KiB is stored truncated with `truncated: true`, and the Client says so.
+  A Harness's own context limits should truncate first, so this should never be reached.
 - `CONTEXT.md` gains **Cursor**, **Frame** and **Resync**. **Handshake** gains the status code and the
-  version set, and **Event** gains the write order and the retention rule. **Sequence Number** loses
+  version set, and **Event** gains the write order and the rule that nothing is deleted. **Sequence
+  Number** loses
   `cursor` from its list of words to avoid, because a Cursor is now a different number with a
   different job, and conflating the two is the mistake the entry has to warn against instead.
 - ADR 0004's open question is closed. A `Last-Event-ID` the Daemon cannot serve is a `resync` frame on

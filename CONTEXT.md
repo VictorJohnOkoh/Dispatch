@@ -89,7 +89,7 @@ The Daemon's decision on whether one more Session may start on its Host. Runs be
 _Avoid_: scheduling, throttling, rate limit, capacity check
 
 **Event**:
-One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. Native output that no Event Kind covers is dropped, and the Harness's raw bytes are kept in a per-Session transcript file beside the log. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history, and a Session's whole state is derivable by folding it. An Event is durable before it is sent. The log keeps the 200 most recent ended Sessions on a Host and deletes the rest whole at the next Daemon boot, so a Session is either wholly readable or gone.
+One normalised, typed thing that happened inside a Session — an assistant message, a tool call, a tool result, an error, a termination. Every Harness's native output is translated into Events; the Client renders only Events, never raw Harness output. Native output that no Event Kind covers is dropped, and the Harness's raw bytes are kept in a per-Session transcript file beside the log. The ordered Event log of a Session is simultaneously its transport, its replay buffer and its history, and a Session's whole state is derivable by folding it. An Event is durable before it is sent, and nothing is ever deleted from the log, so a Session stays readable for as long as the Host keeps its file. An open message is written out every 4 KiB, so a crash keeps what it had rather than losing the message.
 _Avoid_: message, chunk, token, log line
 
 **Event Kind**:
@@ -113,7 +113,7 @@ Where a reader may resume an Event stream, carried as `Last-Event-ID`. It is the
 _Avoid_: offset, position, checkpoint, watermark
 
 **Resync**:
-The Daemon's answer to a Cursor its log cannot serve, either older than retention kept or higher than it ever allocated. A Frame on the stream rather than an error, so the Host stays `Ready`, and the Client answers it by discarding what it holds for that Host and refetching.
+The Daemon's answer to a Cursor its log cannot serve, either higher than it ever allocated or carrying the identity of a log that has been replaced. A Frame on the stream rather than an error, so the Host stays `Ready`, and the Client answers it by discarding what it holds for that Host and refetching. Nothing is deleted from the log, so a Cursor is never too old.
 _Avoid_: reset, invalid cursor, error
 
 **Delta**:
