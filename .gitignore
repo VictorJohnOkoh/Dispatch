@@ -38,3 +38,6 @@ go.work.sum
 # been let loose in.
 hermes-capture-*/
 pi-capture-*/
+
+# The built binary, when go build lands it in the repo root
+/dispatch
