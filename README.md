@@ -18,8 +18,8 @@ history at once, so reattaching and restarting are the same mechanism.
 The architecture is decided and the code is not written yet. Read in this order.
 
 - **[`CONTEXT.md`](CONTEXT.md)** is the vocabulary. Small, and everything else assumes it.
-- **[`SPEC.md`](SPEC.md)** is the frozen v1 scope, the build order and the twelve behaviours that
-  define done.
+- **[`SPEC.md`](SPEC.md)** is the frozen v1 scope, the nine-milestone build order, and the thirteen
+  behaviours that define done.
 - **[`docs/adr/`](docs/adr/)** holds the arguments, twelve of them. Each title is its decision, and
   the index in [`CLAUDE.md`](CLAUDE.md) is usually the whole answer.
 - **[`docs/research/`](docs/research/)** holds what was measured on real Hosts against real Vendors,

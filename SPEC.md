@@ -11,9 +11,9 @@ a term is capitalised here it means exactly what `CONTEXT.md` says it means.
 `docs/adr/` holds the arguments. Twelve ADRs, and each title is its decision, so the index in
 `CLAUDE.md` is usually the whole answer. Open an ADR when you change the area it owns.
 
-What this spec adds is the assembly plus the last five decisions, which are the ones no earlier
-ticket owned: how many Harnesses, how many Vendors, the config format, the error taxonomy, and the
-build order. Those are marked **Decided here** so a reader can tell them apart from the summaries.
+What this spec adds is the assembly, the decisions no earlier ticket owned, and four corrections to
+ADRs that contradict or under-specify something. Everything original to this document is marked
+**Decided here** so a reader can tell it apart from the summaries.
 
 ## The frozen v1 feature list
 
@@ -39,14 +39,15 @@ build order. Those are marked **Decided here** so a reader can tell them apart f
 **The Event log and the wire**
 
 - Sixteen Event Kinds, a per-Daemon Sequence Number, and Deltas that are never stored.
-- SQLite, one `events` table, write-ahead logging, committed before sent, nothing ever deleted.
+- SQLite via `modernc.org/sqlite`, one `events` table, write-ahead logging, committed before sent,
+  nothing ever deleted from the log.
+- A per-Session transcript of the Harness's raw bytes, capped at 64 MB with a truncation marker.
 - Ten endpoints on the Daemon, the same ten under a `/v1/hosts/{host}` prefix on the Hub, plus
   `GET /v1/hosts`.
 - One merged SSE stream to the Client, one stream per Host to the Hub, six frame types the last of
   which is a keepalive comment, a seventh `host` frame the Hub originates, and a `host` field the Hub
   adds to all of them.
-- Replay from a cursor, `resync` when the cursor is unservable, and a per-Session transcript file
-  beside the log holding the Harness's raw bytes.
+- Replay from a cursor, and `resync` when the cursor is unservable.
 
 **The Client**
 
@@ -261,6 +262,10 @@ levels, one module, one binary, and the rule that proves the graph is acyclic: *
 another at its own level.** Ten of the fourteen are named after a `CONTEXT.md` term. Go 1.24 is the
 floor, because ADR 0007's own test example calls `t.Context()`.
 
+One addition to that tree, argued in the corrections below: `daemon/supervise.go` splits into
+`supervise_windows.go` and `supervise_unix.go`, because killing a process tree is the one thing in
+this design with no portable primitive. Nothing else in fourteen packages needs a build tag.
+
 ## The Client shape
 
 Settled by the prototype on `prototype/multi-host-client`. The artefact is the argument and it stays
@@ -294,6 +299,15 @@ error: a `peers` key in `daemon.json` fails to load rather than being quietly ig
 The standard library parses it, so there is no dependency. The cost is that a human edits it without
 comments, and the answer to that is `daemon.example.json` and `hub.example.json` in the repo rather
 than a parser that supports comments.
+
+**The one other dependency decision, which no ADR ever made: the SQLite driver is
+`modernc.org/sqlite`.** ADR 0009 chose SQLite, WAL and the schema and stopped short of what opens the
+database, and M2 cannot start without an answer. Pure Go matters more here than speed: it needs no C
+toolchain, so `go build` works on any machine and the binary stays one self-contained file, which is
+exactly ADR 0011's argument that one file is the whole deployment. The cgo binding is faster and would
+put a working gcc between you and every Host you deploy to, in a repo that has already lost work to
+environment differences four times. It uses `database/sql`, which is the interface worth learning. The
+cost is a large machine-translated codebase you will never read.
 
 The rule that matters more than the format: **no package under `internal/` imports `internal/config`.**
 `main.go` reads the file, validates it, and constructs plain values. `config` may import `vendors`, so
@@ -333,87 +347,132 @@ operational log. A user looking at a `Down` Host is not also told that its Vendo
 
 ## Decided here: the build order
 
-Seven milestones. Each one ends at something you can watch happen, because a milestone that ends at
-"the package compiles" cannot be wrong in a way anyone notices. The order follows
-[ADR 0010](docs/adr/0010-go-package-structure-and-seams.md)'s levels, which means the pure packages
-come first and SSH comes last.
+Nine milestones. Each one ends at something you can watch, because a milestone that ends at "the
+package compiles" cannot be wrong in a way anyone notices.
+
+The order follows [ADR 0010](docs/adr/0010-go-package-structure-and-seams.md)'s levels with three
+deliberate departures, each argued where it happens: `eventlog` is split, the Hub comes before the
+second Harness, and SSH comes early rather than last. All three answer the same question, which is
+how soon something runs that you would actually use.
 
 **M0. The module and the two CI checks.** `go.mod`, `cmd/dispatch/main.go` with the role switch, and
 the two `go list` checks in CI on the first day. They are cheap now and they are the fence the single
-binary trades away.
+binary trades away. The module path is `github.com/VictorJohnOkoh/Dispatch`, matching the
+repository's own capitalisation, because a Go module path is case sensitive to the proxy.
 *Watch:* `dispatch hub` and `dispatch daemon` each print their role and exit, and CI fails a commit
 that makes `internal/daemon` import `internal/hub`.
 
 **M1. The pure packages.** `event`, `protocol`, `session`, `workspace`, `admission`. Tier-one tests,
-no I/O beyond `t.TempDir()` with symlinks in it. `session.Fold` and its JSON fixture land here, and
-the fixture is the contract the Client's JS will later be tested against.
+no I/O beyond `t.TempDir()` with symlinks in it. These are the test-first packages, and
+`session.Fold` ships here rather than with the Client: ADR 0008's state table has a column for what
+the Daemon does differently per state, so the Daemon folds in order to refuse a Prompt on a
+`Starting` Session. What defers to M6 is the JS twin and the shared JSON fixture, not the fold.
 *Watch:* a slice of Events built by hand folds to each of the five states, and `workspace.Contain`
 refuses a symlink that points outside the Root.
 
-**M2. The Event log.** `eventlog` against a real SQLite file. Append, the gapless `Seq` allocated
-inside the write transaction, the 4 KiB flush, `Cursor`, `Replay`, `Subscribe`, the boot sweep,
-`log_id`. Kill the process mid-message and check what survived.
-*Watch:* a killed writer leaves a partial message in the log, and a reader resuming from a cursor
-gets that message whole.
+**M2. The Event log, write and stream only.** `eventlog` against a real SQLite file, with `Append`,
+`AppendText` and `Subscribe`. WAL, the gapless `Seq` allocated inside the write transaction, the
+4 KiB flush, open-message tracking, and the subscriber fan-out that drops rather than blocks.
 
-**M3. The vertical slice.** `daemon` with the passthrough Harness and the Ollama adapter, driven by
-`curl`. Admission, the Session registry, the ten endpoints, the SSE stream, the Vendor poll. No Hub,
-no browser, no process supervision yet, because passthrough spawns nothing.
+**`Cursor`, `Replay`, `Sweep` and `log_id` defer to M4**, and this split is what pulls the first
+running Daemon forward by weeks. Nothing is faked to do it. It is the real SQLite log with three of
+its six methods, and the three that are missing serve reattach and restart, which nothing tests until
+M4. ADR 0010 rejected an in-memory `eventlog` implementation, and this is not one.
+*Watch:* a killed writer leaves a partial message in the log, and every byte that was flushed is
+still there.
+
+**M3. The vertical slice, and the first thing that runs.** `daemon` with the passthrough Harness and
+the Ollama adapter, driven by `curl` on localhost. Admission, the Session registry, the ten
+endpoints, the SSE stream, the Vendor poll. No Hub, no browser and no process supervision, because
+passthrough spawns nothing.
+
+The Daemon calls `vendors.Load` during `Starting`, before `SessionReady`. Record the `vendors`
+fixtures here as well: Ollama is already running for this milestone, so finding R8 becomes a `curl`
+and a save rather than the capture-script problem it has been.
 *Watch:* `curl` starts a Session, submits a Prompt, and reads the assistant's text arriving as Deltas
-on `GET /v1/events`. This is the first end-to-end path and it is deliberately early.
+on `GET /v1/events`.
 
-**M4. A real Harness process.** `harness/acp.go` for OpenCode, plus `supervise.go`, `ledger.go` and
-`transcript.go`. The shutdown ladder, the process group kill, the stderr drain, the two synthesis
-triggers. The stub Harness is the test binary re-executing itself, so all of it is testable with no
+**M4. The Hub, a browser, and a real machine.** `hub`, `hostset`, `web` reduced to one page, and the
+rest of `eventlog`: `Cursor`, `Replay`, `Sweep`, `log_id` and resync detection. Cursor split and
+merge, and `id:` rewriting.
+
+**`HostDialer` gets its real `x/crypto/ssh` implementation here, not at the end.** The `net.Pipe`
+dialer stays for the in-process test, so nothing is lost. What is gained is that every milestone
+after this one runs against a real Host, which is the actual target, and the class of failure this
+repo has lost work to four separate times is found now instead of last. Manual install happens here:
+copy the binary and `daemon.json` to the Host and start it by hand.
+*Watch:* a browser shows a Session's transcript streaming from a machine in another room. Close the
+tab mid-Prompt, reopen it, and the whole transcript comes back including the message that was still
+arriving when the tab closed.
+
+**M5. A real Harness process.** `harness/acp.go` for OpenCode, plus `supervise.go`, `ledger.go` and
+`transcript.go`, running on the Host. The shutdown ladder, the stderr drain, the two synthesis
+triggers, and the Approval Policy becoming live, because passthrough never had one.
+
+**Killing the process tree is per platform and it is not one line**, which is the first correction
+below. The stub Harness is the test binary re-executing itself, so all of this is testable with no
 GPU and no OpenCode installed.
-*Watch:* a Session runs a tool call that waits on the Approval Policy, and a stop kills a process
-group that is refusing to die.
+*Watch:* a Session runs a tool call that waits on the Approval Policy, and a stop leaves nothing
+behind on the Host, checked from a shell there rather than from the Client.
 
-**M5. The Hub and the Client.** `hub`, `hostset` behind a `net.Pipe` dialer, and `web`. Cursor split
-and merge, `id:` rewriting, the merged stream, the fold in JS against M1's fixture, and the whole
-Client shape. The tier-three test lands here, and it is the first thing that exercises both roles.
-*Watch:* a browser drives a Session through the Hub to an in-process Daemon, and closing the tab
-mid-Prompt then reopening it replays the transcript whole.
+**M6. The full Client shape.** The rail, the read-only Hosts view, the four-step wizard, the toast,
+the pair on a Session row, and the fold in JS against M1's fixture. `web` renders the first paint on
+the server and JS applies live frames after it.
+*Watch:* an `ApprovalRequested` on a Session that is not on screen reaches you anyway.
 
-**M6. SSH, and a second machine.** The real `HostDialer`, the two keepalives, backoff, the Handshake,
-and Host State with all four values. This is last because it is the only part that cannot be tested
-in one process.
+**M7. Host State.** The two keepalives, backoff that resets only after 60s continuously `Ready`, the
+Handshake, and all four states with `Down` carrying its cause. M4 gave the Hub a connection; this
+milestone makes its failures correct.
 *Watch:* pull the network cable on a Host mid-Session and the Client dims that Host inside ~25
 seconds while every other Host keeps working.
 
-**M7. The second Harness and the other two Vendors.** `harness/pi.go`, `vendors/lmstudio.go` and
-`vendors/llamaswap.go`, all against fixtures already in this repo, plus the one Pi capture that
-settles Pi's Gate declaration. They are last on purpose: they are the proof the two abstractions are
-abstractions, and that proof is only worth anything once there is something for them to plug into.
-*Watch:* the same Session, the same transcript rendering, one Harness swapped in the wizard. And the
-same Model list showing `Yes` from LM Studio, `Unknown` from Ollama, and `Unknown` from llama-swap
-until it is loaded.
+**M8. The second Harness and the other two Vendors.** `harness/pi.go`, `vendors/lmstudio.go` and
+`vendors/llamaswap.go`, all against fixtures already in this repo, plus the Pi gate work described
+under holes. They are last on purpose: they are the proof the two abstractions are abstractions, and
+that proof is only worth anything once there is something for them to plug into.
+*Watch:* the same Session and the same transcript rendering, with one Harness swapped in the wizard.
+And one Model list showing `Yes` from LM Studio, `Unknown` from Ollama, and `Unknown` from llama-swap
+until the Model is resident.
 
-**If v1 has to shrink**, drop M7, in this order and stopping as soon as it fits: the Pi adapter, then
+**If v1 has to shrink**, drop M8, in this order and stopping as soon as it fits: the Pi adapter, then
 the llama-swap adapter, then the LM Studio adapter. That is the whole list, and the honesty is the
 point. Note what dropping either Vendor costs, since it is not nothing: llama-swap takes `Load` and
-`Unload` with it, and LM Studio takes the only `Yes` any Capability ever returns. M0 to M6 is one
+`Unload` with it, and LM Studio takes the only `Yes` any Capability ever returns. M0 to M7 is one
 Host, one Harness and one Vendor running end to end, which is the smallest thing that is the system
-rather than a demonstration of it, so nothing inside it can go without breaking one of the twelve behaviours
-below. In particular do not drop M4, because a Harness the Daemon cannot kill is the failure this
-whole design exists to prevent.
+rather than a demonstration of it, so nothing inside it can go without breaking one of the thirteen
+behaviours below. In particular do not drop M5, because a Harness the Daemon cannot kill is the
+failure this whole design exists to prevent.
+
+### Where test-first applies, and where it does not
+
+Agreed before any code is written, because "write tests" is not a plan and the answer differs by
+package.
+
+| | packages | why |
+| --- | --- | --- |
+| **Test-first** | `session.Fold` with its JSON fixture, `workspace.Contain`, `admission`, `protocol`'s cursor parse and format | pure, and a test is cheaper than a REPL. For these the test genuinely is the specification |
+| **Rig first, assert after** | `eventlog`, `supervise` | build the real SQLite temp-file rig and the re-exec stub Harness first, then write assertions against what actually happened. Nobody can predict what a killed WAL writer leaves behind, and guessing produces a test that encodes the guess |
+| **Tests after, from fixtures** | `vendors`, `harness` | a recorded `http.RoundTripper` and this repo's own `*-frames.jsonl`. The fixtures are the specification, and for `harness` they already exist |
+| **No unit tests** | `web`, `hub`, `cmd` | covered by the one in-process Hub-to-Daemon test over `net.Pipe`. Unit-testing a composition root tests the wiring diagram |
 
 ## Decided here: what proves v1 is done
 
-Not a test suite. Twelve behaviours you can watch, on real machines. v1 is done when all twelve hold.
+Not a test suite. Thirteen behaviours you can watch, on real machines. v1 is done when all thirteen
+hold.
 
 1. **Start a Session on a sleeping Host and get a useful error.** The Host reads `Down{unreachable}`,
    the Client names it, and the start button on that Host is disabled rather than failing silently.
-2. **Close the laptop mid-Session and reattach with full history.** Every Event replays, including the
-   assistant message that was still arriving when the lid closed, and it replays whole.
+2. **Close the laptop mid-Session and reattach with full history.** Every Event replays, including
+   the assistant message that was still arriving when the lid closed, and it replays whole.
 3. **Approve a tool call from a phone over a tunnel.** The `ApprovalRequested` arrives, the decision
    goes back, and the Tool Call ends with an outcome that says a human decided it.
 4. **The refusal is honest.** Set `execute` to `refuse`, ask the Session to run a command, and see
    `ToolCallEnded{refused}` written from the Daemon's own `ApprovalDecided`, never from the Harness.
 5. **Kill the Daemon under a live Session and restart it.** The boot sweep ends that Session `lost`,
    its transcript is intact and readable, and the Client offers a new Session rather than a resume.
-6. **Kill a Harness that will not die.** Stop runs the ladder and the process group is gone, checked
-   from a shell on the Host rather than from the Client.
+6. **Kill a Harness that will not die.** Stop runs the ladder and the whole process tree is gone,
+   checked from a shell on the Host rather than from the Client. On Windows this means checking that
+   the Harness's own children went with it, which is the part a naive kill gets wrong.
 7. **Start a second Session on a busy Host.** The refusal names the Session holding the slot, and one
    click stops that one and starts this one.
 8. **Run the same prompt on two Hosts at once.** Both stream into one merged Client stream, neither
@@ -428,10 +487,71 @@ Not a test suite. Twelve behaviours you can watch, on real machines. v1 is done 
     rather than as a blank, and every Session runs anyway.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.
+13. **Put a Daemon on a Host that has never had one.** Copy the binary and `daemon.json`, start it,
+    and have the Hub reach it, following only the written instructions and typing nothing from
+    memory. Manual install is a frozen v1 feature with nothing else checking it, and a silent `scp`
+    that landed nowhere has already cost this repo two runs.
 
-Two of these are the ones most likely to be quietly skipped, so they are called out. Number 6 needs a
-shell on the Host, not a green test. Number 12 needs two builds, which is an inconvenience rather
-than a difficulty, and it is the only check that the Handshake is real.
+Three of these get skipped unless they are called out, so they are called out. Number 6 needs a shell
+on the Host, not a green test. Number 12 needs two builds, which is an inconvenience rather than a
+difficulty, and it is the only check that the Handshake is real. Number 13 fails if the install
+instructions do not exist, which is the point of writing it as a behaviour rather than as a task.
+
+## Decided here: four corrections to earlier ADRs
+
+Each of these contradicts or completes something an ADR already says. They live here, named, which is
+how this repo has handled every prior correction: ADR 0009 amended ADR 0005's cursor sentence, and
+ADR 0010 corrected ADR 0007's package name. The index in `CLAUDE.md` carries a pointer on each
+affected row.
+
+**ADR 0008's shutdown ladder, step 6, is not portable as written.** It says "kill the process group,
+not the process", and Windows has no POSIX process groups. `SysProcAttr.Setpgid` is Unix only, and
+Windows' `CREATE_NEW_PROCESS_GROUP` changes only where a Ctrl+Break is delivered: it does not make
+children die. `os.Process.Kill` calls `TerminateProcess` on one handle, so descendants survive as
+orphans. This matters here rather than in theory, because OpenCode resolves to a package binary that
+spawns its own child, so a naive kill leaves the real work running with the Model still resident
+while admission believes the slot is free.
+
+**The fix is a Job Object on Windows**, created at spawn with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+and the Harness assigned to it, so closing the handle takes the whole tree including processes
+spawned later. `golang.org/x/sys/windows` covers it in about thirty lines. ADR 0010's tree gains two
+files, `supervise_windows.go` and `supervise_unix.go`, and the ladder's step 6 stays word for word,
+because "the process group" was always the right idea and only the primitive differs. This does not
+reopen ADR 0008's rejection of Job Objects for isolation: process-tree lifetime is not sandboxing,
+and nothing here limits what the Harness may do.
+
+**ADR 0007's `Load` and `Unload` had no caller anywhere in the design.** Nothing in ADRs 0008, 0009
+or 0010 calls either, and the only candidate was a VRAM-aware admission policy that is out of v1. Left
+alone that is two interface methods no v1 code path reaches.
+
+**The Daemon calls `Load` during `Starting`, before `SessionReady`.** ADR 0008 already assumed this
+without saying so: it justifies `Starting` as a state on the grounds that "a 29.70s cold Model load is
+the reason it is worth the Event", and a load only lands in `Starting` if the Daemon triggers it,
+since all three Vendors otherwise load lazily on the first inference call and would put the stall in
+`Working` instead. Calling `Load` also disables the Vendor's own evictor for the Session's life, which
+is what makes `Idle` mean idle rather than "your next Prompt costs twenty seconds". **`Unload` stays
+on the interface and v1 never calls it**, reserved for the VRAM policy, and that is a decision here
+rather than something for a reviewer to find.
+
+**ADR 0005 asked for transcript retention and no ticket picked it up.** Its Consequences say the raw
+transcript "needs its own rotation and retention. It is not covered by #10's log retention." ADR 0009
+then removed retention for the Event log and never took the other half, so the requirement fell
+between two documents. It lands here.
+
+**A transcript stops at 64 MB per Session and appends one line saying where it stopped.** A byte
+counter and one threshold in `transcript.go`. No rotation, no config knob, no policy. The number is
+reasoned rather than measured: one Pi tool call in `captures/pi-gate/gate-deny-raw.log` is 76 KB of
+raw bytes, so 64 MB is roughly 840 tool calls and a normal Session never reaches it. The Event log's
+promise that nothing is ever deleted is untouched, because a transcript is not the log: it is bytes in
+a file that no program reads, and its only reader is a human debugging an Adapter.
+
+**ADR 0010 left the first paint to this ticket and it is decided.** `web` keeps its `event` import and
+renders the transcript, the rail and the Host cards on the server; JS applies live frames after that.
+Serving an empty shell would remove the only import that makes the Hub aware Event Kinds exist, but it
+costs a blank first paint and moves all rendering into JS rather than just the fold, which is the
+shape the map rejected when it ruled out React. The cost of keeping the import is bounded: the Hub
+still forwards payloads byte for byte, so an Event Kind it has never heard of still reaches the
+browser and renders as a neutral row.
 
 ## The map's Notes, re-read
 
@@ -455,7 +575,7 @@ Client-driven later, which is the other half of the design-the-seam note and is 
 **Confirmed, and it was the one most at risk.** [ADR 0001](docs/adr/0001-resident-daemon-on-host.md),
 the resident Daemon, was decided while charting and before any Host existed. Everything since has
 leaned on it and none of it broke. The Event log is only a replay buffer because something long-lived
-owns it, and behaviours 2 and 5 below are the ones that would have failed under the SSH options.
+owns it, and behaviours 2 and 5 above are the ones that would have failed under the SSH options.
 
 **Corrected.**
 
@@ -493,7 +613,7 @@ this design does: an adapter per agent CLI, an event-sourced core, a headless se
 tunnel reach. Four independent arrivals at the same shape is the strongest outside evidence any of
 these decisions have. It deliberately does not solve the Vendor half, which is the half this project
 exists for, so it confirms the Harness side and says nothing about ADR 0007. Worth re-reading before
-M4 and worth ignoring during M7.
+M5, where the first real Harness process lands, and worth ignoring during M8.
 
 **Superseded, and kept visible.** The Note that Hermes is best driven as a local HTTP and SSE server
 was wrong: that surface does not exist in Hermes v0.19.0. The lesson generalises and is worth keeping
@@ -504,22 +624,33 @@ claim needs an empirical check before anything is designed against it.
 
 Named, so that nobody discovers them by being surprised.
 
-- **The Pi Gate capture.** Whether Pi's permission-gate extension can announce itself before `Start`
-  returns. One capture. Both answers keep Pi in v1 and only one of them is pleasant.
+- **Pi's Gate needs an extension we write, and it needs one capture.** The mechanism itself is proven:
+  `captures/pi-gate/` holds an allow run and a deny run, and the file state settles it rather than the
+  wording, since the target was deleted on `Yes` and survived on `No`. What those captures do not show
+  is a Gate in ADR 0008's sense. Pi's bundled `permission-gate.ts` fires only on `bash`, and only for
+  three regexes (`rm -rf`, `sudo`, `chmod 777`), so most `execute` calls sail past it, and it never
+  announces itself. The Daemon therefore ships its own extension, and what that extension must add is
+  coverage of every `toolKind` plus an announcement before `Start` returns. The one capture still owed
+  is that the announcement arrives. If it cannot, the Adapter declares no Gates, every slot is forced
+  to `auto`, and the Client draws a Session with no gates anywhere, which ADR 0008 already called the
+  correct outcome because it is what is true.
 - **The Vendor fixtures do not exist.** Finding R8. Tier-two tests for `vendors` need recorded bodies
-  for a caller-supplied `http.RoundTripper`, and nothing has recorded them yet. It blocks M7 and part
-  of M3.
+  for a caller-supplied `http.RoundTripper`, and the capture that should have produced them wrote
+  nothing while reporting `HTTP 200`. It is no longer the problem it was: M3 has Ollama running
+  anyway, so recording them is a `curl` and a save, and M3 is where to do it.
 - **No OpenCode refusal has ever been tested.** Every captured permission request was answered with
-  allow, so what `reject_once` does is an assumption. It is cheap to settle during M4 and expensive to
-  discover during M5.
+  allow, so what `reject_once` does is an assumption. Cheap to settle during M5 and expensive to
+  discover during M6.
 - **The Hermes launcher-chain failure is unexplained.** Eight causes were ruled out by measurement and
-  the cause is still open. It does not block anything, and it is the reason the Daemon must try to run
-  a Harness rather than ask whether it is installed.
-- **`web` importing `event` is one import's worth of decision.** It is the only Hub code that knows an
-  Event Kind exists. Serving an empty shell and letting the JS fill it would remove that import, and
-  M5 is where to weigh it against the cost of a blank first paint.
+  the cause is still open. It blocks nothing, and it is the reason the Daemon must try to run a
+  Harness rather than ask whether one is installed.
 - **The fold is written twice**, in `session` and in the Client's JS, sharing one JSON fixture. It is
   the only duplicated logic in the design, and it is duplicated because the Client applies live Events
   itself.
 - **A recorded frame proves what a Harness said in August 2026 and nothing about September.** Every
-  fixture in this repo is a snapshot, so re-capturing is a recurring task rather than a one-off.
+  fixture in this repo is a snapshot, so re-capturing is a recurring task rather than a one-off. This
+  is the risk that grows with the calendar: OpenCode lands at M5 and Pi at M8, and neither is a
+  program this project controls.
+- **The Host has to be standing from M4 onward**, which is earlier than the original order needed it.
+  If it is down, M4 still runs on the `net.Pipe` dialer and the real dial waits, but every milestone
+  after it assumes a reachable machine.
