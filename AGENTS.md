@@ -15,7 +15,7 @@ When speaking always talk in ASD-STE100 Simplified Technical English, read CONTE
 
 ### Issue tracker
 
-Issues live as GitHub issues on `VictorJohnOkoh/Capstone`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues on `VictorJohnOkoh/Dispatch`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

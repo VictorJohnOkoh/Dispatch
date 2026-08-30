@@ -17,7 +17,7 @@ Dumb down complex topics/options afterwards by describing them using more colloq
 
 ### Issue tracker
 
-Issues live as GitHub issues on `VictorJohnOkoh/Capstone`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues on `VictorJohnOkoh/Dispatch`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

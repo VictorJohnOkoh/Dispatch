@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live as GitHub issues on `VictorJohnOkoh/Capstone`. Use the `gh` CLI for all operations.
+Issues and PRDs for this repo live as GitHub issues on `VictorJohnOkoh/Dispatch`. Use the `gh` CLI for all operations.
 
 ## Conventions
 

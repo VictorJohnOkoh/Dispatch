@@ -43,13 +43,14 @@ build order. Those are marked **Decided here** so a reader can tell them apart f
 - Ten endpoints on the Daemon, the same ten under a `/v1/hosts/{host}` prefix on the Hub, plus
   `GET /v1/hosts`.
 - One merged SSE stream to the Client, one stream per Host to the Hub, six frame types the last of
-  which is a keepalive comment, and the Hub's `host` field on each.
+  which is a keepalive comment, a seventh `host` frame the Hub originates, and a `host` field the Hub
+  adds to all of them.
 - Replay from a cursor, `resync` when the cursor is unservable, and a per-Session transcript file
   beside the log holding the Harness's raw bytes.
 
 **The Client**
 
-- Server-rendered HTML with vanilla JS. One conversation fills the screen, other Sessions are a rail.
+- Server-rendered HTML with vanilla JS. One Session fills the screen, the others are a rail.
 - A read-only Hosts view carrying the cause, the Stale stamp, the Vendors and the resident Models.
 - A four-step start wizard: Host, Model, Harness, Approval Policy.
 - A Session row that renders the pair, Session State and Host State, because neither alone is enough.
@@ -64,7 +65,7 @@ Each of these has a reason recorded somewhere. Nothing here is out because it wa
 | Cross-Host Sessions | [ADR 0012](docs/adr/0012-the-same-host-invariant.md). It is a redesign, not a setting |
 | Self-rolled internet-facing auth or TLS | rejected in charting. SSH key auth is the whole boundary |
 | Multi-user or multi-tenant operation | single user throughout |
-| A native Client, React, or any heavyweight frontend | rejected in charting |
+| A native Client, and React or anything like it | rejected in charting |
 | The TUI as a second Client | wanted, and it proves the Hub's API boundary is real. Not v1 |
 | Hermes as a shipped Harness | [ADR 0003](docs/adr/0003-opencode-replaces-hermes-as-the-second-harness.md). It stays as a test fixture |
 | LM Studio as a Vendor | **Decided here**, argued below |
@@ -223,9 +224,15 @@ The Client's ten are the same under `/v1/hosts/{host}`, plus `GET /v1/hosts`. Th
 handler is one function serving all of them, and it would serve an eleventh unchanged.
 
 Frames on the stream: `hello`, `event`, `delta`, `vendors`, `resync`, and a keepalive comment every
-10 seconds. The Hub adds `host` to each and sends its own keepalive on the same beat. `id:` appears
-only where a frame advances the cursor, and the Hub rewrites it to the whole compound cursor, because
-an `EventSource` keeps only one `Last-Event-ID`.
+10 seconds. The Hub adds a `host` field to each and sends its own keepalive on the same beat.
+
+**The Client's leg has a seventh frame the Daemon never sends.** `host` carries Host State, and it
+has to be a frame rather than an Event because every Event carries a Session id and a Host that is
+down has no Session to carry one. It is the only thing the Hub originates instead of forwarding, and
+it is the whole reason the Client can draw the pair on a Session row.
+
+`id:` appears only where a frame advances the cursor, and the Hub rewrites it to the whole compound
+cursor, because an `EventSource` keeps only one `Last-Event-ID`.
 
 The log is SQLite with write-ahead logging, one `events` table whose five columns are the wire shape,
 one index. An Event is committed before it is sent. An open message flushes every 4 KiB, so a crash
@@ -244,8 +251,9 @@ floor, because ADR 0007's own test example calls `t.Context()`.
 Settled by the prototype on `prototype/multi-host-client`. The artefact is the argument and it stays
 off `main`.
 
-- **The primary object is the conversation.** One transcript fills the screen. Other Sessions are a
-  rail. The competing answer, one list of every Session on every Host, reads as a thing to administer.
+- **The primary object is one Session, drawn in full.** Its Events fill the screen and every other
+  Session is a rail. The competing answer, one list of every Session on every Host, reads as a thing
+  to administer.
 - **The Hosts view is read only.** It shows machines. It does not start Sessions.
 - **The start flow is four deliberate steps**, not two selects, because the thing being started runs
   for an hour on a machine in another room.
@@ -364,9 +372,12 @@ They are last on purpose: they are the proof the two abstractions are abstractio
 only worth anything once there is something for them to plug into.
 *Watch:* the same Session, the same transcript rendering, one Harness swapped in the wizard.
 
-**If v1 has to shrink**, drop in this order and stop as soon as it fits: M7's Pi adapter, then M7's
-llama-swap adapter, then M6's Tailscale-shaped niceties. Do not drop M4, because a Harness the Daemon
-cannot kill is the failure this whole design exists to prevent.
+**If v1 has to shrink**, drop M7, in this order and stopping as soon as it fits: the Pi adapter, then
+the llama-swap adapter. That is the whole list, and the honesty is the point. M0 to M6 is one Host,
+one Harness and one Vendor running end to end, which is the smallest thing that is the system rather
+than a demonstration of it, so nothing inside it can go without breaking one of the twelve behaviours
+below. In particular do not drop M4, because a Harness the Daemon cannot kill is the failure this
+whole design exists to prevent.
 
 ## Decided here: what proves v1 is done
 
@@ -404,16 +415,26 @@ than a difficulty, and it is the only check that the Handshake is real.
 ## The map's Notes, re-read
 
 Every Note on the map, confirmed or corrected against the research that landed after it was written.
+The Notes are grouped below rather than listed in the map's order, and nothing is dropped: a Note that
+still holds is named here even when it needed no thought.
 
-**Confirmed unchanged.** Learning first and portfolio second. Data structures and algorithms are not
-a goal. Go, and a dumb browser Client with no React. One binary and two roles, with Daemons that
-never learn about their peers, now [ADR 0011](docs/adr/0011-one-binary-two-roles.md). Control Plane
-and Data Plane stay separate, now [ADR 0012](docs/adr/0012-the-same-host-invariant.md). The Vendor
-abstraction covers discovery, capability and health but not inference. Direct prompting is a
-passthrough Harness rather than a second code path, and ADR 0005 confirmed it costs nothing: it is
-nine of the sixteen Kinds, a strict subset, with nothing bent. Events are normalised and typed, and
-the log is transport, replay buffer and history at once. Daemons bind loopback, reach is an SSH
-tunnel, and there is no self-rolled internet-facing auth.
+**Confirmed unchanged.** The **Domain** note, a Go program in two roles, is what this whole spec
+describes. Learning first and portfolio second. Data structures and algorithms are not a goal. Go, and
+a dumb browser Client with no React. One binary and two roles, with Daemons that never learn about
+their peers, now [ADR 0011](docs/adr/0011-one-binary-two-roles.md). Control Plane and Data Plane stay
+separate, now [ADR 0012](docs/adr/0012-the-same-host-invariant.md). The Vendor abstraction covers
+discovery, capability and health but not inference. Direct prompting is a passthrough Harness rather
+than a second code path, and ADR 0005 confirmed it costs nothing: it is a strict subset of the Kinds
+with nothing bent, and the ones it never writes are the five about tools, which it does not have.
+Events are normalised and typed, the Client never sees raw Harness output, and the log is transport,
+replay buffer and history at once. Daemons bind loopback, reach is an SSH tunnel with Tailscale as the
+later upgrade, and there is no self-rolled internet-facing auth. Manual Daemon install now and
+Client-driven later, which is the other half of the design-the-seam note and is unchanged.
+
+**Confirmed, and it was the one most at risk.** [ADR 0001](docs/adr/0001-resident-daemon-on-host.md),
+the resident Daemon, was decided while charting and before any Host existed. Everything since has
+leaned on it and none of it broke. The Event log is only a replay buffer because something long-lived
+owns it, and behaviours 2 and 5 below are the ones that would have failed under the SSH options.
 
 **Corrected.**
 
@@ -433,6 +454,24 @@ Hub-side limit would be advisory.
 design with nothing to exercise it.
 
 *Passthrough plus one real Harness.* Corrected to two real ones, argued above.
+
+*One arithmetic correction, since it is the kind that gets carried silently.* ADR 0005 records
+passthrough as nine of fourteen Kinds. ADR 0008 added `SessionReady` and `DaemonStarted`, and
+`SessionReady` is the only trigger out of `Starting`, so a passthrough Session writes it too. Ten of
+sixteen, and the subset argument is untouched.
+
+**Still true, and not an architecture claim.** The **skills** note names `/grilling` and
+`/domain-modeling` as the default reading for a session on this map, with `/codebase-design` for
+interface tickets. That was a working practice for charting rather than a decision about the system,
+and it does not carry into the build, where the reading is `CONTEXT.md`, this spec, and the one ADR
+that owns whatever is being changed.
+
+**Prior art, re-read and still the closest analogue.** T3 Code solves the Harness half the same way
+this design does: an adapter per agent CLI, an event-sourced core, a headless server, loopback plus
+tunnel reach. Four independent arrivals at the same shape is the strongest outside evidence any of
+these decisions have. It deliberately does not solve the Vendor half, which is the half this project
+exists for, so it confirms the Harness side and says nothing about ADR 0007. Worth re-reading before
+M4 and worth ignoring during M7.
 
 **Superseded, and kept visible.** The Note that Hermes is best driven as a local HTTP and SSE server
 was wrong: that surface does not exist in Hermes v0.19.0. The lesson generalises and is worth keeping
