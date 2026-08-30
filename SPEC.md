@@ -152,12 +152,13 @@ The cost is two adapter files beside the first. The research in
 [ADR 0010](docs/adr/0010-go-package-structure-and-seams.md)'s tree already names `ollama.go`,
 `lmstudio.go` and `llamaswap.go` as files in one package rather than three packages.
 
-**One caveat, stated rather than designed around.** LM Studio is GUI-first. Its server is started by
-hand from a desktop session and cannot be brought up over SSH, so a Host reached only over SSH is an
-Ollama or llama-swap Host in practice. That is a fact about how a user runs LM Studio, not a defect in
-the adapter, and it changes nothing about the Vendor Adapter. It does mean the Daemon must never
-assume it can start a Vendor, which it already never does: a Vendor is reachable exactly when a call
-to it succeeds.
+All three are proven on a real Host over SSH, which is worth stating because an earlier version of
+the research claimed otherwise about LM Studio. The `pi-vendors` pass drove all three at loopback on
+the Host, and the OpenCode run records `gate1_tool_call_on_host: pass` against LM Studio over SSH with
+no TTY. That finding is corrected in `docs/research/remote-host-findings.md` rather than left to be
+rediscovered. The one real difference is that LM Studio's server is started once from its own
+application instead of from a CLI, which is Host setup and not something the Daemon ever does: a
+Vendor is reachable exactly when a call to it succeeds.
 
 ## The system
 
