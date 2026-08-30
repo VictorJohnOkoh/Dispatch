@@ -56,12 +56,12 @@ var everyKind = []struct {
 }{
 	{KindSessionStarted, false, &SessionStarted{Harness: "opencode", Model: "qwen3", Vendor: "ollama", Cwd: "/srv/work"}},
 	{KindSessionReady, false, &SessionReady{Model: "capstone/qwen3.5-9b"}},
-	{KindApprovalPolicySet, false, &ApprovalPolicySet{Policy: Policy{Auto, Wait, Wait, Wait, Auto}, SetBy: SetByDefault}},
+	{KindApprovalPolicySet, false, &ApprovalPolicySet{Policy: Policy{RuleAuto, RuleWait, RuleWait, RuleWait, RuleAuto}, SetBy: SetByDefault}},
 	{KindPromptSubmitted, false, &PromptSubmitted{Text: "rename the handler"}},
 	{KindApprovalRequested, false, &ApprovalRequested{ToolCallID: "t-1", Title: "run tests", Detail: "go test ./..."}},
-	{KindApprovalDecided, false, &ApprovalDecided{ToolCallID: "t-1", Decision: Allowed, By: ByPolicy}},
+	{KindApprovalDecided, false, &ApprovalDecided{ToolCallID: "t-1", Decision: DecisionAllowed, By: ByPolicy}},
 	{KindError, false, &Error{Code: ErrVendor, Message: "model not found"}},
-	{KindSessionEnded, false, &SessionEnded{Reason: Lost}},
+	{KindSessionEnded, false, &SessionEnded{Reason: EndLost}},
 	{KindHubDetached, false, &NoPayload{}},
 	{KindHubAttached, false, &NoPayload{}},
 	{KindDaemonStarted, false, &NoPayload{}},
@@ -142,7 +142,19 @@ func TestEndReasons(t *testing.T) {
 			t.Errorf("got %s, want reason %q", got, want)
 		}
 	}
-	if Stopped != "stopped" || Failed != "failed" || Lost != "lost" {
+	if EndStopped != "stopped" || EndFailed != "failed" || EndLost != "lost" {
 		t.Error("the three reasons are stopped, failed and lost")
+	}
+}
+
+// A frame with no payload key at all is read, not refused. The three Kinds that
+// carry nothing are the ones a writer is most likely to send this way.
+func TestAMissingPayloadIsNotAnError(t *testing.T) {
+	var got Event
+	if err := json.Unmarshal([]byte(`{"seq":1,"session":"s-1","at":1756412093118000,"kind":"HubAttached"}`), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Kind != KindHubAttached {
+		t.Errorf("kind is %s, want %s", got.Kind, KindHubAttached)
 	}
 }

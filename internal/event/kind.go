@@ -41,9 +41,9 @@ func (k Kind) WrittenByAdapter() bool {
 	return false
 }
 
-// newPayload returns an empty payload to decode into, or nil for a Kind this build
-// does not know.
-func newPayload(k Kind) any {
+// NewPayload returns an empty payload to decode into, or nil for a Kind this build
+// does not know. It is the one place a Kind becomes a type.
+func NewPayload(k Kind) any {
 	switch k {
 	case KindSessionStarted:
 		return &SessionStarted{}

@@ -57,7 +57,7 @@ func TestToolKindRejectsAnythingElse(t *testing.T) {
 // The Approval Policy is five slots on the wire, named rather than positional, and
 // in ToolKind order.
 func TestPolicyIsFiveNamedSlots(t *testing.T) {
-	p := Policy{Auto, Wait, Refuse, Wait, Auto}
+	p := Policy{RuleAuto, RuleWait, RuleRefuse, RuleWait, RuleAuto}
 
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -82,5 +82,15 @@ func TestPolicyRefusesAPartialSet(t *testing.T) {
 	var p Policy
 	if err := json.Unmarshal([]byte(`{"read":"auto","edit":"wait","execute":"wait","fetch":"wait"}`), &p); err == nil {
 		t.Error("four slots is not an Approval Policy")
+	}
+}
+
+// A slot set to something that is not a Rule is refused, the same way ToolKind
+// refuses a name outside its five.
+func TestPolicyRefusesASlotThatIsNotARule(t *testing.T) {
+	var p Policy
+	err := json.Unmarshal([]byte(`{"read":"banana","edit":"wait","execute":"wait","fetch":"wait","other":"wait"}`), &p)
+	if err == nil {
+		t.Error("banana is not a Rule and should not decode")
 	}
 }

@@ -79,8 +79,8 @@ type ApprovalDecided struct {
 type Decision string
 
 const (
-	Allowed Decision = "allowed"
-	Refused Decision = "refused"
+	DecisionAllowed Decision = "allowed"
+	DecisionRefused Decision = "refused"
 )
 
 // DecidedBy is what answered the question.
@@ -151,9 +151,9 @@ type SessionEnded struct {
 type EndReason string
 
 const (
-	Stopped EndReason = "stopped"
-	Failed  EndReason = "failed"
-	Lost    EndReason = "lost" // the Daemon that supervised the Session restarted
+	EndStopped EndReason = "stopped"
+	EndFailed  EndReason = "failed"
+	EndLost    EndReason = "lost" // the Daemon that supervised the Session restarted
 )
 
 // NoPayload is the payload of the three Kinds that carry nothing: HubDetached,

@@ -88,20 +88,20 @@ func ReadStream(r io.Reader, out func(Frame)) {
 
 		if line == "[DONE]" {
 			done = true
-			continue
+			break
 		}
 
 		// A line this reader cannot parse is skipped rather than refused. The
 		// rules above read the fields they need and ignore every other one, which
 		// is what lets one reader serve three Vendors and their extensions.
 		var c chunk
-		if json.Unmarshal([]byte(line), &c) != nil {
+		if err := json.Unmarshal([]byte(line), &c); err != nil {
 			continue
 		}
 
 		// Rule 2: an error key, framed or not, ends the stream.
 		if len(c.Error) > 0 && !bytes.Equal(c.Error, []byte("null")) {
-			out(Frame{Kind: FrameError, Text: string(c.Error)})
+			out(Frame{Kind: FrameError, Text: errorText(c.Error)})
 			return
 		}
 
@@ -115,8 +115,12 @@ func ReadStream(r io.Reader, out func(Frame)) {
 		}
 
 		for _, choice := range c.Choices {
-			// Rule 4: reasoning arrives under either name, and no Vendor sends both.
-			if text := choice.Delta.Reasoning + choice.Delta.ReasoningContent; text != "" {
+			// Rule 4: reasoning arrives under either name, whichever is present.
+			text := choice.Delta.Reasoning
+			if text == "" {
+				text = choice.Delta.ReasoningContent
+			}
+			if text != "" {
 				out(Frame{Kind: FrameReasoning, Text: text})
 			}
 			if choice.Delta.Content != "" {
@@ -136,4 +140,15 @@ func ReadStream(r io.Reader, out func(Frame)) {
 		return
 	}
 	out(Frame{Kind: FrameEnd, Stop: stop, Usage: usage})
+}
+
+// errorText is the Vendor's own words. Ollama and LM Studio put a plain sentence
+// under the error key, and llama.cpp puts an object whose type values are outside
+// the OpenAI vocabulary, so the object travels whole rather than losing them.
+func errorText(raw json.RawMessage) string {
+	var sentence string
+	if json.Unmarshal(raw, &sentence) == nil {
+		return sentence
+	}
+	return string(raw)
 }

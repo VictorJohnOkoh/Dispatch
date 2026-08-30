@@ -56,9 +56,9 @@ func (k *ToolKind) UnmarshalJSON(b []byte) error {
 type Rule string
 
 const (
-	Auto   Rule = "auto"   // run it without asking
-	Wait   Rule = "wait"   // hold it and ask the user
-	Refuse Rule = "refuse" // refuse it without asking
+	RuleAuto   Rule = "auto"   // run it without asking
+	RuleWait   Rule = "wait"   // hold it and ask the user
+	RuleRefuse Rule = "refuse" // refuse it without asking
 )
 
 // Policy is the Approval Policy: one Rule per ToolKind, always all five set. It
@@ -86,8 +86,9 @@ func (p Policy) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON refuses a policy with a slot missing, because the five are always
-// all set.
+// UnmarshalJSON refuses a policy with a slot missing or a slot set to something
+// that is not a Rule, because the five are always all set and what may run
+// unattended is not a field to be lenient about.
 func (p *Policy) UnmarshalJSON(b []byte) error {
 	var s policySlots
 	if err := json.Unmarshal(b, &s); err != nil {
@@ -95,8 +96,12 @@ func (p *Policy) UnmarshalJSON(b []byte) error {
 	}
 	slots := Policy{s.Read, s.Edit, s.Execute, s.Fetch, s.Other}
 	for i, rule := range slots {
-		if rule == "" {
+		switch rule {
+		case RuleAuto, RuleWait, RuleRefuse:
+		case "":
 			return fmt.Errorf("event: Approval Policy has no %s slot", toolKindNames[i])
+		default:
+			return fmt.Errorf("event: Approval Policy %s slot is %q, not a Rule", toolKindNames[i], rule)
 		}
 	}
 	*p = slots

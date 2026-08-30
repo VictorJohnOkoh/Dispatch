@@ -36,6 +36,11 @@ type Event struct {
 
 // wireEvent is the Envelope as ADR 0009 frames it. At is Unix microseconds, which
 // sorts and compares without parsing.
+//
+// ADR 0010 gives the read path its own untyped envelope, protocol.Event, which
+// carries the payload as raw JSON so the Hub can forward a Kind it never heard of.
+// This one is the typed spelling, and it is here because turning a Kind into its
+// payload is Kind knowledge. The two meet in the SQLite row.
 type wireEvent struct {
 	Seq     uint64          `json:"seq"`
 	Session SessionID       `json:"session"`
@@ -66,8 +71,8 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	payload := newPayload(w.Kind)
-	if payload == nil {
+	payload := NewPayload(w.Kind)
+	if payload == nil || len(w.Payload) == 0 {
 		e.Payload = w.Payload
 	} else {
 		if err := json.Unmarshal(w.Payload, payload); err != nil {

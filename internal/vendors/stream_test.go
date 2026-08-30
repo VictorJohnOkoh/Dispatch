@@ -39,7 +39,7 @@ func TestFramedErrorIsAnErrorFrame(t *testing.T) {
 // then sends no terminator, so a reader that needs the prefix never reaches rule 2.
 func TestUnframedErrorIsStillAnErrorFrame(t *testing.T) {
 	wantFrames(t, "{\"error\":\"model not found\"}\n",
-		Frame{Kind: FrameError, Text: `"model not found"`},
+		Frame{Kind: FrameError, Text: "model not found"},
 	)
 }
 
@@ -100,6 +100,13 @@ func TestCachedTokensAreRead(t *testing.T) {
 // An error closes the stream, so nothing after it is read.
 func TestNothingIsReadAfterAnError(t *testing.T) {
 	wantFrames(t, "data: {\"error\":\"gone\"}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
-		Frame{Kind: FrameError, Text: `"gone"`},
+		Frame{Kind: FrameError, Text: "gone"},
+	)
+}
+
+// [DONE] ends the stream, so a frame after it is not read.
+func TestNothingIsReadAfterDone(t *testing.T) {
+	wantFrames(t, "data: [DONE]\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n\n",
+		Frame{Kind: FrameEnd},
 	)
 }
