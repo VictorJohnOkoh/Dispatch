@@ -17,7 +17,7 @@ Dumb down complex topics/options afterwards by describing them using more colloq
 
 ### Issue tracker
 
-Issues live as GitHub issues on `VictorJohnOkoh/Capstone`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues on `VictorJohnOkoh/Dispatch`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -39,12 +39,28 @@ in the last column when you do.
 | 0002 | llama-swap is how llama.cpp becomes a Vendor, and the Daemon still owns admission control | llama.cpp, VRAM admission | 3 KB |
 | 0003 | OpenCode replaces Hermes as the second Harness, and Hermes becomes a test fixture | the Harness list, test fixtures | 6 KB |
 | 0004 | The Hub owns a four-state Host State, and presence is connection liveness | Hub, Host State, presence | 12 KB |
-| 0005 | Fourteen Event kinds (0008 raised it to sixteen), a per-Daemon sequence number, and text that streams as Deltas the log never keeps | the Event model, Deltas, the log | 28 KB |
+| 0005 | Fourteen Event kinds (0008 raised it to sixteen), a per-Daemon sequence number, and text that streams as Deltas the log never keeps (the transcript bound it asks for is in `SPEC.md`) | the Event model, Deltas, the log | 28 KB |
 | 0006 | The Daemon owns the Harness process and the Adapter owns the conversation | Harness Adapters, process supervision | 28 KB |
-| 0007 | The Vendor Adapter has no Health method, and every capability it reports is three-valued | Vendor Adapters, capability reporting | 33 KB |
-| 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed | Session lifecycle, admission, Approval Policy | 44 KB |
+| 0007 | The Vendor Adapter has no Health method, and every capability it reports is three-valued (`SPEC.md` says who calls `Load`, and that nothing calls `Unload`) | Vendor Adapters, capability reporting | 33 KB |
+| 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed (its ladder's "kill the process group" needs a Job Object on Windows, see `SPEC.md`) | Session lifecycle, admission, Approval Policy | 44 KB |
 | 0009 | One protocol that differs by a Host id, a merged stream to the Client, and an Event that is written before it is sent | the wire protocol, the SQLite log, replay, retention | 51 KB |
-| 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import | the package tree, imports, concurrency ownership, testing tiers, where config enters | 41 KB |
+| 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import (`SPEC.md` adds the two per-OS `supervise` files and settles the first paint it deferred) | the package tree, imports, concurrency ownership, testing tiers, where config enters | 41 KB |
+| 0011 | One binary runs both roles, and the Hub is the only place a second Host can be named | the role split, one binary against two, deployment | 6 KB |
+| 0012 | A Harness reaches only its own Host's Vendor, and no type on the wire can say otherwise | cross-Host Sessions, the Data Plane, Vendor addresses | 4 KB |
 
-Everything after 0004 is long. The ten together are about 65,000 tokens, which is why
-they are indexed here and not read by default.
+Everything after 0004 is long. The twelve together are about 68,000 tokens, which is why
+they are indexed here and not read by default. 0011 and 0012 are the exceptions and
+are short enough to open on a hunch.
+
+### The build spec
+
+`SPEC.md` at the repo root is the frozen v1 scope, the nine-milestone build order, the
+thirteen behaviours that define done, and where test-first applies. Read it before
+writing code.
+
+It mostly assembles the ADRs rather than repeating them, with two exceptions worth
+knowing. It owns the decisions no ADR made: the SQLite driver, the config format, the
+Harness and Vendor counts, observability and the error taxonomy. And it owns **four
+corrections** to ADRs 0005, 0007, 0008 and 0010, flagged on their rows above. Where the
+two disagree, `SPEC.md` is later and wins, which is the same rule ADR 0009 and ADR 0010
+already set when they corrected earlier ADRs.

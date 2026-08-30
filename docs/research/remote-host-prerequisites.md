@@ -161,9 +161,11 @@ ollama pull qwen3:8b
 ollama list
 ```
 
-**LM Studio** matches the existing captures more closely, but is GUI-first: it
-needs a desktop session open on the Host, and the server started by hand from
-Developer → Start Server. Over SSH alone it will not start.
+**LM Studio** matches the existing captures more closely. Start its server once
+on the Host from Developer → Start Server. That is a setup step, not a per-run
+one: the server keeps serving afterwards and is reachable over SSH like any
+other Vendor on loopback, which the `pi-vendors` and OpenCode captures both
+confirm. What you cannot do over SSH alone is start it the first time.
 
 Either way the model **must** be tool-calling capable. A model that cannot call
 a tool produces an empty capture, which is the whole point of the exercise lost.

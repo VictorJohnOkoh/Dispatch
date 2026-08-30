@@ -152,10 +152,30 @@ Two differences matter for the Daemon:
 - Ollama's `/v1/models` also drops the context length, which LM Studio reports.
   The native `/api/tags` carries parameter size and quantisation instead.
 
-This matters for a remote Host because LM Studio is GUI-first — its server is
-started by hand from a desktop session and cannot be brought up over SSH.
-Ollama runs headless. A Host reached only over SSH is therefore an Ollama Host
-in practice, whatever the local captures used.
+**Corrected 2026-08-30. The paragraph that stood here was wrong, and it was an
+inference from `[desktop]` rather than an observation.** It said LM Studio is
+GUI-first, cannot be brought up over SSH, and that a Host reached only over SSH
+is an Ollama Host in practice. Two later captures on this Host disprove it.
+`[remote]`
+
+- The 2026-08-25 `pi-vendors` pass drove LM Studio at `127.0.0.1:1234` on the
+  Host, all stages exit 0, the same as Ollama and llama.cpp.
+- The 2026-08-27 OpenCode run records
+  `gate1_tool_call_on_host: pass`, noting
+  `Host Victor@ZenitoBurrito:22 over SSH, no TTY, supervisor owned stdin;
+  Vendor lmstudio`. See `captures/opencode/lmstudio/gates.json`.
+
+What is true is narrower and is not about reach. LM Studio's server is started
+from its own application rather than from a CLI, which is a one-time setup step
+on the Host. Once it is serving it keeps serving, and it is then reachable over
+SSH like any other Vendor on loopback. It survives across Sessions and across
+reconnects.
+
+Nothing in the design depended on the wrong version, because the Daemon never
+starts a Vendor: a Vendor is reachable exactly when a call to it succeeds. The
+lesson is the one this file keeps making. A `[desktop]` observation plus a
+plausible inference is not a `[remote]` finding, and this one sat unchallenged
+for five days next to captures that already contradicted it.
 
 ## R7. Pi's event vocabulary is the same across all three Vendors
 

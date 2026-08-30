@@ -15,7 +15,7 @@ When speaking always talk in ASD-STE100 Simplified Technical English, read CONTE
 
 ### Issue tracker
 
-Issues live as GitHub issues on `VictorJohnOkoh/Capstone`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues on `VictorJohnOkoh/Dispatch`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -23,4 +23,4 @@ The five canonical triage roles, each label string equal to its name. See `docs/
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: `CONTEXT.md` + `docs/adr/` + `SPEC.md` at the repo root. See `docs/agents/domain.md`.
