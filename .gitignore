@@ -41,3 +41,7 @@ pi-capture-*/
 
 # The built binary, when go build lands it in the repo root
 /dispatch
+
+# go test builds its binaries under %TEMP% on Windows, where an Application
+# Control policy can block them from running. GOTMPDIR=./.gotmp moves them here.
+/.gotmp/
