@@ -10,6 +10,9 @@ This is a **single-context** repo: one `CONTEXT.md` and one `docs/adr/` at the r
 - **`docs/adr/`** — the ADR index in `CLAUDE.md` gives every decision in one line.
   Read the index first. Open a full ADR only when you change the area it covers;
   0005 onward run 28 KB to 51 KB each.
+- **`SPEC.md`** at the repo root — the frozen v1 scope, the build order and the twelve
+  behaviours that define done. Read it before writing code. It assembles the ADRs and
+  never overrides one, so a decision changes in its ADR first.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 

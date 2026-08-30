@@ -1,5 +1,26 @@
 # Dispatch
-An app that allows for remote connection with host devices running local LLM models
----
-The goal is that there is a central managing system that allows the user to view the progress of threads on other machines and a Daemon would live on these remote machines handling things like delivering prompts in the right format for the selected harness or managing the memory of the system so if a new thread attempts to spin up while the system doesn't have enough memory available then its blocked or if memory is being occupied by models that aren't in use then they can be unloaded after a specific timeout and then a needed model can be loaded in
-Then the system can be connected to remotely via SSH (maybe over Tailscale in the future)
+
+Drive AI agent harnesses that run on other machines you own, from a browser, with the model behind
+each one chosen when the session starts.
+
+A Daemon lives on each Host and owns everything that happens there: it spawns the Harness, holds its
+stdin, answers its permission requests, writes every normalised Event to a durable log, and kills the
+process group when you say stop. A Hub holds a connection to every Host, merges what they report, and
+serves the Client. Reach is an SSH tunnel, so the Daemons bind loopback and nothing hand-written
+faces the internet.
+
+Sessions survive the laptop closing. The Event log is the transport, the replay buffer and the
+history at once, so reattaching and restarting are the same mechanism.
+
+## The documents
+
+The architecture is decided and the code is not written yet. Read in this order.
+
+- **[`CONTEXT.md`](CONTEXT.md)** is the vocabulary. Small, and everything else assumes it.
+- **[`SPEC.md`](SPEC.md)** is the frozen v1 scope, the build order and the twelve behaviours that
+  define done.
+- **[`docs/adr/`](docs/adr/)** holds the arguments, twelve of them. Each title is its decision, and
+  the index in [`CLAUDE.md`](CLAUDE.md) is usually the whole answer.
+- **[`docs/research/`](docs/research/)** holds what was measured on real Hosts against real Vendors,
+  with the raw captures beside the findings. Several decisions in the ADRs exist because a capture
+  contradicted the documentation.

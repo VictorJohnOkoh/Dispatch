@@ -45,6 +45,15 @@ in the last column when you do.
 | 0008 | Five Session states, one process each, and a gate that claims only what the Daemon allowed | Session lifecycle, admission, Approval Policy | 44 KB |
 | 0009 | One protocol that differs by a Host id, a merged stream to the Client, and an Event that is written before it is sent | the wire protocol, the SQLite log, replay, retention | 51 KB |
 | 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import | the package tree, imports, concurrency ownership, testing tiers, where config enters | 41 KB |
+| 0011 | One binary runs both roles, and the Hub is the only place a second Host can be named | the role split, one binary against two, deployment | 6 KB |
+| 0012 | A Harness reaches only its own Host's Vendor, and no type on the wire can say otherwise | cross-Host Sessions, the Data Plane, Vendor addresses | 4 KB |
 
-Everything after 0004 is long. The ten together are about 65,000 tokens, which is why
-they are indexed here and not read by default.
+Everything after 0004 is long. The twelve together are about 68,000 tokens, which is why
+they are indexed here and not read by default. 0011 and 0012 are the exceptions and
+are short enough to open on a hunch.
+
+### The build spec
+
+`SPEC.md` at the repo root is the frozen v1 scope, the build order and the twelve
+behaviours that define done. It assembles the ADRs rather than repeating them, so it is
+the right first read before writing code and the wrong place to change a decision.
