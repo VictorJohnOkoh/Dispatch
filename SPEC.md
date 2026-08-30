@@ -30,7 +30,7 @@ build order. Those are marked **Decided here** so a reader can tell them apart f
 - One Session at a time per Host, enforced by `admission.SingleSession`.
 - Five Session states, folded from the Event log, with `Ended` carrying `stopped`, `failed` or `lost`.
 - Three Harnesses: passthrough, OpenCode and Pi. **Decided here**, argued below.
-- Two Vendors: Ollama and llama-swap. **Decided here**, argued below.
+- Three Vendors: Ollama, LM Studio and llama-swap. **Decided here**, argued below.
 - Per-Session Model choice, made before the Session starts.
 - Approval Policy, five slots, one per `toolKind`, settable at start and changeable while running.
 - Workspace Root containment on the working directory and on every delegated write.
@@ -68,7 +68,6 @@ Each of these has a reason recorded somewhere. Nothing here is out because it wa
 | A native Client, and React or anything like it | rejected in charting |
 | The TUI as a second Client | wanted, and it proves the Hub's API boundary is real. Not v1 |
 | Hermes as a shipped Harness | [ADR 0003](docs/adr/0003-opencode-replaces-hermes-as-the-second-harness.md). It stays as a test fixture |
-| LM Studio as a Vendor | **Decided here**, argued below |
 | Concurrent Sessions, queueing, eviction, VRAM accounting | [ADR 0008](docs/adr/0008-session-lifecycle-admission-and-containment.md). The seam is `admission.Policy` and only `SingleSession` is written |
 | Client-driven Daemon install over SSH | deferred in charting. Manual install is the v1 shape |
 | Tailscale reach | deferred in charting. It is a `HostDialer` swap, which is why it stays cheap |
@@ -91,7 +90,7 @@ its exact v1 implementation, so nobody has to guess how simple is simple enough.
 | `hostset.HostDialer` | an in-process SSH client, `x/crypto/ssh`, opening a `direct-tcpip` channel to the Daemon's loopback port | Tailscale, which is a dialer returning a plain `net.Conn` |
 | Daemon install | manual. Copy the binary and `daemon.json`, start it by hand | a Client-driven install over the SSH connection the Hub already holds |
 | `harness.Adapter` | three: `passthrough.go`, `acp.go` for OpenCode, `pi.go` | a fourth adapter file. Nothing else moves |
-| `vendors.Adapter` | two: `ollama.go`, `llamaswap.go` | `lmstudio.go`, which the research already covers |
+| `vendors.Adapter` | three: `ollama.go`, `lmstudio.go`, `llamaswap.go` | a fourth adapter file. The interface does not move, which is the claim three Vendors exist to test |
 | `harness.Spawner` | `exec.Command` with the executable path the Host config names, in its own process group | unchanged. The seam exists so tests can pass a stub, not so production can vary |
 | The Client | `internal/hub/internal/web`, server-rendered, embedded | a TUI is a second `web` against the same `protocol` |
 | Event compatibility | append-only semantics, no version field on an Event. The Handshake refuses a Hub and Daemon that disagree | a second protocol version in the Handshake's served set |
@@ -124,26 +123,41 @@ anywhere. That second outcome is ugly and it is true, which is the correct pairi
 
 The capture is a task for the build, not a blocker on this freeze. It is listed under holes below.
 
-## Decided here: two Vendors, and LM Studio is the one that goes
+## Decided here: three Vendors
 
-**v1 ships Ollama and llama-swap.**
+**v1 ships Ollama, LM Studio and llama-swap.**
 
-The map's shorthand was one Vendor. Two is right, because one Vendor makes the Vendor Adapter a
-rename rather than an abstraction. [ADR 0007](docs/adr/0007-the-vendor-adapter-interface.md) made
-every reported capability three-valued because llama-swap answers `Unknown` for every Model it has
-not loaded. With only Ollama in v1, `Unknown` is a value nothing ever returns, and a three-valued
-design nothing exercises is unmotivated code.
+The map's shorthand was one Vendor. Three is right, and the reason is that the Vendor Adapter's whole
+shape is an answer to how differently these three behave. One Vendor makes it a rename.
 
-Ollama and llama-swap are the two ends of the axis the research found. Ollama has rich per-Model
-metadata. llama-swap has none until a Model is resident, and it is the only one of the three with a
-real load and unload story, which is what `Load` and `Unload` exist for. Building against both means
-the interface is exercised at both ends on the first day, rather than on the day a second Vendor
-arrives and the shape turns out to have been Ollama's all along.
+[ADR 0007](docs/adr/0007-the-vendor-adapter-interface.md) made every reported Capability three-valued,
+`Yes`, `No` or `Unknown`, and the three Vendors are what fill the three values. LM Studio reports
+`trained_for_tool_use`, so it is the only one that ever answers `Yes`. Ollama's `/v1/models` carries
+no capability field at all, so it answers `Unknown` and a discovery routine that reads absent as
+`No` would hide every usable Model on an Ollama Host. llama-swap answers `Unknown` for every Model it
+has not loaded, and it is the only one of the three with a real load and unload story, which is what
+`Load` and `Unload` exist for. **Drop any one of them and a value in that design stops being
+exercised.** Drop LM Studio in particular and nothing in v1 ever returns `Yes`.
 
-LM Studio goes, and it is the right one to drop for two reasons. Its metadata is the same shape as
-Ollama's, so it is a third point on a line already drawn. And it needs a desktop application running
-on the Host, which is the worst fit for a headless machine in another room. The adapter is small and
-the research already covers it, so adding it later is an afternoon rather than a project.
+They also disagree on things a careless Daemon would average. `usage.reasoning` was 51 under LM
+Studio and 0 under the other two for the same thinking output, so zero means not reported rather than
+none. llama-swap charged 24 input tokens against a 2986-token cached prefix where the others charged
+about 3010. Totals agree, the split does not. Those traps are only visible with more than one Vendor
+in front of you, and they are the reason the Session records the Vendor and Model that served it
+rather than the ones it was configured with.
+
+The cost is two adapter files beside the first. The research in
+[#3](https://github.com/VictorJohnOkoh/Dispatch/issues/3) covers all three, the captures in
+`docs/research/captures/pi-vendors/` exercise all three, and
+[ADR 0010](docs/adr/0010-go-package-structure-and-seams.md)'s tree already names `ollama.go`,
+`lmstudio.go` and `llamaswap.go` as files in one package rather than three packages.
+
+**One caveat, stated rather than designed around.** LM Studio is GUI-first. Its server is started by
+hand from a desktop session and cannot be brought up over SSH, so a Host reached only over SSH is an
+Ollama or llama-swap Host in practice. That is a fact about how a user runs LM Studio, not a defect in
+the adapter, and it changes nothing about the Vendor Adapter. It does mean the Daemon must never
+assume it can start a Vendor, which it already never does: a Vendor is reachable exactly when a call
+to it succeeds.
 
 ## The system
 
@@ -366,16 +380,20 @@ in one process.
 *Watch:* pull the network cable on a Host mid-Session and the Client dims that Host inside ~25
 seconds while every other Host keeps working.
 
-**M7. The second Harness and the second Vendor.** `harness/pi.go` and `vendors/llamaswap.go`, both
-against fixtures already in this repo, plus the one Pi capture that settles its Gate declaration.
-They are last on purpose: they are the proof the two abstractions are abstractions, and that proof is
-only worth anything once there is something for them to plug into.
-*Watch:* the same Session, the same transcript rendering, one Harness swapped in the wizard.
+**M7. The second Harness and the other two Vendors.** `harness/pi.go`, `vendors/lmstudio.go` and
+`vendors/llamaswap.go`, all against fixtures already in this repo, plus the one Pi capture that
+settles Pi's Gate declaration. They are last on purpose: they are the proof the two abstractions are
+abstractions, and that proof is only worth anything once there is something for them to plug into.
+*Watch:* the same Session, the same transcript rendering, one Harness swapped in the wizard. And the
+same Model list showing `Yes` from LM Studio, `Unknown` from Ollama, and `Unknown` from llama-swap
+until it is loaded.
 
 **If v1 has to shrink**, drop M7, in this order and stopping as soon as it fits: the Pi adapter, then
-the llama-swap adapter. That is the whole list, and the honesty is the point. M0 to M6 is one Host,
-one Harness and one Vendor running end to end, which is the smallest thing that is the system rather
-than a demonstration of it, so nothing inside it can go without breaking one of the twelve behaviours
+the llama-swap adapter, then the LM Studio adapter. That is the whole list, and the honesty is the
+point. Note what dropping either Vendor costs, since it is not nothing: llama-swap takes `Load` and
+`Unload` with it, and LM Studio takes the only `Yes` any Capability ever returns. M0 to M6 is one
+Host, one Harness and one Vendor running end to end, which is the smallest thing that is the system
+rather than a demonstration of it, so nothing inside it can go without breaking one of the twelve behaviours
 below. In particular do not drop M4, because a Harness the Daemon cannot kill is the failure this
 whole design exists to prevent.
 
@@ -403,8 +421,10 @@ Not a test suite. Twelve behaviours you can watch, on real machines. v1 is done 
    exists. Then have the Harness delegate a write outside it, and see that refused too.
 10. **Swap the Harness and change nothing else.** The same Model, the same prompt, the same Host, and
     the transcript renders the same way for both OpenCode and Pi.
-11. **Run against a Vendor with no metadata.** llama-swap reports `Unknown` for an unloaded Model, the
-    Client draws `Unknown` as an answer rather than as a blank, and the Session runs anyway.
+11. **See all three Capability values in one Model list.** LM Studio answers `Yes` from
+    `trained_for_tool_use`, Ollama answers `Unknown` because its `/v1/models` has no such field, and
+    llama-swap answers `Unknown` until the Model is resident. The Client draws `Unknown` as an answer
+    rather than as a blank, and every Session runs anyway.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.
 
@@ -450,8 +470,9 @@ It is one Session per **Host**, not one in the system. A user driving three Host
 concurrent Sessions and no cross-Host limit anywhere, because a Daemon cannot enforce one and a
 Hub-side limit would be advisory.
 
-*"One Vendor."* Corrected to two, argued above. One Vendor leaves ADR 0007's three-valued capability
-design with nothing to exercise it.
+*"One Vendor."* Corrected to three, argued above. Each of the three fills a different one of ADR
+0007's three Capability values, so one Vendor leaves that design with nothing to exercise it and two
+still leave one value unreached.
 
 *Passthrough plus one real Harness.* Corrected to two real ones, argued above.
 
