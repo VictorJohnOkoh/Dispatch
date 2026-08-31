@@ -105,6 +105,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 	s := &Session{
 		id:      d.sessions.newID(),
 		harness: req.Harness,
+		caps:    adapter.Capabilities(),
 		model:   req.Model,
 		vendor:  vendor.Endpoint().Base,
 		dir:     dir,
@@ -118,7 +119,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		Harness: s.harness, Model: s.model, Vendor: s.vendor, Cwd: s.dir,
 	})
 	if err != nil {
-		http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
+		logRefused(w)
 		return
 	}
 	d.sessions.add(s)
@@ -295,6 +296,10 @@ type Session struct {
 	dir     string
 	started time.Time
 
+	// caps is the Harness Adapter's, read once at the start. The Approval Policy is
+	// checked against it, and a Session outlives no Adapter, so it cannot go stale.
+	caps harness.Capabilities
+
 	// cancel ends the launch, the Run and every call either has in flight.
 	cancel context.CancelFunc
 
@@ -332,19 +337,33 @@ func (r *sessions) add(s *Session) {
 	r.all = append(r.all, s)
 }
 
-// find is one Session as a command needs it: the Run to act on, the State that
-// decides whether it may, and the Tool Calls it is holding. The three are read
-// together under the one mutex, so they describe the same moment.
-func (r *sessions) find(id event.SessionID) (*Session, harness.Run, session.State, []string) {
+// find is one Session as a command needs it, with the Run to act on and the State
+// that decides whether it may. The two are read together under the one mutex, so
+// they describe the same moment.
+func (r *sessions) find(id event.SessionID) (*Session, harness.Run, session.State) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	s := r.lookup(id)
 	if s == nil {
-		return nil, nil, 0, nil
+		return nil, nil, 0
 	}
 	state, _ := session.Fold(s.events)
-	return s, s.run, state, session.Held(s.events)
+	return s, s.run, state
+}
+
+// held is the Tool Calls this Session is waiting on a decision for.
+func (r *sessions) held(s *Session) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return session.Held(s.events)
+}
+
+// ending reports whether someone has already taken on writing SessionEnded.
+func (r *sessions) ending(s *Session) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return s.ending
 }
 
 // endOnce reports whether this caller is the one that ends the Session. A stop and

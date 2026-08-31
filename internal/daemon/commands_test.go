@@ -21,6 +21,7 @@ type chatFake struct {
 	mu     sync.Mutex
 	stream string // the SSE body to serve
 	halt   bool   // hold the body open after stream, until the request is cancelled
+	status int    // the status to answer with, 0 meaning 200
 }
 
 func (c *chatFake) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -30,6 +31,10 @@ func (c *chatFake) RoundTrip(req *http.Request) (*http.Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.status != 0 {
+		return &http.Response{StatusCode: c.status, Header: http.Header{}, Request: req,
+			Body: io.NopCloser(strings.NewReader(`{"error":"no such model"}`))}, nil
+	}
 	var served io.ReadCloser = io.NopCloser(strings.NewReader(c.stream))
 	if c.halt {
 		served = &halting{ctx: req.Context(), head: strings.NewReader(c.stream)}
@@ -246,6 +251,35 @@ func TestAMalformedPromptIsRefusedAsTheRequestsOwnFault(t *testing.T) {
 				t.Errorf("reason = %q", r.Reason)
 			}
 		})
+	}
+}
+
+// A Prompt the Vendor would not take is bounded all the same, because
+// PromptSubmitted is in the log and a Session left Working refuses every Prompt
+// after it.
+func TestAPromptTheVendorRefusesIsStillBounded(t *testing.T) {
+	h := newHost(t)
+	id := h.idle(t)
+	h.chat.mu.Lock()
+	h.chat.status = http.StatusNotFound
+	h.chat.mu.Unlock()
+
+	w := h.post(t, "/v1/sessions/"+string(id)+"/prompts", promptBody)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want the Host failing rather than the request being wrong", w.Code)
+	}
+
+	view := h.waitState(t, id, "Idle")
+	if view.EndReason != "" {
+		t.Errorf("the Session ended with %q, want it still usable", view.EndReason)
+	}
+	var done event.PromptCompleted
+	h.payload(t, id, event.KindPromptCompleted, &done)
+	if done.StopReason != event.StopError {
+		t.Errorf("stop reason = %q, want %q", done.StopReason, event.StopError)
+	}
+	if got := h.kinds(t); len(got) != 5 || got[3] != "Error" || got[4] != "PromptCompleted" {
+		t.Errorf("log = %v, want the Prompt bounded by an Error and a PromptCompleted", got)
 	}
 }
 

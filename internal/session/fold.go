@@ -48,9 +48,9 @@ func Fold(events []event.Event) (State, event.EndReason) {
 	return Starting, ""
 }
 
-// Held is the Tool Calls whose question no ApprovalDecided has answered, in the
-// order they were asked. Parallel calls can leave several open at once, so it is a
-// list of ids rather than a counter that a repeated decision could drive negative.
+// Held is the Tool Calls whose question no ApprovalDecided has answered. Parallel
+// calls can leave several open at once, so it is a list of ids rather than a
+// counter that a repeated decision could drive negative.
 //
 // It is the set Fold answers Asking on, and it is also what the Daemon reads to
 // tell a decision on an open question from one on a question nobody asked.

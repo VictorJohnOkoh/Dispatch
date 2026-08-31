@@ -17,11 +17,10 @@ import (
 // Session's own Events to decide whether it may run, which is why session.Fold
 // ships in the Daemon and not only in the Client.
 //
-// A command the State says no to answers StatusConflict: the request is fine and
+// A command the State says no to answers StatusConflict. The request is fine and
 // the moment is wrong. A command that could never be right whatever the State is
 // answers StatusUnprocessable, and that is the Client's own bug or a stale form.
 
-// promptRequest is the body of POST /v1/sessions/{session}/prompts.
 type promptRequest struct {
 	Text string `json:"text"`
 }
@@ -50,24 +49,42 @@ func (d *Daemon) submitPrompt(w http.ResponseWriter, r *http.Request) {
 	_, err := d.write(s, event.KindPromptSubmitted, &event.PromptSubmitted{Text: req.Text})
 	d.commanding.Unlock()
 	if err != nil {
-		http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
+		logRefused(w)
 		return
 	}
 
 	if err := run.Prompt(r.Context(), req.Text); err != nil {
-		// PromptSubmitted is in the log, so the Prompt has to be bounded or the
-		// Session stays Working and refuses every Prompt after it.
-		d.write(s, event.KindError, &event.Error{Code: event.ErrVendor, Message: err.Error()})
-		d.write(s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: event.StopError})
+		d.boundFailed(s, err)
 		http.Error(w, "the Harness would not take the Prompt", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
+// boundFailed closes a Prompt the Harness would not take. PromptSubmitted is
+// already in the log, so an unbounded Prompt would leave the Session Working and
+// refusing every Prompt after it.
+//
+// A stop that landed while the Harness was being asked has already ended the
+// Session, and SessionEnded is always last, so nothing is written after it.
+func (d *Daemon) boundFailed(s *Session, err error) {
+	d.commanding.Lock()
+	defer d.commanding.Unlock()
+
+	if d.sessions.ending(s) {
+		return
+	}
+	d.write(s, event.KindError, &event.Error{Code: event.ErrVendor, Message: err.Error()})
+	d.write(s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: event.StopError})
+}
+
 // interrupt abandons the Prompt in flight and keeps the Session. It returns once
 // the Adapter has stopped reading, and the Adapter is what writes PromptCompleted,
 // so the Session is Idle again by the time this answers.
+//
+// One narrow window is not covered. A Prompt is Working from the moment
+// PromptSubmitted is written, which is before the Harness has been asked, and an
+// interrupt landing in there finds nothing in flight and abandons nothing.
 func (d *Daemon) interrupt(w http.ResponseWriter, r *http.Request) {
 	d.commanding.Lock()
 	s, run, ok := d.allow(w, r, session.Working, session.Asking)
@@ -84,17 +101,19 @@ func (d *Daemon) interrupt(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
-// stopSession ends the Session. Everything it was doing is abandoned: a Prompt in
+// stopSession ends the Session. Everything it was doing is abandoned. A Prompt in
 // flight gets no PromptCompleted and its message is left torn, because the user
 // asked for this, so it is neither a fault nor a finish.
 func (d *Daemon) stopSession(w http.ResponseWriter, r *http.Request) {
 	d.commanding.Lock()
 	s, run, ok := d.allow(w, r, session.Starting, session.Idle, session.Working, session.Asking)
-	first := ok && d.sessions.endOnce(s)
-	d.commanding.Unlock()
 	if !ok {
+		d.commanding.Unlock()
 		return
 	}
+	first := d.sessions.endOnce(s)
+	d.commanding.Unlock()
+
 	// A launch that failed reached the end first. The Session is ending either way,
 	// so the caller got what it asked for.
 	if !first {
@@ -113,8 +132,8 @@ func (d *Daemon) stopSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
-// policyRequest is the body of POST /v1/sessions/{session}/policy. The Policy
-// decodes strictly on its own: all five slots, each one a Rule.
+// policyRequest carries an Approval Policy that decodes strictly on its own. All
+// five slots, and each one a Rule.
 type policyRequest struct {
 	Policy event.Policy `json:"policy"`
 }
@@ -135,7 +154,7 @@ func (d *Daemon) setPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if refusal := ungated(d.harness(s.harness).Capabilities(), req.Policy); refusal != nil {
+	if refusal := ungated(s.caps, req.Policy); refusal != nil {
 		refuse(w, protocol.StatusUnprocessable, *refusal)
 		return
 	}
@@ -143,13 +162,17 @@ func (d *Daemon) setPolicy(w http.ResponseWriter, r *http.Request) {
 	if _, err := d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
 		Policy: req.Policy, SetBy: event.SetByUser,
 	}); err != nil {
-		http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
+		logRefused(w)
 		return
 	}
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
 // ungated reports why this Harness cannot honour this Approval Policy, or nil.
+//
+// ADR 0006 gives a Harness with no tools no Approval Policy at all, an absence
+// rather than five slots that happen to be auto, so every Policy is refused rather
+// than only the ones naming a slot it cannot gate.
 func ungated(caps harness.Capabilities, p event.Policy) *protocol.Refusal {
 	if !caps.Tools {
 		return &protocol.Refusal{
@@ -169,14 +192,13 @@ func ungated(caps harness.Capabilities, p event.Policy) *protocol.Refusal {
 	return nil
 }
 
-// approvalRequest is the body of POST /v1/sessions/{session}/approvals.
 type approvalRequest struct {
 	ToolCallID string         `json:"toolCallId"`
 	Decision   event.Decision `json:"decision"`
 }
 
-// decideApproval answers one held Tool Call. Nothing on this Host asks yet:
-// passthrough is the only Harness and it runs no tools, so every decision here
+// decideApproval answers one held Tool Call. Nothing on this Host asks yet.
+// Passthrough is the only Harness and it runs no tools, so every decision here
 // meets a question that is not open.
 func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 	var req approvalRequest
@@ -198,7 +220,7 @@ func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, _, _, held := d.sessions.find(s.id); !slices.Contains(held, req.ToolCallID) {
+	if !slices.Contains(d.sessions.held(s), req.ToolCallID) {
 		refuse(w, protocol.StatusConflict, protocol.Refusal{
 			Reason: protocol.ReasonNoQuestion,
 			Detail: fmt.Sprintf("no held Tool Call %q is waiting on a decision", req.ToolCallID),
@@ -209,7 +231,7 @@ func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 	if _, err := d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 		ToolCallID: req.ToolCallID, Decision: req.Decision, By: event.ByUser,
 	}); err != nil {
-		http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
+		logRefused(w)
 		return
 	}
 	w.WriteHeader(protocol.StatusAccepted)
@@ -223,7 +245,7 @@ func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 // writes the Event that changes it.
 func (d *Daemon) allow(w http.ResponseWriter, r *http.Request, states ...session.State) (*Session, harness.Run, bool) {
 	id := event.SessionID(r.PathValue("session"))
-	s, run, state, _ := d.sessions.find(id)
+	s, run, state := d.sessions.find(id)
 	if s == nil {
 		refuse(w, protocol.StatusNoSession, protocol.Refusal{
 			Reason: protocol.ReasonUnknownSession,
@@ -262,4 +284,10 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 		return false
 	}
 	return true
+}
+
+// logRefused is the Event log saying no, which is this Host failing rather than
+// the request being wrong.
+func logRefused(w http.ResponseWriter) {
+	http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
 }
