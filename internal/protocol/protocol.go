@@ -105,4 +105,7 @@ const (
 	ReasonUnknownModel   Reason = "unknown_model"   // no Vendor on this Host serves that Model
 	ReasonWorkspace      Reason = "workspace"       // the directory is outside the Workspace Root
 	ReasonUnknownSession Reason = "unknown_session" // this Host has no Session by that id
+	ReasonState          Reason = "state"           // the Session's State does not allow this command
+	ReasonNoGate         Reason = "no_gate"         // the Harness cannot hold that class of Tool Call
+	ReasonNoQuestion     Reason = "no_question"     // no held Tool Call is waiting on that decision
 )

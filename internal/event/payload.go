@@ -120,6 +120,15 @@ type PromptCompleted struct {
 // Ollama sends values outside the OpenAI set such as "load" and "unload".
 type StopReason string
 
+// The two stop reasons this project names itself, for the two ways a Prompt ends
+// without the Vendor saying why. Neither invents a fact about the Vendor: both
+// name something the Daemon or an Adapter did, and a Prompt that is never bounded
+// leaves the Session Working and so refusing every Prompt after it.
+const (
+	StopError       StopReason = "error"
+	StopInterrupted StopReason = "interrupted"
+)
+
 // Usage is the token count for one Prompt.
 type Usage struct {
 	Input     int `json:"input"`

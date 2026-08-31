@@ -31,6 +31,7 @@ type host struct {
 	root    string
 	logPath string
 	vendor  *fake
+	chat    *chatFake
 	lines   *lines
 }
 
@@ -49,12 +50,13 @@ func newHost(t *testing.T) *host {
 	t.Cleanup(func() { events.Close() })
 
 	f := ollamaFake()
+	chat := &chatFake{}
 	written := &lines{}
 	d := New(slog.New(slog.NewTextHandler(written, nil)), events, root,
-		[]vendors.Adapter{f}, []Harness{{Name: "passthrough", Adapter: harness.NewPassthrough(nil)}})
+		[]vendors.Adapter{f}, []Harness{{Name: "passthrough", Adapter: harness.NewPassthrough(chat)}})
 	d.vendors.pollAll(t.Context())
 
-	return &host{Daemon: d, root: dir, logPath: path, vendor: f, lines: written}
+	return &host{Daemon: d, root: dir, logPath: path, vendor: f, chat: chat, lines: written}
 }
 
 func (h *host) post(t *testing.T, path, body string) *httptest.ResponseRecorder {
