@@ -5,7 +5,8 @@ Make sure that when deciding with how you write out feature that you always choo
 When choosing a data structure I prefer using only what is necessary. 
 Example:
 - Using a hash map when the data needed is a known certain amount and the data structure is expected to be fully populated. <br>
-Comments are very nice but they should be used quitesparingly and only when they add value. <br>
+Comments are very nice but they should be used quite sparingly and only when they add value. They should only bring value to the codebase, they should only be usedexplanining something that isn't obvious or self-explanatory. 
+ <br>
 Good Example:
 - For a function that adds 3 numbers together should be commented with "# adds 2 numbers together and returns the sum" <br>
 Bad Example:
