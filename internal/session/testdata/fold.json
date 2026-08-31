@@ -1,0 +1,149 @@
+{
+  "about": "The fold's specification, shared by session.Fold and the Client's JS twin so that the two stay honest with each other. Each case is one Session's own Events in Seq order and the State they fold to. reason is present only on Ended.",
+  "cases": [
+    {
+      "name": "no Events at all is Starting",
+      "events": [],
+      "state": "Starting"
+    },
+    {
+      "name": "SessionStarted with no SessionReady is Starting",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "passthrough", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}}
+      ],
+      "state": "Starting"
+    },
+    {
+      "name": "a launch that finished is Idle",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "passthrough", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412091000000, "kind": "ApprovalPolicySet", "payload": {"policy": {"read": "auto", "edit": "wait", "execute": "wait", "fetch": "wait", "other": "wait"}, "setBy": "default"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}}
+      ],
+      "state": "Idle"
+    },
+    {
+      "name": "a Prompt in flight is Working",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412093402000, "kind": "AssistantMessage", "payload": {"text": "Renaming it now.", "complete": true}}
+      ],
+      "state": "Working"
+    },
+    {
+      "name": "a held Tool Call is Asking",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412094000000, "kind": "ToolCallRequested", "payload": {"toolCallId": "tc-1", "name": "bash", "toolKind": "execute", "title": "go test ./...", "args": {"cmd": "go test ./..."}}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412094100000, "kind": "ApprovalRequested", "payload": {"toolCallId": "tc-1", "title": "run go test ./...", "detail": "in /home/victor/work"}}
+      ],
+      "state": "Asking"
+    },
+    {
+      "name": "the decision returns a Session to Working",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412094100000, "kind": "ApprovalRequested", "payload": {"toolCallId": "tc-1", "title": "run go test ./...", "detail": ""}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412099000000, "kind": "ApprovalDecided", "payload": {"toolCallId": "tc-1", "decision": "allowed", "by": "user"}}
+      ],
+      "state": "Working"
+    },
+    {
+      "name": "two questions keep a Session Asking until the last one is decided",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412094100000, "kind": "ApprovalRequested", "payload": {"toolCallId": "tc-1", "title": "run go test ./...", "detail": ""}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412094200000, "kind": "ApprovalRequested", "payload": {"toolCallId": "tc-2", "title": "write handler.go", "detail": ""}},
+        {"seq": 6, "session": "s-7f3a2c", "at": 1756412099000000, "kind": "ApprovalDecided", "payload": {"toolCallId": "tc-1", "decision": "allowed", "by": "user"}}
+      ],
+      "state": "Asking"
+    },
+    {
+      "name": "PromptCompleted returns a Session to Idle",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412094100000, "kind": "ApprovalRequested", "payload": {"toolCallId": "tc-1", "title": "run go test ./...", "detail": ""}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412099000000, "kind": "ApprovalDecided", "payload": {"toolCallId": "tc-1", "decision": "allowed", "by": "user"}},
+        {"seq": 6, "session": "s-7f3a2c", "at": 1756412101000000, "kind": "ToolCallEnded", "payload": {"toolCallId": "tc-1", "outcome": "ok", "content": "ok  github.com/x/y"}},
+        {"seq": 7, "session": "s-7f3a2c", "at": 1756412103000000, "kind": "PromptCompleted", "payload": {"stopReason": "stop", "usage": {"input": 812, "output": 96, "cacheRead": 0, "total": 908}}}
+      ],
+      "state": "Idle"
+    },
+    {
+      "name": "a second Prompt after the first completed is Working again",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412103000000, "kind": "PromptCompleted", "payload": {"stopReason": "stop", "usage": {"input": 812, "output": 96, "cacheRead": 0, "total": 908}}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412110000000, "kind": "PromptSubmitted", "payload": {"text": "now update the callers"}}
+      ],
+      "state": "Working"
+    },
+    {
+      "name": "an Error Event is never terminal",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412095000000, "kind": "Error", "payload": {"code": "vendor_error", "message": "connection refused"}}
+      ],
+      "state": "Working"
+    },
+    {
+      "name": "the Kinds the fold ignores change nothing",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412091000000, "kind": "DaemonStarted", "payload": {}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412091500000, "kind": "HubDetached", "payload": {}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412091800000, "kind": "HubAttached", "payload": {}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "Reasoning", "payload": {"text": "the user wants a rename", "complete": true}}
+      ],
+      "state": "Starting"
+    },
+    {
+      "name": "a stopped Session is Ended stopped",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412120000000, "kind": "SessionEnded", "payload": {"reason": "stopped"}}
+      ],
+      "state": "Ended",
+      "reason": "stopped"
+    },
+    {
+      "name": "a launch that never reached Idle is Ended failed",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412091000000, "kind": "Error", "payload": {"code": "harness_failed", "message": "opencode exited with 1"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412091100000, "kind": "SessionEnded", "payload": {"reason": "failed"}}
+      ],
+      "state": "Ended",
+      "reason": "failed"
+    },
+    {
+      "name": "the boot sweep leaves Ended lost, and it closes the open question first",
+      "events": [
+        {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
+        {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
+        {"seq": 3, "session": "s-7f3a2c", "at": 1756412093118000, "kind": "PromptSubmitted", "payload": {"text": "rename the handler"}},
+        {"seq": 4, "session": "s-7f3a2c", "at": 1756412094100000, "kind": "ApprovalRequested", "payload": {"toolCallId": "tc-1", "title": "run go test ./...", "detail": ""}},
+        {"seq": 5, "session": "s-7f3a2c", "at": 1756412300000000, "kind": "ApprovalDecided", "payload": {"toolCallId": "tc-1", "decision": "refused", "by": "daemon_restart"}},
+        {"seq": 6, "session": "s-7f3a2c", "at": 1756412300100000, "kind": "ToolCallEnded", "payload": {"toolCallId": "tc-1", "outcome": "refused", "content": ""}},
+        {"seq": 7, "session": "s-7f3a2c", "at": 1756412300200000, "kind": "SessionEnded", "payload": {"reason": "lost"}}
+      ],
+      "state": "Ended",
+      "reason": "lost"
+    }
+  ]
+}
