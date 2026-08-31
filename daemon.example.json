@@ -3,9 +3,7 @@
   "workspaceRoot": "/home/victor/work",
   "logPath": "/home/victor/.local/state/dispatch/events.db",
   "vendors": [
-    {"kind": "ollama", "base": "http://127.0.0.1:11434"},
-    {"kind": "lmstudio", "base": "http://127.0.0.1:1234"},
-    {"kind": "llamaswap", "base": "http://127.0.0.1:8080"}
+    {"kind": "ollama", "base": "http://127.0.0.1:11434"}
   ],
   "harnesses": [
     {"name": "passthrough"},
