@@ -1,6 +1,6 @@
 # Ollama Vendor captures — 2026-08-31
 
-Six bodies from a real Ollama **v0.33.2** on Windows, answering on loopback at
+Eight bodies from a real Ollama **v0.33.2** on Windows, answering on loopback at
 `http://127.0.0.1:11434`. Fetched with `curl` from the Host itself, which is the
 only place the Daemon ever reaches a Vendor.
 
@@ -26,9 +26,12 @@ the status is half the answer. The `.json` files are bodies only.
 The bodies the tests replay are copied to
 [`../../../../internal/vendors/testdata/ollama/`](../../../../internal/vendors/testdata/ollama/),
 so `internal/vendors` reads its own `testdata` and no test in that package opens a
-socket. `ollama_live_test.go` is what produced these and it skips unless
-`DISPATCH_OLLAMA_LIVE` is set, so a human can record them again against a newer
-Ollama.
+socket.
+
+`ollama_live_test.go` writes no files. It drives the same four calls against a real
+Ollama and skips unless `DISPATCH_OLLAMA_LIVE` is set, so a human can check that a
+newer Ollama still answers the way these bodies say before re-running the `curl`
+commands above.
 
 ## What `/api/tags` settles
 
@@ -52,10 +55,7 @@ Ollama below v0.30.2 lists none at all and reading that absence as `No` would hi
 every Model on the Host. That is the mistake the three values exist to prevent, and
 it is intact.
 
-**One line in `SPEC.md` is now wrong.** Behaviour 11 says Ollama answers `Unknown`
-because its `/v1/models` has no such field. The endpoint claim is true and the
-conclusion does not follow, because discovery does not use that endpoint. On this
-Ollama the Model list draws `Yes` from Ollama and `Unknown` from llama-swap, so
-behaviour 11 still shows all three values in one list and still needs LM Studio for
-nothing. The behaviour holds; its wording about which Vendor supplies which value
-does not.
+**Two lines in `SPEC.md` were wrong and this capture corrected them**: the three
+Vendors section, which said Ollama answers `Unknown` for everything, and behaviour
+11, which repeated it. Both now say what `api-tags.json` shows. The behaviours
+themselves did not change, only the claim about which Vendor supplies which value.

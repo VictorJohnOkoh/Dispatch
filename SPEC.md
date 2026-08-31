@@ -133,12 +133,21 @@ shape is an answer to how differently these three behave. One Vendor makes it a 
 
 [ADR 0007](docs/adr/0007-the-vendor-adapter-interface.md) made every reported Capability three-valued,
 `Yes`, `No` or `Unknown`, and the three Vendors are what fill the three values. LM Studio reports
-`trained_for_tool_use`, so it is the only one that ever answers `Yes`. Ollama's `/v1/models` carries
-no capability field at all, so it answers `Unknown` and a discovery routine that reads absent as
-`No` would hide every usable Model on an Ollama Host. llama-swap answers `Unknown` for every Model it
-has not loaded, and it is the only one of the three with a real load and unload story, which is what
-`Load` and `Unload` exist for. **Drop any one of them and a value in that design stops being
-exercised.** Drop LM Studio in particular and nothing in v1 ever returns `Yes`.
+`trained_for_tool_use`. Ollama answers `Yes` for what its `/api/tags` lists and `Unknown` for
+everything else, and never `No`, because an Ollama below v0.30.2 lists no capabilities at all and a
+discovery routine that read absent as `No` would hide every usable Model on that Host. llama-swap
+answers `Unknown` for every Model it has not loaded, and it is the only one of the three with a real
+load and unload story, which is what `Load` and `Unload` exist for. **Drop any one of them and a
+value in that design stops being exercised.** Drop llama-swap in particular and nothing in v1 is
+`Unknown` on a current Vendor.
+
+**Corrected 2026-08-31, and this line is the correction.** An earlier version of this paragraph said
+Ollama answers `Unknown` for everything because its `/v1/models` carries no capability field. The
+endpoint claim is true and the conclusion did not follow, because discovery does not use that
+endpoint. ADR 0007's own version matrix already said a single `/api/tags` call answers every field on
+Ollama v0.30.2 and later, and `docs/research/captures/ollama-vendor/` is that body from a running
+v0.33.2. What survives unchanged is the rule the three values exist for: **absent is `Unknown` and
+never `No`.**
 
 They also disagree on things a careless Daemon would average. `usage.reasoning` was 51 under LM
 Studio and 0 under the other two for the same thinking output, so zero means not reported rather than
@@ -484,8 +493,8 @@ hold.
 10. **Swap the Harness and change nothing else.** The same Model, the same prompt, the same Host, and
     the transcript renders the same way for both OpenCode and Pi.
 11. **See all three Capability values in one Model list.** LM Studio answers `Yes` from
-    `trained_for_tool_use`, Ollama answers `Unknown` because its `/v1/models` has no such field, and
-    llama-swap answers `Unknown` until the Model is resident. The Client draws `Unknown` as an answer
+    `trained_for_tool_use`, Ollama answers `Yes` for what `/api/tags` lists and `Unknown` for what it
+    does not, and llama-swap answers `Unknown` until the Model is resident. The Client draws `Unknown` as an answer
     rather than as a blank, and every Session runs anyway.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.

@@ -260,7 +260,7 @@ now reports `HTTP 200 but NO FILE WRITTEN` instead of a silent gap.
 
 **Closed 2026-08-31.** The bodies exist and are checked in, at
 [`captures/ollama-vendor/`](captures/ollama-vendor/) with a table saying which
-endpoint each one came from. Six of them, from a real Ollama v0.33.2 on loopback:
+endpoint each one came from. Eight of them, from a real Ollama v0.33.2 on loopback:
 `/api/version`, `/api/tags`, `/v1/models`, `/api/ps` loaded and empty, and three
 `/api/chat` answers for load, unload and a Model that does not exist. They are
 copied into `internal/vendors/testdata/ollama/` and replayed through a

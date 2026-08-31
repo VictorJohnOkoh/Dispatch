@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,11 +102,11 @@ func TestNoCapabilityIsEverReportedAsNo(t *testing.T) {
 	}
 }
 
+// An Ollama older than v0.30.2 sends no capabilities key at all.
 func TestCapabilitiesAreAllUnknownWhenOllamaSendsNone(t *testing.T) {
-	// An Ollama older than v0.30.2: the same listing with no capabilities key.
 	var caps Capabilities
-	if got := capabilities(nil); got != caps {
-		t.Errorf("capabilities(nil) = %+v, want every field Unknown", got)
+	if got := ollamaCaps(nil); got != caps {
+		t.Errorf("ollamaCaps(nil) = %+v, want every field Unknown", got)
 	}
 }
 
@@ -172,6 +173,10 @@ func TestLoadTurnsOffOllamasOwnEvictor(t *testing.T) {
 	if len(sent.Messages) != 0 {
 		t.Errorf("Load sent %d messages, want an empty chat", len(sent.Messages))
 	}
+	// /api/chat streams NDJSON unless told not to, and a load wants one answer.
+	if sent.Stream {
+		t.Error("Load sent stream true, want false")
+	}
 }
 
 func TestUnloadSendsKeepAliveZero(t *testing.T) {
@@ -197,8 +202,37 @@ func TestLoadNamesAModelOllamaDoesNotHave(t *testing.T) {
 		t.Fatalf("Load of a missing Model returned %v, want ErrModelNotFound", err)
 	}
 	// The Vendor's own words survive, because they name the Model the user typed.
-	if want := "no-such-model:v9"; !bytes.Contains([]byte(err.Error()), []byte(want)) {
+	if want := "no-such-model:v9"; !strings.Contains(err.Error(), want) {
 		t.Errorf("the error is %q and does not name %q", err, want)
+	}
+}
+
+// The status and the path are the fact. Ollama rewording its own sentence must not
+// silently downgrade this to a generic error.
+func TestTheNamedErrorDoesNotDependOnOllamasWording(t *testing.T) {
+	o := ollamaFrom(t, &recorded{
+		body:   map[string]string{"/api/chat": "ps-empty.json"},
+		status: map[string]int{"/api/chat": http.StatusNotFound},
+	})
+
+	if err := o.Load(context.Background(), "no-such-model:v9"); !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("a 404 from /api/chat returned %v, want ErrModelNotFound", err)
+	}
+}
+
+// A 404 from a discovery path is a wrong Vendor, not a wrong Model id.
+func TestA404FromDiscoveryIsNotAMissingModel(t *testing.T) {
+	o := ollamaFrom(t, &recorded{
+		body:   map[string]string{"/api/tags": "ps-empty.json"},
+		status: map[string]int{"/api/tags": http.StatusNotFound},
+	})
+
+	_, err := o.Catalogue(context.Background())
+	if err == nil {
+		t.Fatal("Catalogue against a 404 returned no error")
+	}
+	if errors.Is(err, ErrModelNotFound) {
+		t.Errorf("Catalogue reported %v as a missing Model", err)
 	}
 }
 
@@ -228,9 +262,10 @@ func TestEndpointIsTheOllamaRoot(t *testing.T) {
 var _ Adapter = (*OllamaAdapter)(nil)
 
 type sentChat struct {
-	Model     string   `json:"model"`
-	Messages  []string `json:"messages"`
-	KeepAlive int      `json:"keep_alive"`
+	Model     string     `json:"model"`
+	Messages  []struct{} `json:"messages"`
+	Stream    bool       `json:"stream"`
+	KeepAlive int        `json:"keep_alive"`
 }
 
 func decodeSent(t *testing.T, req *http.Request) sentChat {
