@@ -1,0 +1,22 @@
+{
+  "listen": "127.0.0.1:7717",
+  "workspaceRoot": "/home/victor/work",
+  "logPath": "/home/victor/.local/state/dispatch/events.db",
+  "vendors": [
+    {"kind": "ollama", "base": "http://127.0.0.1:11434"},
+    {"kind": "lmstudio", "base": "http://127.0.0.1:1234"},
+    {"kind": "llamaswap", "base": "http://127.0.0.1:8080"}
+  ],
+  "harnesses": [
+    {"name": "passthrough"},
+    {"name": "opencode", "exe": "/usr/local/bin/opencode"},
+    {"name": "pi", "exe": "/usr/local/bin/pi"}
+  ],
+  "policyDefault": {
+    "read": "auto",
+    "edit": "wait",
+    "execute": "wait",
+    "fetch": "auto",
+    "other": "wait"
+  }
+}
