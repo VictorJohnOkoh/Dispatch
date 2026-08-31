@@ -13,15 +13,3 @@ hand-written faces the internet.
 Sessions survive the laptop closing. The Event log is the transport, the replay buffer and the
 history at once, so reattaching and restarting are the same mechanism.
 
-## The documents
-
-The architecture is decided and the code is not written yet. Read in this order.
-
-- **[`CONTEXT.md`](CONTEXT.md)** is the vocabulary. Small, and everything else assumes it.
-- **[`SPEC.md`](SPEC.md)** is the frozen v1 scope, the nine-milestone build order, and the thirteen
-  behaviours that define done.
-- **[`docs/adr/`](docs/adr/)** holds the arguments, twelve of them. Each title is its decision, and
-  the index in [`CLAUDE.md`](CLAUDE.md) is usually the whole answer.
-- **[`docs/research/`](docs/research/)** holds what was measured on real Hosts against real Vendors,
-  with the raw captures beside the findings. Several decisions in the ADRs exist because a capture
-  contradicted the documentation.
