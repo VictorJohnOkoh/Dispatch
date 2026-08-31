@@ -10,12 +10,12 @@ import (
 )
 
 // pollInterval is the Vendor poll's beat. One beat asks every Vendor for both of
-// its lists, because they travel together in the vendors frame and a second timer
-// would only mean a second thing to get wrong.
+// its lists, because they travel together and a second timer would only be a
+// second thing to get wrong.
 const pollInterval = 5 * time.Second
 
-// pollTimeout bounds one Vendor's beat. A Vendor that hangs delays the next beat
-// by this much and delays no request at all.
+// pollTimeout bounds one Vendor's beat. The Vendors are polled side by side, so a
+// Vendor that hangs delays its own line and no other.
 const pollTimeout = 3 * time.Second
 
 // Vendors is the Daemon's whole view of the Vendors on this Host: the goroutine
@@ -27,6 +27,7 @@ const pollTimeout = 3 * time.Second
 // than going stale.
 type Vendors struct {
 	adapters []vendors.Adapter
+	every    time.Duration
 	log      *slog.Logger
 
 	mu    sync.Mutex
@@ -34,22 +35,33 @@ type Vendors struct {
 }
 
 // beat is what the last poll saw of one Vendor. The zero value is a Vendor that is
-// not answering, which is why nothing here is a pointer.
+// not answering.
 type beat struct {
-	models   []vendors.Model
+	models []vendors.Model
+
+	// resident is held only so the first vendors frame on a new stream carries the
+	// whole current state, which ADR 0009 asks for. It is what the last beat pushed
+	// rather than an answer to a fetch, so ADR 0007's rule that a Resident list is
+	// never cached still holds.
 	resident []vendors.Resident
-	at       time.Time
+
+	at time.Time
 }
 
 func newVendors(adapters []vendors.Adapter, log *slog.Logger) *Vendors {
-	return &Vendors{adapters: adapters, log: log, beats: make([]beat, len(adapters))}
+	return &Vendors{
+		adapters: adapters,
+		every:    pollInterval,
+		log:      log,
+		beats:    make([]beat, len(adapters)),
+	}
 }
 
 // Run polls every Vendor on the beat until ctx is done. The first poll happens
 // before the first tick, so a request arriving right after start meets a cache
 // that has been filled rather than one that is merely empty.
 func (v *Vendors) Run(ctx context.Context) {
-	t := time.NewTicker(pollInterval)
+	t := time.NewTicker(v.every)
 	defer t.Stop()
 	for {
 		v.pollAll(ctx)
@@ -61,19 +73,29 @@ func (v *Vendors) Run(ctx context.Context) {
 	}
 }
 
+// pollAll asks every Vendor at once, so one Vendor that hangs costs the beat
+// pollTimeout rather than costing every Vendor behind it its own.
 func (v *Vendors) pollAll(ctx context.Context) {
 	next := make([]beat, len(v.adapters))
+	var wg sync.WaitGroup
 	for i, a := range v.adapters {
-		next[i] = v.pollOne(ctx, a)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			next[i] = v.pollOne(ctx, a)
+		}()
 	}
+	wg.Wait()
+
 	v.mu.Lock()
 	v.beats = next
 	v.mu.Unlock()
 }
 
-// pollOne asks one Vendor for both of its lists under one deadline. A failed
-// Catalogue returns the zero beat: it is the call this Daemon reads reachability
-// from, and an unreachable Vendor's line is empty rather than old.
+// pollOne asks one Vendor for both of its lists under one deadline. Either call
+// failing returns the zero beat, because a Vendor is reachable exactly when a call
+// to it succeeds, and half a beat would draw a Vendor that is not answering as one
+// with nothing loaded.
 func (v *Vendors) pollOne(parent context.Context, a vendors.Adapter) beat {
 	ctx, cancel := context.WithTimeout(parent, pollTimeout)
 	defer cancel()
@@ -87,6 +109,7 @@ func (v *Vendors) pollOne(parent context.Context, a vendors.Adapter) beat {
 	resident, err := a.Resident(ctx)
 	if err != nil {
 		v.warn(parent, base, "resident", err)
+		return beat{}
 	}
 	return beat{models: models, resident: resident, at: time.Now()}
 }
@@ -107,14 +130,7 @@ func (v *Vendors) Catalogue() []CatalogueView {
 
 	out := make([]CatalogueView, len(v.adapters))
 	for i, b := range v.beats {
-		e := v.adapters[i].Endpoint()
-		out[i] = CatalogueView{
-			Kind:      e.Kind.String(),
-			Base:      e.Base,
-			Reachable: !b.at.IsZero(),
-			At:        micros(b.at),
-			Models:    modelViews(b.models),
-		}
+		out[i] = CatalogueView{VendorLine: v.line(i), At: micros(b.at), Models: modelViews(b.models)}
 	}
 	return out
 }
@@ -128,25 +144,37 @@ func (v *Vendors) Frame() []VendorView {
 
 	out := make([]VendorView, len(v.adapters))
 	for i, b := range v.beats {
-		e := v.adapters[i].Endpoint()
 		out[i] = VendorView{
-			Kind:      e.Kind.String(),
-			Base:      e.Base,
-			Reachable: !b.at.IsZero(),
-			Resident:  residentViews(b.resident),
+			VendorLine: v.line(i),
+			Reachable:  !b.at.IsZero(),
+			Resident:   residentViews(b.resident),
 		}
 	}
 	return out
 }
 
-// CatalogueView is one Vendor's line in the answer to GET /v1/models.
+// line names one Vendor. Both answers carry it, and it is built in one place so
+// the two cannot name the same Vendor differently.
+func (v *Vendors) line(i int) VendorLine {
+	e := v.adapters[i].Endpoint()
+	return VendorLine{Kind: e.Kind.String(), Base: e.Base}
+}
+
+// VendorLine says which Vendor a line is about.
+type VendorLine struct {
+	Kind string `json:"kind"`
+	Base string `json:"base"`
+}
+
+// CatalogueView is one Vendor's line in the answer to GET /v1/models. It carries
+// no reachability field: that belongs to the vendors frame, and two fields for one
+// fact are two fields that can disagree.
 type CatalogueView struct {
-	Kind      string `json:"kind"`
-	Base      string `json:"base"`
-	Reachable bool   `json:"reachable"`
+	VendorLine
 
 	// At is when this list was true, in Unix microseconds, and 0 when no beat has
-	// filled it. It is what a Client stamps a Stale catalogue with.
+	// filled it. It is the stamp a Client puts on this answer once it is holding it
+	// against a Host that has stopped answering, which is what Stale means.
 	At int64 `json:"at"`
 
 	Models []ModelView `json:"models"`
@@ -154,8 +182,7 @@ type CatalogueView struct {
 
 // VendorView is one Vendor's line in the vendors frame.
 type VendorView struct {
-	Kind      string         `json:"kind"`
-	Base      string         `json:"base"`
+	VendorLine
 	Reachable bool           `json:"reachable"`
 	Resident  []ResidentView `json:"resident"`
 }
@@ -170,8 +197,7 @@ type ModelView struct {
 }
 
 // CapsView spells the four answers. Each is "yes", "no" or "unknown", and never a
-// bool, because a Vendor that carries no answer is not the same as one that said
-// no.
+// bool, because a Vendor that carries no answer is not a Vendor that said no.
 type CapsView struct {
 	Chat      string `json:"chat"`
 	Tools     string `json:"tools"`
@@ -185,8 +211,7 @@ type ResidentView struct {
 	VRAM          int64  `json:"vram"`
 }
 
-// supportNames spells the three answers. There are exactly three and they are
-// numbered from zero, so it is an array indexed by the Support.
+// supportNames spells the three answers, indexed by the Support.
 var supportNames = [...]string{vendors.Unknown: "unknown", vendors.No: "no", vendors.Yes: "yes"}
 
 func modelViews(models []vendors.Model) []ModelView {

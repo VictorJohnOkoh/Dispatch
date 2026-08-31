@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,10 +17,11 @@ import (
 // fake is a Vendor that answers whatever the test set. It is the whole of the
 // Adapter interface because the poll is the only caller here.
 type fake struct {
-	endpoint vendors.Endpoint
-	models   []vendors.Model
-	resident []vendors.Resident
-	err      error
+	endpoint    vendors.Endpoint
+	models      []vendors.Model
+	resident    []vendors.Resident
+	err         error
+	residentErr error
 
 	polled chan struct{} // closed by the first Catalogue call
 	block  chan struct{} // Catalogue waits on this when it is not nil
@@ -44,9 +46,14 @@ func (f *fake) Catalogue(ctx context.Context) ([]vendors.Model, error) {
 	return f.models, f.err
 }
 
-func (f *fake) Resident(context.Context) ([]vendors.Resident, error) { return f.resident, f.err }
-func (f *fake) Load(context.Context, string) error                   { return f.err }
-func (f *fake) Unload(context.Context, string) error                 { return f.err }
+func (f *fake) Resident(context.Context) ([]vendors.Resident, error) {
+	if f.residentErr != nil {
+		return nil, f.residentErr
+	}
+	return f.resident, f.err
+}
+func (f *fake) Load(context.Context, string) error   { return f.err }
+func (f *fake) Unload(context.Context, string) error { return f.err }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
@@ -75,7 +82,7 @@ func TestABeatFillsTheCatalogueCache(t *testing.T) {
 		t.Fatalf("%d lines, want 1", len(got))
 	}
 	line := got[0]
-	if !line.Reachable || line.Kind != "ollama" || line.At == 0 {
+	if line.Kind != "ollama" || line.At == 0 {
 		t.Fatalf("line = %+v", line)
 	}
 	if len(line.Models) != 1 || line.Models[0].ID != "qwen3:8b" {
@@ -115,7 +122,7 @@ func TestAVendorThatStopsAnsweringEmptiesItsLine(t *testing.T) {
 	v.pollAll(t.Context())
 
 	line := v.Catalogue()[0]
-	if line.Reachable || len(line.Models) != 0 || line.At != 0 {
+	if len(line.Models) != 0 || line.At != 0 {
 		t.Fatalf("line = %+v, want an empty one", line)
 	}
 	if line.Base != f.endpoint.Base {
@@ -123,6 +130,23 @@ func TestAVendorThatStopsAnsweringEmptiesItsLine(t *testing.T) {
 	}
 	if frame := v.Frame()[0]; frame.Reachable || len(frame.Resident) != 0 {
 		t.Errorf("frame = %+v, want an empty one", frame)
+	}
+}
+
+// A Vendor that answers one call and not the other is not answering. Drawing it
+// reachable with nothing loaded would say nothing is in memory, which is the one
+// thing the failed call did not tell us.
+func TestHalfABeatIsNotABeat(t *testing.T) {
+	f := ollamaFake()
+	f.residentErr = errors.New("connection reset")
+	v := newVendors([]vendors.Adapter{f}, quiet())
+	v.pollAll(t.Context())
+
+	if frame := v.Frame()[0]; frame.Reachable {
+		t.Errorf("frame = %+v, want an unreachable Vendor", frame)
+	}
+	if line := v.Catalogue()[0]; line.At != 0 || len(line.Models) != 0 {
+		t.Errorf("line = %+v, want an empty one", line)
 	}
 }
 
@@ -167,22 +191,44 @@ func TestAReaderNeverWaitsOnTheVendor(t *testing.T) {
 }
 
 // Run polls once before the first beat, so a request arriving right after start
-// meets a cache that has been filled rather than one that is merely empty.
-func TestRunPollsBeforeTheFirstBeat(t *testing.T) {
-	f := ollamaFake()
-	f.polled = make(chan struct{})
-	polled := f.polled
+// meets a cache that has been filled rather than one that is merely empty, and it
+// keeps polling on the beat after that.
+func TestRunPollsBeforeTheFirstBeatAndOnEveryBeatAfter(t *testing.T) {
+	f := &countingFake{fake: *ollamaFake()}
 	v := newVendors([]vendors.Adapter{f}, quiet())
+	v.every = time.Millisecond
 
 	ctx, cancel := context.WithCancel(t.Context())
 	stopped := make(chan struct{})
 	go func() { defer close(stopped); v.Run(ctx) }()
 
-	select {
-	case <-polled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("no poll before the first beat")
+	deadline := time.Now().Add(2 * time.Second)
+	for f.count() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d beats in two seconds, want at least 3", f.count())
+		}
+		time.Sleep(time.Millisecond)
 	}
 	cancel()
 	<-stopped
+}
+
+// countingFake counts its beats, because Run reads them from its own goroutine.
+type countingFake struct {
+	fake
+	mu sync.Mutex
+	n  int
+}
+
+func (c *countingFake) Catalogue(ctx context.Context) ([]vendors.Model, error) {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+	return c.fake.Catalogue(ctx)
+}
+
+func (c *countingFake) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
 }

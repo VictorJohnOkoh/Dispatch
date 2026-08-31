@@ -44,8 +44,8 @@ func TestListModelsAnswersFromTheCache(t *testing.T) {
 	}
 }
 
-// A Daemon whose Vendor has never answered still has a line for it, so the Client
-// draws an empty Vendor row rather than nothing.
+// A Daemon whose Vendor has never answered still has a line for it, with the stamp
+// at zero, so the Client draws an empty Vendor row rather than nothing.
 func TestListModelsAnswersBeforeTheFirstBeat(t *testing.T) {
 	d := New([]vendors.Adapter{ollamaFake()}, quiet())
 
@@ -53,7 +53,7 @@ func TestListModelsAnswersBeforeTheFirstBeat(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d", w.Code)
 	}
-	if got := w.Body.String(); !strings.Contains(got, `"reachable":false`) {
+	if got := w.Body.String(); !strings.Contains(got, `"at":0`) {
 		t.Errorf("body = %s", got)
 	}
 }

@@ -56,7 +56,9 @@ func (d *Daemon) Serve(ctx context.Context, listen string) error {
 	stop := context.AfterFunc(ctx, func() {
 		grace, done := context.WithTimeout(context.Background(), shutdownGrace)
 		defer done()
-		srv.Shutdown(grace)
+		if err := srv.Shutdown(grace); err != nil {
+			d.log.Warn("daemon shut down on requests still open", "err", err)
+		}
 	})
 	defer stop()
 

@@ -27,12 +27,8 @@ func (d *Daemon) handler() http.Handler {
 // listModels answers from the cache the poll fills. It calls no Vendor, so a
 // Vendor that is slow or gone cannot make this request slow or gone.
 func (d *Daemon) listModels(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, struct {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
 		Vendors []CatalogueView `json:"vendors"`
 	}{d.vendors.Catalogue()})
-}
-
-func writeJSON(w http.ResponseWriter, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(body)
 }
