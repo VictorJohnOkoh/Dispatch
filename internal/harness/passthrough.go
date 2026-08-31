@@ -35,22 +35,25 @@ func NewPassthrough(rt http.RoundTripper) *Passthrough {
 // every Gate false means every slot is forced to RuleAuto.
 func (p *Passthrough) Capabilities() Capabilities { return Capabilities{} }
 
-// Start dials the Vendor and returns once it confirms it serves spec.Model. A Model
-// the Vendor does not list is an error and no Session exists, because a config key
-// that names a Model is not evidence that the Model was selected.
+// Start brings up a Session that has nothing to bring up. There is no process and
+// no handshake, so it returns a Run and dials nothing.
+//
+// ADR 0006 has an Adapter confirm the Model before Start returns. That rule is
+// about reading back what a Harness says it selected, and there is no Harness here:
+// every request names spec.Model, so the selection cannot drift. The Model the
+// Vendor does not have is caught by the Daemon's own vendors.Load during Starting.
 func (p *Passthrough) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error) {
 	if out == nil {
 		return nil, errors.New("passthrough: no Sink")
-	}
-	if err := p.confirmModel(ctx, spec.Vendor, spec.Model); err != nil {
-		return nil, err
 	}
 	return &ptRun{pt: p, session: ctx, spec: spec, out: out}, nil
 }
 
 // The two stop reasons a passthrough Session names itself, for the two ways a Prompt
 // ends without the Vendor saying why. Every other one is the Vendor's own word,
-// passed through.
+// passed through. Neither invents a fact about the Vendor: both name something this
+// Adapter did, and a Prompt that is never bounded leaves the Session Working and so
+// refusing every Prompt after it.
 const (
 	stopError       event.StopReason = "error"
 	stopInterrupted event.StopReason = "interrupted"
@@ -62,12 +65,12 @@ type ptRun struct {
 	spec    SessionSpec
 	out     Sink
 
-	mu        sync.Mutex
-	history   []chatMessage
-	cancel    context.CancelFunc // cancels the Prompt in flight, nil when none is
-	done      chan struct{}      // closed when the reader stops, nil when none runs
-	abandoned bool               // Interrupt or Close ended this Prompt, not the Vendor
-	closed    bool
+	mu          sync.Mutex
+	history     []chatMessage
+	cancel      context.CancelFunc // cancels the Prompt in flight, nil when none is
+	done        chan struct{}      // closed when the reader stops, nil when none runs
+	interrupted bool               // this Prompt was abandoned and the Session kept
+	closed      bool               // the Session is ending, so the Prompt is not bounded
 }
 
 type chatMessage struct {
@@ -104,7 +107,7 @@ func (r *ptRun) Prompt(ctx context.Context, text string) error {
 	// bounds only the wait for the Vendor's answer.
 	reqCtx, cancel := context.WithCancel(r.session)
 	stopWatch := context.AfterFunc(ctx, cancel)
-	resp, err := r.pt.call(reqCtx, r.spec.Vendor, "/chat/completions", body)
+	resp, err := r.pt.post(reqCtx, r.spec.Vendor, "/chat/completions", body)
 	stopWatch()
 	if err != nil {
 		cancel()
@@ -120,7 +123,7 @@ func (r *ptRun) Prompt(ctx context.Context, text string) error {
 		return errors.New("passthrough: the Session is closed")
 	}
 	r.history = messages
-	r.cancel, r.done, r.abandoned = cancel, done, false
+	r.cancel, r.done, r.interrupted = cancel, done, false
 	r.mu.Unlock()
 
 	go r.read(resp.Body, cancel, done)
@@ -136,7 +139,7 @@ func (r *ptRun) Interrupt(ctx context.Context) error {
 		r.mu.Unlock()
 		return nil
 	}
-	r.abandoned = true
+	r.interrupted = true
 	r.mu.Unlock()
 
 	cancel()
@@ -148,13 +151,16 @@ func (r *ptRun) Interrupt(ctx context.Context) error {
 	}
 }
 
+// Close ends the Session. A Prompt still in flight is not bounded and its message
+// is left torn, because ADR 0008 gives a stopped Session no PromptCompleted and no
+// Error: the user asked for this, so it is not a fault and not a finish.
 func (r *ptRun) Close() error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
 		return nil
 	}
-	r.closed, r.abandoned = true, true
+	r.closed = true
 	cancel, done := r.cancel, r.done
 	r.mu.Unlock()
 
@@ -180,6 +186,10 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 	)
 	// The Sink closes the open Event itself when the other kind is called, so this
 	// is needed only where a Prompt ends.
+	//
+	// A message is left torn only where the Session is ending, because the Daemon
+	// closes those. A Session that stays usable may not leave one open: the Cursor
+	// sits below every open Event, so it would never move again.
 	closeOpen := func() {
 		switch open {
 		case event.KindAssistantMessage:
@@ -202,21 +212,25 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 			open = event.KindReasoning
 
 		case vendors.FrameError:
-			// The Prompt is over and the Session stays usable, so the message is
-			// closed here rather than left open for the rest of the Session.
+			// Error is never terminal, so the Session stays usable, which it can
+			// only be once this Prompt is bounded.
 			closeOpen()
 			r.out.Failed(event.ErrVendor, f.Text)
 			r.out.Completed(stopError, event.Usage{})
 
 		case vendors.FrameTruncated:
-			if r.wasAbandoned() {
+			// Three ways a stream stops short, and they are three different facts.
+			switch interrupted, closed := r.ending(); {
+			case closed:
+				// A stop. No Error and no PromptCompleted, per ADR 0008.
+			case interrupted:
 				closeOpen()
 				r.out.Completed(stopInterrupted, event.Usage{})
-				return
+			default:
+				// The Daemon writes SessionEnded{failed} after this and closes
+				// the torn message there.
+				r.out.Failed(event.ErrStreamTruncated, "the stream ended mid-message")
 			}
-			// A torn message stays torn. The Daemon writes SessionEnded{failed}
-			// after this, and closes it there.
-			r.out.Failed(event.ErrStreamTruncated, "the stream ended mid-message")
 
 		case vendors.FrameEnd:
 			closeOpen()
@@ -232,10 +246,10 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 	r.mu.Unlock()
 }
 
-func (r *ptRun) wasAbandoned() bool {
+func (r *ptRun) ending() (interrupted, closed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.abandoned
+	return r.interrupted, r.closed
 }
 
 type chatRequest struct {
@@ -251,48 +265,14 @@ type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
-// confirmModel reads the Vendor's OpenAI-compatible model list and looks for the id
-// verbatim, because a Model id is the Vendor's own spelling and is never normalised.
-func (p *Passthrough) confirmModel(ctx context.Context, e vendors.Endpoint, modelID string) error {
-	resp, err := p.call(ctx, e, "/models", nil)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	var list struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return fmt.Errorf("passthrough: /models: %w", err)
-	}
-	for _, m := range list.Data {
-		if m.ID == modelID {
-			return nil
-		}
-	}
-	return fmt.Errorf("passthrough: %w: %s does not serve %q", vendors.ErrModelNotFound, e.Base, modelID)
-}
-
-// call does one request on the Vendor's OpenAI-compatible surface, which all three
-// Vendors serve at Base + "/v1". A nil payload is a GET. The body is the caller's
-// to close.
-func (p *Passthrough) call(ctx context.Context, e vendors.Endpoint, path string, payload []byte) (*http.Response, error) {
-	method, url := http.MethodGet, e.Base+"/v1"+path
-	var reader io.Reader
-	if payload != nil {
-		method, reader = http.MethodPost, bytes.NewReader(payload)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, reader)
+// post sends one completion on the Vendor's OpenAI-compatible surface, which all
+// three Vendors serve at Base + "/v1". The body is the caller's to close.
+func (p *Passthrough) post(ctx context.Context, e vendors.Endpoint, path string, payload []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.Base+"/v1"+path, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("passthrough: %s: %w", path, err)
 	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	req.Header.Set("Content-Type", "application/json")
 	if e.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+e.Token)
 	}

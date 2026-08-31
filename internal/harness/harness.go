@@ -88,6 +88,8 @@ type SessionSpec struct {
 // shim on the PATH answers a shell and nothing else.
 type Spawner func(ctx context.Context, l Launch) (Pipes, error)
 
+// Launch is the Harness-specific half of a spawn. It is what an Adapter knows and
+// the Daemon does not: acp on one Harness and --mode rpc on another.
 type Launch struct {
 	Args []string
 	Env  []string // added to the Daemon's own environment

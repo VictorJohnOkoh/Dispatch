@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,7 +19,6 @@ const testModel = "capstone/qwen3.5:9b"
 // request bodies so a test can see the conversation the Adapter posted. No test in
 // this file opens a socket.
 type vendorFake struct {
-	models  string // the body of GET /v1/models, or "" for the one Model above
 	stream  string // the SSE body of POST /v1/chat/completions
 	status  int    // the status of the chat call, 0 meaning 200
 	halting bool   // hold the stream open after stream, until the request is cancelled
@@ -34,13 +32,6 @@ func (v *vendorFake) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	switch req.URL.Path {
-	case "/v1/models":
-		body := v.models
-		if body == "" {
-			body = `{"data":[{"id":"` + testModel + `"}]}`
-		}
-		return answer(http.StatusOK, io.NopCloser(strings.NewReader(body)))
-
 	case "/v1/chat/completions":
 		var posted chatRequest
 		if err := json.NewDecoder(req.Body).Decode(&posted); err != nil {
@@ -270,6 +261,31 @@ func TestInterruptEndsThePromptAndLeavesTheSessionUsable(t *testing.T) {
 	}
 }
 
+func TestStoppingMidPromptWritesNoErrorAndNoCompleted(t *testing.T) {
+	head := `data: {"choices":[{"delta":{"content":"He"}}]}
+
+`
+	run, sink := startPassthrough(t, &vendorFake{stream: head, halting: true})
+
+	if err := run.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if err := run.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A stop is what the user asked for, so it is neither a fault nor a finish.
+	if len(sink.failures) != 0 {
+		t.Errorf("a stop was reported as a fault: %+v", sink.failures)
+	}
+	if len(sink.completed) != 0 {
+		t.Errorf("a stop completed the Prompt: %+v", sink.completed)
+	}
+	if last := sink.messages[len(sink.messages)-1]; last.end {
+		t.Error("a stopped Session closed its message, so it reads as finished")
+	}
+}
+
 func TestPassthroughCarriesTheConversationForward(t *testing.T) {
 	v := &vendorFake{stream: helloStream}
 	run, _ := startPassthrough(t, v)
@@ -306,16 +322,6 @@ func TestPassthroughCarriesTheConversationForward(t *testing.T) {
 	}
 }
 
-func TestStartRefusesAModelTheVendorDoesNotServe(t *testing.T) {
-	v := &vendorFake{models: `{"data":[{"id":"some/other-model"}]}`}
-	spec := SessionSpec{Model: testModel, Vendor: vendors.Endpoint{Base: "http://127.0.0.1:11434"}}
-
-	_, err := NewPassthrough(v).Start(context.Background(), spec, newRecorder(t))
-	if !errors.Is(err, vendors.ErrModelNotFound) {
-		t.Fatalf("Start: %v, want %v", err, vendors.ErrModelNotFound)
-	}
-}
-
 func TestPromptCarriesTheVendorsRefusalWhenTheCallFails(t *testing.T) {
 	run, _ := startPassthrough(t, &vendorFake{status: http.StatusNotFound})
 
@@ -349,7 +355,7 @@ func TestPassthroughSendsTheTokenWhenTheVendorWantsOne(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{},
-			Body:       io.NopCloser(bytes.NewReader([]byte(`{"data":[{"id":"` + testModel + `"}]}`))),
+			Body:       io.NopCloser(strings.NewReader(helloStream)),
 			Request:    req,
 		}, nil
 	})
@@ -358,9 +364,12 @@ func TestPassthroughSendsTheTokenWhenTheVendorWantsOne(t *testing.T) {
 		Vendor: vendors.Endpoint{Base: "http://127.0.0.1:11434", Token: "secret"},
 	}
 
-	if _, err := NewPassthrough(rt).Start(context.Background(), spec, newRecorder(t)); err != nil {
+	run, err := NewPassthrough(rt).Start(context.Background(), spec, newRecorder(t))
+	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	promptAndDrain(t, run)
+
 	if seen != "Bearer secret" {
 		t.Errorf("Authorization %q, want %q", seen, "Bearer secret")
 	}
