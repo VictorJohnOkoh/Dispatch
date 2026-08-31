@@ -259,8 +259,10 @@ log's identity changed or the cursor is above anything ever allocated.
 
 [ADR 0010](docs/adr/0010-go-package-structure-and-seams.md) owns it. Fourteen packages in five
 levels, one module, one binary, and the rule that proves the graph is acyclic: **no package imports
-another at its own level.** Ten of the fourteen are named after a `CONTEXT.md` term. Go 1.24 is the
-floor, because ADR 0007's own test example calls `t.Context()`.
+another at its own level.** Ten of the fourteen are named after a `CONTEXT.md` term. Go 1.25 is the
+floor. ADR 0010 set it at 1.24 because ADR 0007's own test example calls `t.Context()`, and
+`modernc.org/sqlite` raised it: the current driver needs 1.25, and M2 takes the current driver rather
+than pinning an old one to hold a floor nothing else needs.
 
 One addition to that tree, argued in the corrections below: `daemon/supervise.go` splits into
 `supervise_windows.go` and `supervise_unix.go`, because killing a process tree is the one thing in
