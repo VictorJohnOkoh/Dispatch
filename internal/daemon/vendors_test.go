@@ -267,3 +267,35 @@ func (c *countingFake) count() int {
 	defer c.mu.Unlock()
 	return c.n
 }
+
+// Watch hands out the lines and a channel the next beat closes, so a stream sends
+// what it has now and waits for the next change without registering anything.
+func TestWatchClosesOnTheNextBeat(t *testing.T) {
+	f := ollamaFake()
+	v := newVendors([]vendors.Adapter{f}, quiet())
+
+	before, beat := v.Watch()
+	if len(before) != 1 || before[0].Reachable {
+		t.Fatalf("before the first beat = %+v", before)
+	}
+	select {
+	case <-beat:
+		t.Fatal("the beat closed before a poll")
+	default:
+	}
+
+	v.pollAll(t.Context())
+	select {
+	case <-beat:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a poll did not close the beat")
+	}
+
+	after, next := v.Watch()
+	if len(after) != 1 || !after[0].Reachable {
+		t.Errorf("after the beat = %+v", after)
+	}
+	if next == beat {
+		t.Error("Watch handed back the beat that already closed")
+	}
+}

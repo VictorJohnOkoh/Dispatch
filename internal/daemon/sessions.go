@@ -315,7 +315,14 @@ func (r *sessions) newID() event.SessionID {
 	}
 }
 
-// lookup is newID's scan. The caller holds the mutex.
+// known reports whether this Host ever started a Session by that id, ended or not.
+func (r *sessions) known(id event.SessionID) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lookup(id) != nil
+}
+
+// lookup is the registry's scan. The caller holds the mutex.
 func (r *sessions) lookup(id event.SessionID) *Session {
 	for _, s := range r.all {
 		if s.id == id {

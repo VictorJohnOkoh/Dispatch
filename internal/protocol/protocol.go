@@ -103,4 +103,5 @@ const (
 	ReasonUnknownHarness Reason = "unknown_harness" // this Host serves no Harness by that name
 	ReasonUnknownModel   Reason = "unknown_model"   // no Vendor on this Host serves that Model
 	ReasonWorkspace      Reason = "workspace"       // the directory is outside the Workspace Root
+	ReasonUnknownSession Reason = "unknown_session" // this Host has no Session by that id
 )

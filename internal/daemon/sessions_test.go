@@ -386,3 +386,17 @@ func TestTheSessionRoutesAreTheOnesProtocolNames(t *testing.T) {
 		t.Fatalf("routes = %q, %q", protocol.StartSession, protocol.ListSessions)
 	}
 }
+
+// page reads back one page of GET /v1/sessions/{id}/events.
+func (h *host) page(t *testing.T, path string) []protocol.Event {
+	t.Helper()
+	w := get(t, h.Daemon, path)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var body struct{ Events []protocol.Event }
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("page: %v", err)
+	}
+	return body.Events
+}
