@@ -135,6 +135,24 @@ func (v *Vendors) Catalogue() []CatalogueView {
 	return out
 }
 
+// serving is the Vendor whose last beat listed this Model, or nil when no Vendor
+// on this Host did. It reads the poll's cache, so a Session start refuses an
+// unknown Model without a call on the request path, and a Vendor that is not
+// answering serves nothing.
+func (v *Vendors) serving(model string) vendors.Adapter {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	for i, b := range v.beats {
+		for _, m := range b.models {
+			if m.ID == model {
+				return v.adapters[i]
+			}
+		}
+	}
+	return nil
+}
+
 // Frame is the content of the vendors frame: reachability beside what is in memory
 // now. It is pushed on the beat rather than fetched, because a Resident list is
 // worthless when old.

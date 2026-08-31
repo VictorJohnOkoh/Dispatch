@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/config"
 	"github.com/VictorJohnOkoh/Dispatch/internal/daemon"
+	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
+	"github.com/VictorJohnOkoh/Dispatch/internal/harness"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
@@ -91,9 +94,40 @@ func startDaemon(ctx context.Context, path string, log *slog.Logger) error {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}
+	harnesses, err := newHarnesses(cfg.Harnesses, log)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+
+	events, err := eventlog.Open(cfg.LogPath)
+	if err != nil {
+		return err
+	}
+	defer events.Close()
+
 	log.Info("dispatch starting", "role", "daemon", "vendors", len(adapters),
-		"harnesses", len(cfg.Harnesses), "workspaceRoot", root)
-	return daemon.New(adapters, log).Serve(ctx, cfg.Listen)
+		"harnesses", len(harnesses), "workspaceRoot", root, "logPath", cfg.LogPath)
+	return daemon.New(log, events, root, adapters, harnesses).Serve(ctx, cfg.Listen)
+}
+
+// newHarnesses builds one Adapter per named Harness this build knows. A Harness
+// with no Adapter yet is a milestone that has not landed, so it is a warning and
+// not a startup error: the Daemon still serves the ones it does have. A file that
+// names none of them is the error, because that Daemon can start no Session.
+func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.Harness, error) {
+	var out []daemon.Harness
+	for _, profile := range profiles {
+		switch profile.Name {
+		case "passthrough":
+			out = append(out, daemon.Harness{Name: profile.Name, Adapter: harness.NewPassthrough(nil)})
+		default:
+			log.Warn("this Harness has no Adapter yet, and no Session may name it", "harness", profile.Name)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no Harness in this file has an Adapter yet")
+	}
+	return out, nil
 }
 
 // newVendor is the one place a Vendor Kind is read. Ollama is the Adapter this

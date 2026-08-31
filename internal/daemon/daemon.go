@@ -17,23 +17,88 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/admission"
+	"github.com/VictorJohnOkoh/Dispatch/internal/event"
+	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
+	"github.com/VictorJohnOkoh/Dispatch/internal/harness"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
+	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
 )
 
 // shutdownGrace is how long a Serve that is stopping waits for the requests it is
 // already answering.
 const shutdownGrace = 5 * time.Second
 
-// Daemon is one Host's server.
-type Daemon struct {
-	vendors *Vendors
-	log     *slog.Logger
+// Harness is one Harness this Host serves, under the name daemon.json gave it.
+// That name is what a Session start asks for.
+type Harness struct {
+	Name    string
+	Adapter harness.Adapter
 }
 
-// New builds the Daemon from the values main.go resolved. The adapters are one per
-// Vendor the config named, in that order.
-func New(adapters []vendors.Adapter, log *slog.Logger) *Daemon {
-	return &Daemon{vendors: newVendors(adapters, log), log: log}
+// Daemon is one Host's server.
+type Daemon struct {
+	log       *slog.Logger
+	events    *eventlog.Log
+	root      workspace.Root
+	vendors   *Vendors
+	harnesses []Harness
+
+	// admit is the seam ADR 0008 named, and SingleSession is the only policy v1
+	// ships. It is built here rather than passed in, because no configuration
+	// chooses it.
+	admit admission.Policy
+
+	sessions sessions
+
+	// base is the context every Session hangs off, which is Serve's. A handler
+	// exercised without Serve gets the background one this starts as.
+	base context.Context
+}
+
+// New builds the Daemon from the values main.go resolved. The Vendor adapters and
+// the Harnesses are each one per entry the config named, in that order.
+func New(log *slog.Logger, events *eventlog.Log, root workspace.Root, adapters []vendors.Adapter, harnesses []Harness) *Daemon {
+	return &Daemon{
+		log:       log,
+		events:    events,
+		root:      root,
+		vendors:   newVendors(adapters, log),
+		harnesses: harnesses,
+		admit:     admission.SingleSession{},
+		base:      context.Background(),
+	}
+}
+
+// harness is the Adapter this Host serves under that name, or nil. It is a scan
+// over three entries at most, which is cheaper to read than an index.
+func (d *Daemon) harness(name string) harness.Adapter {
+	for _, h := range d.harnesses {
+		if h.Name == name {
+			return h.Adapter
+		}
+	}
+	return nil
+}
+
+// write appends one Event for a Session and records it against that Session. A
+// write that fails is the one thing the Event log cannot report, so it goes to the
+// operational log and cancels the Session.
+func (d *Daemon) write(s *Session, kind event.Kind, payload any) (event.Event, error) {
+	e, err := d.events.Append(event.Event{Session: s.id, At: time.Now().UTC(), Kind: kind, Payload: payload})
+	if err != nil {
+		d.writeFailed(s, kind, err)
+		return event.Event{}, err
+	}
+	d.sessions.record(s, e)
+	return e, nil
+}
+
+// writeFailed is the Event log refusing. The Session cannot be trusted to describe
+// itself after this, so it is cancelled.
+func (d *Daemon) writeFailed(s *Session, kind event.Kind, err error) {
+	d.log.Error("the Event log refused a write", "session", s.id, "kind", kind, "err", err)
+	s.cancel()
 }
 
 // Serve binds listen, starts the Vendor poll and answers until ctx is done.
@@ -47,7 +112,10 @@ func (d *Daemon) Serve(ctx context.Context, listen string) error {
 	}
 	d.log.Info("daemon listening", "addr", ln.Addr().String())
 
+	// Every Session hangs off this one, so a Daemon that stops cancels the launches
+	// and the Runs it is holding.
 	ctx, cancel := context.WithCancel(ctx)
+	d.base = ctx
 	polled := make(chan struct{})
 	go func() { defer close(polled); d.vendors.Run(ctx) }()
 	defer func() { cancel(); <-polled }()
