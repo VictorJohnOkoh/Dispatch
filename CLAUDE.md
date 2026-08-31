@@ -16,7 +16,7 @@ Bad Example for a variable/constant: type Support uint8
 - // missing value, so nothing here is a pointer and no caller writes a nil check.
 - // Unknown is the zero value, which makes an unfilled Capabilities honest rather
 - // than wrong.
-
+When adding a new feature to an existing codebase publish your changes to a branch and open a Pull Request instead of just comminting to main
 ## Speech Pattern
 When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language.
 Dumb down complex topics/options afterwards by describing them using more colloquial language

@@ -11,6 +11,7 @@ Good Example:
 Bad Example:
 - For a function that adds 3 numbers together "Takes in 3 integers, performs the addition operation and returns the result as an integer" 
 When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language
+When adding a new feature to an existing codebase publish your changes to a branch and open a Pull Request instead of just comminting to main 
 ## Agent skills
 
 ### Issue tracker
