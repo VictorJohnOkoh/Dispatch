@@ -234,3 +234,26 @@ func TestCrashWriter(t *testing.T) {
 	fmt.Println("written")
 	time.Sleep(time.Minute)
 }
+
+// Closing the log is the third way a message stops being open, and the text it
+// had reaches the file even though nothing completed it.
+func TestCloseFlushesAnOpenMessage(t *testing.T) {
+	path := tempPath(t)
+	log := openLog(t, path)
+
+	opened, err := log.Append(openMessageEvent(event.KindAssistantMessage))
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := log.AppendText(opened.Seq, "half a ", false); err != nil {
+		t.Fatalf("AppendText: %v", err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	text, complete := storedMessage(t, path, opened.Seq)
+	if text != "half a " || complete {
+		t.Errorf("row after Close = %q, complete %v, want %q and open", text, complete, "half a ")
+	}
+}

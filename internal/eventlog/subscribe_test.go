@@ -124,3 +124,17 @@ func TestDeltasReachSubscribers(t *testing.T) {
 		t.Errorf("Delta Seq = %d, want the Event's %d", last.Seq, opened.Seq)
 	}
 }
+
+func TestCloseEndsEverySubscription(t *testing.T) {
+	log := openLog(t, tempPath(t))
+	frames, stop := log.Subscribe()
+	defer stop()
+
+	if err := log.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, ok := <-frames; ok {
+		t.Error("a subscriber outlived the log")
+	}
+}

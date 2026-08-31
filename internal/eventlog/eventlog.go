@@ -36,18 +36,18 @@ CREATE INDEX IF NOT EXISTS events_by_session ON events (session, seq);
 `
 
 // FlushThreshold is how much new text an open message holds before it is written
-// out again. It is a size and not a duration because a size bounds the loss in the
-// unit a user cares about, and it needs no knob: a fast Model flushes often and a
-// slow one rarely.
+// out again.
 const FlushThreshold = 4 << 10
 
-// subscriberBuffer is how far behind a subscriber may fall before the log drops
-// it. It is large enough for a reader that is still draining its range scan, and
-// small enough that a reader which stopped altogether is found quickly.
+// subscriberBuffer is how far behind a subscriber may fall before the log drops it.
 const subscriberBuffer = 256
 
-// Frame is one thing the log fans out. Exactly one field is set: an Event, or a
-// Delta for an Event the subscriber already has.
+// Frame is one thing the log fans out, and the Daemon sends each one as the
+// protocol.Frame of the same name. Exactly one field is set: an Event, or a Delta
+// for an Event the subscriber already has.
+//
+// Every subscriber is handed the same Frame, so a reader reads it and never
+// writes to it.
 type Frame struct {
 	Event *event.Event
 	Delta *protocol.Delta
@@ -58,13 +58,32 @@ type Frame struct {
 type openMessage struct {
 	session event.SessionID
 	kind    event.Kind
-	text    string
+	text    []byte
 	stored  int
+}
+
+// payload builds the row's payload from the text held so far. Only the two Kinds
+// openingText admits ever reach here, and Reasoning is the one that is not the
+// default.
+func (m *openMessage) payload(complete bool) any {
+	if m.kind == event.KindReasoning {
+		return &event.Reasoning{Text: string(m.text), Complete: complete}
+	}
+	return &event.AssistantMessage{Text: string(m.text), Complete: complete}
 }
 
 type subscriber struct {
 	frames chan Frame
 	closed bool
+}
+
+// end closes the channel once. The log never reads it again after this.
+func (s *subscriber) end() {
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.frames)
 }
 
 // Log is one Daemon's Event log. Every write holds the mutex, so one insert
@@ -93,7 +112,23 @@ func Open(path string) (*Log, error) {
 	return &Log{db: db, open: make(map[uint64]*openMessage)}, nil
 }
 
-func (l *Log) Close() error { return l.db.Close() }
+// Close flushes every message that is still open, ends every subscription and
+// closes the file. A message that is still open stays incomplete, because nothing
+// finished it.
+func (l *Log) Close() error {
+	l.mu.Lock()
+	flushed := l.closeOpen("")
+	for _, sub := range l.subs {
+		sub.end()
+	}
+	l.subs = nil
+	l.mu.Unlock()
+
+	if err := l.db.Close(); err != nil {
+		return err
+	}
+	return flushed
+}
 
 // Append writes one Event and returns it carrying its Sequence Number. The insert
 // allocates that number as the row's own key, which is the highest one in the
@@ -128,15 +163,15 @@ func (l *Log) Append(e event.Event) (event.Event, error) {
 	e.Seq = uint64(seq)
 
 	if text, isOpen := openingText(e); isOpen {
-		l.open[e.Seq] = &openMessage{session: e.Session, kind: e.Kind, text: text, stored: len(text)}
+		l.open[e.Seq] = &openMessage{session: e.Session, kind: e.Kind, text: []byte(text), stored: len(text)}
 	}
-	if e.Kind == event.KindSessionEnded {
-		if err := l.endSession(e.Session); err != nil {
-			return event.Event{}, err
-		}
-	}
-
 	l.publish(Frame{Event: &e})
+
+	// The Event is committed and sent, so a failed flush here is reported beside
+	// it rather than in place of it.
+	if e.Kind == event.KindSessionEnded {
+		return e, l.closeOpen(e.Session)
+	}
 	return e, nil
 }
 
@@ -156,17 +191,23 @@ func (l *Log) AppendText(seq uint64, text string, final bool) (protocol.Delta, e
 		return protocol.Delta{}, fmt.Errorf("eventlog: append text: no open message at %d", seq)
 	}
 
-	delta := protocol.Delta{Seq: seq, N: len(message.text), Text: text, Final: final}
-	message.text += text
+	before := len(message.text)
+	delta := protocol.Delta{Seq: seq, N: before, Text: text, Final: final}
+	message.text = append(message.text, text...)
 	if final {
-		delta.N, delta.Text = len(message.text), message.text
-		delete(l.open, seq)
+		delta.N, delta.Text = len(message.text), string(message.text)
 	}
 
 	if final || len(message.text)-message.stored >= FlushThreshold {
 		if err := l.store(seq, message, final); err != nil {
+			// The message stays open, and stays as long as it was, so the
+			// caller may send this text again.
+			message.text = message.text[:before]
 			return protocol.Delta{}, err
 		}
+	}
+	if final {
+		delete(l.open, seq)
 	}
 
 	l.publish(Frame{Delta: &delta})
@@ -204,8 +245,7 @@ func (l *Log) publish(f Frame) {
 		case sub.frames <- f:
 			live = append(live, sub)
 		default:
-			sub.closed = true
-			close(sub.frames)
+			sub.end()
 		}
 	}
 	l.subs = live
@@ -223,32 +263,33 @@ func (l *Log) drop(sub *subscriber) {
 			break
 		}
 	}
-	sub.closed = true
-	close(sub.frames)
+	sub.end()
 }
 
-// endSession closes every message this Session left open. The text each one had is
-// written out and complete stays false, so the Client draws a torn message. The
-// caller holds the mutex.
-func (l *Log) endSession(session event.SessionID) error {
+// closeOpen closes every message one Session left open, or every open message
+// there is when session is empty. The text each one had is written out and
+// complete stays false, so the Client draws a torn message. It returns the first
+// write that failed, and closes the rest either way. The caller holds the mutex.
+func (l *Log) closeOpen(session event.SessionID) error {
+	var failed error
 	for seq, message := range l.open {
-		if message.session != session {
+		if session != "" && message.session != session {
 			continue
 		}
 		delete(l.open, seq)
 		if message.stored == len(message.text) {
 			continue
 		}
-		if err := l.store(seq, message, false); err != nil {
-			return err
+		if err := l.store(seq, message, false); err != nil && failed == nil {
+			failed = err
 		}
 	}
-	return nil
+	return failed
 }
 
 // store writes an open message's text over its row. The caller holds the mutex.
 func (l *Log) store(seq uint64, message *openMessage, complete bool) error {
-	payload, err := json.Marshal(messagePayload(message.kind, message.text, complete))
+	payload, err := json.Marshal(message.payload(complete))
 	if err != nil {
 		return fmt.Errorf("eventlog: %s payload: %w", message.kind, err)
 	}
@@ -269,11 +310,4 @@ func openingText(e event.Event) (string, bool) {
 		return payload.Text, !payload.Complete
 	}
 	return "", false
-}
-
-func messagePayload(kind event.Kind, text string, complete bool) any {
-	if kind == event.KindReasoning {
-		return &event.Reasoning{Text: text, Complete: complete}
-	}
-	return &event.AssistantMessage{Text: text, Complete: complete}
 }
