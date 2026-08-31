@@ -32,6 +32,11 @@ type Vendors struct {
 
 	mu    sync.Mutex
 	beats []beat // one per adapter, in the order the config named them
+
+	// polled is closed after the first beat, so a server can wait for a Catalogue
+	// that has been filled before it answers a request that reads one.
+	polled chan struct{}
+	first  sync.Once
 }
 
 // beat is what the last poll saw of one Vendor. The zero value is a Vendor that is
@@ -54,6 +59,7 @@ func newVendors(adapters []vendors.Adapter, log *slog.Logger) *Vendors {
 		every:    pollInterval,
 		log:      log,
 		beats:    make([]beat, len(adapters)),
+		polled:   make(chan struct{}),
 	}
 }
 
@@ -90,6 +96,8 @@ func (v *Vendors) pollAll(ctx context.Context) {
 	v.mu.Lock()
 	v.beats = next
 	v.mu.Unlock()
+
+	v.first.Do(func() { close(v.polled) })
 }
 
 // pollOne asks one Vendor for both of its lists under one deadline. Either call
@@ -134,6 +142,11 @@ func (v *Vendors) Catalogue() []CatalogueView {
 	}
 	return out
 }
+
+// Polled is closed once a beat has been taken, whether or not any Vendor
+// answered it. A Vendor that is not answering has a line, so waiting on this
+// never waits on a Vendor that is down.
+func (v *Vendors) Polled() <-chan struct{} { return v.polled }
 
 // serving is the Vendor whose last beat listed this Model, or nil when no Vendor
 // on this Host did. It reads the poll's cache, so a Session start refuses an

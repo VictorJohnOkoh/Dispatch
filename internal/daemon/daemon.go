@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/admission"
@@ -51,6 +52,13 @@ type Daemon struct {
 
 	sessions sessions
 
+	// starting makes admission and the registry entry it decided on one step.
+	starting sync.Mutex
+
+	// writing keeps a Session's recorded Events in the order the log gave them
+	// Sequence Numbers, which is the order the fold reads them in.
+	writing sync.Mutex
+
 	// base is the context every Session hangs off, which is Serve's. A handler
 	// exercised without Serve gets the background one this starts as.
 	base context.Context
@@ -85,6 +93,9 @@ func (d *Daemon) harness(name string) harness.Adapter {
 // write that fails is the one thing the Event log cannot report, so it goes to the
 // operational log and cancels the Session.
 func (d *Daemon) write(s *Session, kind event.Kind, payload any) (event.Event, error) {
+	d.writing.Lock()
+	defer d.writing.Unlock()
+
 	e, err := d.events.Append(event.Event{Session: s.id, At: time.Now().UTC(), Kind: kind, Payload: payload})
 	if err != nil {
 		d.writeFailed(s, kind, err)
@@ -119,6 +130,14 @@ func (d *Daemon) Serve(ctx context.Context, listen string) error {
 	polled := make(chan struct{})
 	go func() { defer close(polled); d.vendors.Run(ctx) }()
 	defer func() { cancel(); <-polled }()
+
+	// The listener is bound, but nothing is answered until the first beat has been
+	// taken: a Session start arriving immediately would otherwise meet an empty
+	// Catalogue and be told the Model does not exist.
+	select {
+	case <-d.vendors.Polled():
+	case <-ctx.Done():
+	}
 
 	srv := &http.Server{Handler: d.handler()}
 	stop := context.AfterFunc(ctx, func() {

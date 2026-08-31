@@ -88,6 +88,47 @@ func TestServeBindsLoopbackAndStaysUp(t *testing.T) {
 	}
 }
 
+// The listener answers nothing until the first beat has been taken, so a request
+// arriving right after start reads a Catalogue that has been filled rather than
+// an empty one.
+func TestServeAnswersNothingUntilTheFirstBeat(t *testing.T) {
+	f := ollamaFake()
+	f.block = make(chan struct{})
+	log := &lines{}
+	d := plain([]vendors.Adapter{f}, slog.New(slog.NewTextHandler(log, nil)))
+
+	go d.Serve(t.Context(), "127.0.0.1:0")
+	url := "http://" + boundAddr(t, log) + "/v1/models"
+
+	answered := make(chan int, 1)
+	go func() {
+		resp, err := http.Get(url)
+		if err != nil {
+			answered <- 0
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		answered <- resp.StatusCode
+	}()
+
+	select {
+	case code := <-answered:
+		t.Fatalf("the request was answered %d while the first beat was still running", code)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(f.block)
+	select {
+	case code := <-answered:
+		if code != http.StatusOK {
+			t.Errorf("status %d", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request was never answered")
+	}
+}
+
 // The Hub reaches the Daemon through an SSH tunnel, so an address off the loopback
 // interface is refused at start rather than bound.
 func TestServeRefusesAnAddressThatIsNotLoopback(t *testing.T) {

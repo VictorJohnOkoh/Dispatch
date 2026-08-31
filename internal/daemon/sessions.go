@@ -58,11 +58,15 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 
 	dir, err := d.root.Contain(d.root.String(), req.Dir)
 	if err != nil {
-		status := protocol.StatusUnprocessable
 		if !errors.Is(err, workspace.ErrOutsideRoot) {
-			status = http.StatusInternalServerError
+			// The path could not be resolved at all, which is this Host failing
+			// rather than the request being wrong, so it is not a Refusal.
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		refuse(w, status, protocol.Refusal{Reason: protocol.ReasonWorkspace, Detail: err.Error()})
+		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
+			Reason: protocol.ReasonWorkspace, Detail: err.Error(),
+		})
 		return
 	}
 
@@ -74,6 +78,11 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Admission and the registry entry it decided on are one step, so two starts
+	// arriving together cannot both read an empty Host and both be admitted.
+	d.starting.Lock()
+	defer d.starting.Unlock()
 
 	// Admission is asked once, before the Session exists. A refusal writes no Event
 	// because there is nothing to write one against, so it goes to the operational
@@ -101,8 +110,9 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		started: time.Now().UTC(),
 		cancel:  cancel,
 	}
-	d.sessions.add(s)
-
+	// The Session joins the registry only once its first Event is in the log. A
+	// Session with no Event folds to Starting, so one added ahead of a write that
+	// failed would hold the Host's one slot for as long as the Daemon runs.
 	started, err := d.write(s, event.KindSessionStarted, &event.SessionStarted{
 		Harness: s.harness, Model: s.model, Vendor: s.vendor, Cwd: s.dir,
 	})
@@ -110,6 +120,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
 		return
 	}
+	d.sessions.add(s)
 
 	go d.launch(ctx, s, adapter, vendor)
 
@@ -211,7 +222,9 @@ type Session struct {
 	// cancel ends the launch, the Run and every call either has in flight.
 	cancel context.CancelFunc
 
-	// run is nil until the Harness is up, and stays nil for a launch that failed.
+	// run is the live Session the Adapter handed back, which the Daemon holds
+	// because it is the Daemon that prompts and stops it. It is nil until the
+	// Harness is up, and stays nil for a launch that failed.
 	run harness.Run
 
 	// events is this Session's own Events, in Seq order, which is what the fold
@@ -237,14 +250,6 @@ func (r *sessions) add(s *Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.all = append(r.all, s)
-}
-
-// find returns the Session with this id, or nil. Every endpoint under
-// /v1/sessions/{session} starts here.
-func (r *sessions) find(id event.SessionID) *Session {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.lookup(id)
 }
 
 func (r *sessions) setRun(s *Session, run harness.Run) {
@@ -310,7 +315,7 @@ func (r *sessions) newID() event.SessionID {
 	}
 }
 
-// lookup is the scan both find and newID need. The caller holds the mutex.
+// lookup is newID's scan. The caller holds the mutex.
 func (r *sessions) lookup(id event.SessionID) *Session {
 	for _, s := range r.all {
 		if s.id == id {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,6 +133,29 @@ func (h *host) kinds(t *testing.T) []string {
 	return out
 }
 
+// message reads back an appendable Event's text and whether it is complete.
+func (h *host) message(t *testing.T, seq int) (string, bool) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+h.logPath)
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	defer db.Close()
+
+	var payload []byte
+	if err := db.QueryRow(`SELECT payload FROM events WHERE seq = ?`, seq).Scan(&payload); err != nil {
+		t.Fatalf("no Event at %d: %v", seq, err)
+	}
+	var body struct {
+		Text     string `json:"text"`
+		Complete bool   `json:"complete"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload at %d: %v", seq, err)
+	}
+	return body.Text, body.Complete
+}
+
 // waitState waits for a Session to reach a state, because the launch runs after
 // the answer has gone out, which is the whole point of Starting.
 func (h *host) waitState(t *testing.T, id event.SessionID, want string) SessionView {
@@ -244,6 +268,38 @@ func TestASecondStartIsRefusedAndNamesTheSessionHoldingTheSlot(t *testing.T) {
 	}
 	if got := h.list(t); len(got) != 1 {
 		t.Errorf("%d Sessions, want only the one that was admitted", len(got))
+	}
+}
+
+// Two starts arriving together cannot both read an empty Host and both be
+// admitted, because admission and the registry entry it decided on are one step.
+func TestTwoStartsArrivingTogetherAdmitOne(t *testing.T) {
+	h := newHost(t)
+
+	codes := make(chan int, 4)
+	var wg sync.WaitGroup
+	for range cap(codes) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes <- h.post(t, "/v1/sessions", startBody).Code
+		}()
+	}
+	wg.Wait()
+	close(codes)
+
+	started := 0
+	for code := range codes {
+		switch code {
+		case protocol.StatusStarted:
+			started++
+		case protocol.StatusConflict:
+		default:
+			t.Errorf("status %d", code)
+		}
+	}
+	if started != 1 {
+		t.Errorf("%d starts were admitted, want 1", started)
 	}
 }
 
