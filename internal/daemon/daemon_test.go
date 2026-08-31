@@ -10,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
+	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
 )
 
 // lines is a log a test can read while the Daemon is still writing to it.
@@ -28,6 +31,12 @@ func (l *lines) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.buf.String()
+}
+
+// plain is a Daemon with its Vendors and nothing else, for the tests that never
+// start a Session.
+func plain(adapters []vendors.Adapter, log *slog.Logger) *Daemon {
+	return New(log, nil, workspace.Root{}, adapters, nil)
 }
 
 var addrLine = regexp.MustCompile(`addr=(\S+)`)
@@ -52,7 +61,7 @@ func boundAddr(t *testing.T, l *lines) string {
 // an operator reads.
 func TestServeBindsLoopbackAndStaysUp(t *testing.T) {
 	log := &lines{}
-	d := New(nil, slog.New(slog.NewTextHandler(log, nil)))
+	d := plain(nil, slog.New(slog.NewTextHandler(log, nil)))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	served := make(chan error, 1)
@@ -79,11 +88,52 @@ func TestServeBindsLoopbackAndStaysUp(t *testing.T) {
 	}
 }
 
+// The listener answers nothing until the first beat has been taken, so a request
+// arriving right after start reads a Catalogue that has been filled rather than
+// an empty one.
+func TestServeAnswersNothingUntilTheFirstBeat(t *testing.T) {
+	f := ollamaFake()
+	f.block = make(chan struct{})
+	log := &lines{}
+	d := plain([]vendors.Adapter{f}, slog.New(slog.NewTextHandler(log, nil)))
+
+	go d.Serve(t.Context(), "127.0.0.1:0")
+	url := "http://" + boundAddr(t, log) + "/v1/models"
+
+	answered := make(chan int, 1)
+	go func() {
+		resp, err := http.Get(url)
+		if err != nil {
+			answered <- 0
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		answered <- resp.StatusCode
+	}()
+
+	select {
+	case code := <-answered:
+		t.Fatalf("the request was answered %d while the first beat was still running", code)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(f.block)
+	select {
+	case code := <-answered:
+		if code != http.StatusOK {
+			t.Errorf("status %d", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request was never answered")
+	}
+}
+
 // The Hub reaches the Daemon through an SSH tunnel, so an address off the loopback
 // interface is refused at start rather than bound.
 func TestServeRefusesAnAddressThatIsNotLoopback(t *testing.T) {
 	for _, listen := range []string{"0.0.0.0:7717", "192.168.1.4:7717", "localhost:7717", "7717"} {
-		if err := New(nil, quiet()).Serve(t.Context(), listen); err == nil {
+		if err := plain(nil, quiet()).Serve(t.Context(), listen); err == nil {
 			t.Errorf("Serve(%q) = nil, want an error", listen)
 		}
 	}

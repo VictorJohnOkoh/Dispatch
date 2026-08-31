@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,11 @@ type fake struct {
 	polled chan struct{} // closed by the first Catalogue call
 	block  chan struct{} // Catalogue waits on this when it is not nil
 	calls  int
+
+	loadErr error
+	mu      sync.Mutex
+	gate    chan struct{} // Load waits on this when it is not nil
+	loaded  []string
 }
 
 func (f *fake) Endpoint() vendors.Endpoint { return f.endpoint }
@@ -52,8 +58,37 @@ func (f *fake) Resident(context.Context) ([]vendors.Resident, error) {
 	}
 	return f.resident, f.err
 }
-func (f *fake) Load(context.Context, string) error   { return f.err }
+
+// Load records what the Daemon asked for, and waits on gate when a test set one,
+// which is how a cold Model load is held inside Starting.
+func (f *fake) Load(ctx context.Context, modelID string) error {
+	f.mu.Lock()
+	f.loaded = append(f.loaded, modelID)
+	gate := f.gate
+	f.mu.Unlock()
+
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return f.loadErr
+}
+
+// loads is what Load was called with, so far.
+func (f *fake) loads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.loaded)
+}
+
 func (f *fake) Unload(context.Context, string) error { return f.err }
+
+// errNoModel is a Vendor refusing, which is the only Vendor failure these tests
+// need to tell apart from success.
+var errNoModel = errors.New("no such model")
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 

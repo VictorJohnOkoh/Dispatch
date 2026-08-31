@@ -20,7 +20,7 @@ func get(t *testing.T, d *Daemon, path string) *httptest.ResponseRecorder {
 
 func TestListModelsAnswersFromTheCache(t *testing.T) {
 	f := ollamaFake()
-	d := New([]vendors.Adapter{f}, quiet())
+	d := plain([]vendors.Adapter{f}, quiet())
 	d.vendors.pollAll(t.Context())
 	before := f.calls
 
@@ -47,7 +47,7 @@ func TestListModelsAnswersFromTheCache(t *testing.T) {
 // A Daemon whose Vendor has never answered still has a line for it, with the stamp
 // at zero, so the Client draws an empty Vendor row rather than nothing.
 func TestListModelsAnswersBeforeTheFirstBeat(t *testing.T) {
-	d := New([]vendors.Adapter{ollamaFake()}, quiet())
+	d := plain([]vendors.Adapter{ollamaFake()}, quiet())
 
 	w := get(t, d, "/v1/models")
 	if w.Code != http.StatusOK {
@@ -59,7 +59,7 @@ func TestListModelsAnswersBeforeTheFirstBeat(t *testing.T) {
 }
 
 func TestPprofAnswersOnTheDaemonsListener(t *testing.T) {
-	d := New(nil, quiet())
+	d := plain(nil, quiet())
 	for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1", "/debug/pprof/cmdline"} {
 		if w := get(t, d, path); w.Code != http.StatusOK {
 			t.Errorf("%s: status %d", path, w.Code)

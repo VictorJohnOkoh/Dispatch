@@ -29,6 +29,8 @@ func daemonConfig(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	s := strings.Replace(string(body), `"/home/victor/work"`, strconv.Quote(root), 1)
+	s = strings.Replace(s, `"/home/victor/.local/state/dispatch/events.db"`,
+		strconv.Quote(filepath.ToSlash(filepath.Join(root, "events.db"))), 1)
 	return strings.Replace(s, `"127.0.0.1:7717"`, `"127.0.0.1:0"`, 1)
 }
 
@@ -66,6 +68,31 @@ func TestDaemonRefusesAVendorWithNoAdapter(t *testing.T) {
 		t.Fatalf("exit %d, want 1", code)
 	}
 	if !strings.Contains(errOut.String(), "no Adapter yet") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+// A Harness whose Adapter has not landed yet is a warning and not a stop, so the
+// Daemon still serves the ones it has. A file naming none of them is the stop,
+// because that Daemon can start no Session.
+func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfig(t, dir, "daemon.json", daemonConfig(t, dir))
+	var log strings.Builder
+	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &log); code != 0 {
+		t.Fatalf("exit %d: %s", code, log.String())
+	}
+	if !strings.Contains(log.String(), "harness=opencode") {
+		t.Errorf("log = %q", log.String())
+	}
+
+	only := strings.Replace(daemonConfig(t, dir), `{"name": "passthrough"},`, "", 1)
+	path = writeConfig(t, dir, "none.json", only)
+	var errOut strings.Builder
+	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &errOut); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "no Harness in this file has an Adapter yet") {
 		t.Errorf("stderr = %q", errOut.String())
 	}
 }
