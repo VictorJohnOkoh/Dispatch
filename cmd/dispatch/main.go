@@ -8,38 +8,52 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"os/signal"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/config"
+	"github.com/VictorJohnOkoh/Dispatch/internal/daemon"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
+	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
 )
 
 const usage = "usage: dispatch <daemon|hub> [-config path]"
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // run selects the role and returns the process exit code. main is the only
-// caller of os.Exit, so a role can defer its shutdown.
-func run(args []string, out, errOut io.Writer) int {
+// caller of os.Exit, so a role can defer its shutdown. It returns when ctx is
+// done, which is what an interrupt cancels.
+func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(errOut, usage)
 		return 2
 	}
 
+	// The operational log is stderr. It holds what the Event log cannot: a process,
+	// a socket, and a decision that produced no Session.
+	log := slog.New(slog.NewTextHandler(errOut, nil))
+
 	role := args[0]
 	var path string
-	var start func(string, io.Writer) error
+	var start func(context.Context, string) error
 	switch role {
 	case "daemon":
-		path, start = "daemon.json", startDaemon
+		path = "daemon.json"
+		start = func(ctx context.Context, p string) error { return startDaemon(ctx, p, log) }
 	case "hub":
-		path, start = "hub.json", startHub
+		path = "hub.json"
+		start = func(_ context.Context, p string) error { return startHub(p, out) }
 	default:
 		fmt.Fprintf(errOut, "dispatch: unknown role %q\n%s\n", role, usage)
 		return 2
@@ -52,7 +66,7 @@ func run(args []string, out, errOut io.Writer) int {
 		return 2
 	}
 
-	if err := start(path, out); err != nil {
+	if err := start(ctx, path); err != nil {
 		fmt.Fprintf(errOut, "dispatch: %v\n", err)
 		return 1
 	}
@@ -62,7 +76,7 @@ func run(args []string, out, errOut io.Writer) int {
 // startDaemon loads this Host's configuration and resolves the values that
 // touch the world. Resolving the Workspace Root at start is deliberate: a Root
 // that is not there is better found now than at the first Session.
-func startDaemon(path string, out io.Writer) error {
+func startDaemon(ctx context.Context, path string, log *slog.Logger) error {
 	cfg, err := config.LoadDaemon(path)
 	if err != nil {
 		return err
@@ -71,9 +85,27 @@ func startDaemon(path string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "dispatch: role daemon, %d Vendors, %d Harnesses, Workspace Root %s\n",
-		len(cfg.Vendors), len(cfg.Harnesses), root)
-	return nil
+	adapters := make([]vendors.Adapter, len(cfg.Vendors))
+	for i, profile := range cfg.Vendors {
+		if adapters[i], err = newVendor(profile.Endpoint); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	log.Info("dispatch starting", "role", "daemon", "vendors", len(adapters),
+		"harnesses", len(cfg.Harnesses), "workspaceRoot", root)
+	return daemon.New(adapters, log).Serve(ctx, cfg.Listen)
+}
+
+// newVendor is the one place a Vendor Kind is read. Ollama is the Adapter this
+// milestone has, and a configured Vendor with no Adapter is a startup error rather
+// than a Vendor that quietly never appears.
+func newVendor(endpoint vendors.Endpoint) (vendors.Adapter, error) {
+	switch endpoint.Kind {
+	case vendors.Ollama:
+		return vendors.NewOllama(endpoint.Base, nil), nil
+	default:
+		return nil, fmt.Errorf("Vendor kind %s has no Adapter yet", endpoint.Kind)
+	}
 }
 
 // startHub loads the Host list. The Host id rule lives in protocol, which config

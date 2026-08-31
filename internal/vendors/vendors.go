@@ -66,6 +66,11 @@ const (
 	LlamaSwap
 )
 
+var kindNames = [...]string{Ollama: "ollama", LMStudio: "lmstudio", LlamaSwap: "llamaswap"}
+
+// String is a Kind's one spelling, and it is the one daemon.json writes.
+func (k Kind) String() string { return kindNames[k] }
+
 // Model is one set of weights a Vendor can serve.
 type Model struct {
 	// ID is the Vendor's own spelling and is used verbatim, never parsed and never

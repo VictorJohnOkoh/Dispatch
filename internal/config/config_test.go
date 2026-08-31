@@ -185,3 +185,20 @@ func TestExampleFilesLoad(t *testing.T) {
 		t.Errorf("hub.example.json: %v", err)
 	}
 }
+
+// A Kind's spelling in the file and its spelling on the wire are the same word,
+// and this is where the two are held together.
+func TestEveryVendorKindDecodesToItsName(t *testing.T) {
+	for name, kind := range vendorKinds {
+		var p VendorProfile
+		if err := p.UnmarshalJSON([]byte(`{"kind":"` + name + `","base":"http://127.0.0.1:1"}`)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if p.Endpoint.Kind != kind {
+			t.Errorf("%s decoded to %s", name, p.Endpoint.Kind)
+		}
+		if p.Endpoint.Kind.String() != name {
+			t.Errorf("%s is spelled %q on the wire", name, p.Endpoint.Kind.String())
+		}
+	}
+}
