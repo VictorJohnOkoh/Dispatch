@@ -49,16 +49,6 @@ func (p *Passthrough) Start(ctx context.Context, spec SessionSpec, out Sink) (Ru
 	return &ptRun{pt: p, session: ctx, spec: spec, out: out}, nil
 }
 
-// The two stop reasons a passthrough Session names itself, for the two ways a Prompt
-// ends without the Vendor saying why. Every other one is the Vendor's own word,
-// passed through. Neither invents a fact about the Vendor: both name something this
-// Adapter did, and a Prompt that is never bounded leaves the Session Working and so
-// refusing every Prompt after it.
-const (
-	stopError       event.StopReason = "error"
-	stopInterrupted event.StopReason = "interrupted"
-)
-
 type ptRun struct {
 	pt      *Passthrough
 	session context.Context
@@ -216,7 +206,7 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 			// only be once this Prompt is bounded.
 			closeOpen()
 			r.out.Failed(event.ErrVendor, f.Text)
-			r.out.Completed(stopError, event.Usage{})
+			r.out.Completed(event.StopError, event.Usage{})
 
 		case vendors.FrameTruncated:
 			// Three ways a stream stops short, and they are three different facts.
@@ -225,7 +215,7 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 				// A stop. No Error and no PromptCompleted, per ADR 0008.
 			case interrupted:
 				closeOpen()
-				r.out.Completed(stopInterrupted, event.Usage{})
+				r.out.Completed(event.StopInterrupted, event.Usage{})
 			default:
 				// The Daemon writes SessionEnded{failed} after this and closes
 				// the torn message there.

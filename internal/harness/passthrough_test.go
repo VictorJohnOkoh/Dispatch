@@ -211,8 +211,8 @@ func TestPassthroughReportsAVendorErrorAndCompletesThePrompt(t *testing.T) {
 		t.Errorf("the Error lost the Vendor's own words: %q", sink.failures[0].msg)
 	}
 	// The Session stays usable, so the Prompt is bounded and the message is closed.
-	if got := sink.stopReason(); got != stopError {
-		t.Errorf("stop reason %q, want %q", got, stopError)
+	if got := sink.stopReason(); got != event.StopError {
+		t.Errorf("stop reason %q, want %q", got, event.StopError)
 	}
 	if last := sink.messages[len(sink.messages)-1]; !last.end {
 		t.Error("the message was left open on a Session that stays usable")
@@ -250,8 +250,8 @@ func TestInterruptEndsThePromptAndLeavesTheSessionUsable(t *testing.T) {
 		t.Fatalf("Interrupt: %v", err)
 	}
 
-	if got := sink.stopReason(); got != stopInterrupted {
-		t.Errorf("stop reason %q, want %q", got, stopInterrupted)
+	if got := sink.stopReason(); got != event.StopInterrupted {
+		t.Errorf("stop reason %q, want %q", got, event.StopInterrupted)
 	}
 	if len(sink.failures) != 0 {
 		t.Errorf("an interrupt was reported as a fault: %+v", sink.failures)

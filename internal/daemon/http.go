@@ -8,7 +8,7 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// handler is the Daemon's mux. Five of ADR 0009's ten endpoints are not here yet.
+// handler is the Daemon's mux, and it serves all ten of ADR 0009's endpoints.
 func (d *Daemon) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(protocol.ListModels, d.listModels)
@@ -16,6 +16,11 @@ func (d *Daemon) handler() http.Handler {
 	mux.HandleFunc(protocol.ListSessions, d.listSessions)
 	mux.HandleFunc(protocol.StreamEvents, d.streamEvents)
 	mux.HandleFunc(protocol.SessionEvents, d.sessionEvents)
+	mux.HandleFunc(protocol.SubmitPrompt, d.submitPrompt)
+	mux.HandleFunc(protocol.Interrupt, d.interrupt)
+	mux.HandleFunc(protocol.StopSession, d.stopSession)
+	mux.HandleFunc(protocol.SetPolicy, d.setPolicy)
+	mux.HandleFunc(protocol.DecideApproval, d.decideApproval)
 
 	// pprof is the whole of SPEC.md's process-level observability. The five are
 	// named one by one rather than by handing the listener http.DefaultServeMux,

@@ -60,6 +60,10 @@ type Daemon struct {
 	// starting makes admission and the registry entry it decided on one step.
 	starting sync.Mutex
 
+	// commanding makes a command's fold and the Event that changes it one step, so
+	// two Prompts arriving together cannot both read an Idle Session.
+	commanding sync.Mutex
+
 	// writing keeps a Session's recorded Events in the order the log gave them
 	// Sequence Numbers, which is the order the fold reads them in.
 	writing sync.Mutex

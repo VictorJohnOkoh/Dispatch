@@ -105,6 +105,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 	s := &Session{
 		id:      d.sessions.newID(),
 		harness: req.Harness,
+		caps:    adapter.Capabilities(),
 		model:   req.Model,
 		vendor:  vendor.Endpoint().Base,
 		dir:     dir,
@@ -118,7 +119,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		Harness: s.harness, Model: s.model, Vendor: s.vendor, Cwd: s.dir,
 	})
 	if err != nil {
-		http.Error(w, "the Event log refused the write", http.StatusInternalServerError)
+		logRefused(w)
 		return
 	}
 	d.sessions.add(s)
@@ -163,7 +164,14 @@ func (d *Daemon) launch(ctx context.Context, s *Session, adapter harness.Adapter
 // endFailed is a launch that did not finish. SessionStarted is already in the log,
 // so the record exists and the Session does not, and the pair of Events is what
 // says so.
+//
+// A stop that landed first has already ended the Session, and the failure it
+// caused is not news, so nothing is written.
 func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
+	if !d.sessions.endOnce(s) {
+		s.cancel()
+		return
+	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
 	s.cancel()
@@ -288,6 +296,10 @@ type Session struct {
 	dir     string
 	started time.Time
 
+	// caps is the Harness Adapter's, read once at the start. The Approval Policy is
+	// checked against it, and a Session outlives no Adapter, so it cannot go stale.
+	caps harness.Capabilities
+
 	// cancel ends the launch, the Run and every call either has in flight.
 	cancel context.CancelFunc
 
@@ -299,6 +311,10 @@ type Session struct {
 	// events is this Session's own Events, in Seq order, which is what the fold
 	// reads. Deltas are not Events and never land here.
 	events []event.Event
+
+	// ending is set by whoever writes SessionEnded, so a stop and a launch that
+	// failed cannot both write one and leave the end reason to a race.
+	ending bool
 }
 
 // sessions is this Host's Session registry: every Session the Daemon started, in
@@ -319,6 +335,47 @@ func (r *sessions) add(s *Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.all = append(r.all, s)
+}
+
+// find is one Session as a command needs it, with the Run to act on and the State
+// that decides whether it may. The two are read together under the one mutex, so
+// they describe the same moment.
+func (r *sessions) find(id event.SessionID) (*Session, harness.Run, session.State) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	s := r.lookup(id)
+	if s == nil {
+		return nil, nil, 0
+	}
+	state, _ := session.Fold(s.events)
+	return s, s.run, state
+}
+
+// held is the Tool Calls this Session is waiting on a decision for.
+func (r *sessions) held(s *Session) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return session.Held(s.events)
+}
+
+// ending reports whether someone has already taken on writing SessionEnded.
+func (r *sessions) ending(s *Session) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return s.ending
+}
+
+// endOnce reports whether this caller is the one that ends the Session. A stop and
+// a launch that failed can both reach the end, and only the first writes it.
+func (r *sessions) endOnce(s *Session) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s.ending {
+		return false
+	}
+	s.ending = true
+	return true
 }
 
 func (r *sessions) setRun(s *Session, run harness.Run) {
