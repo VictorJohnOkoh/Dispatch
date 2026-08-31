@@ -1,0 +1,19 @@
+{
+  "listen": "127.0.0.1:7700",
+  "hosts": [
+    {
+      "id": "workstation",
+      "address": "192.168.1.20:22",
+      "user": "victor",
+      "keyPath": "/home/victor/.ssh/id_ed25519",
+      "daemonPort": 7717
+    },
+    {
+      "id": "laptop",
+      "address": "192.168.1.21:22",
+      "user": "victor",
+      "keyPath": "/home/victor/.ssh/id_ed25519",
+      "daemonPort": 7717
+    }
+  ]
+}

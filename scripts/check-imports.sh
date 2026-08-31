@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The two import fences from ADR 0010. Each package is listed on its own,
+# The three import fences from ADR 0010. Each package is listed on its own,
 # because one missing directory makes go list fail every pattern at once and
 # print nothing, which a single combined command cannot tell from a pass.
 #
@@ -46,5 +46,22 @@ for pkg in event vendors workspace protocol; do
 	fi
 done
 
-[ "$status" -eq 0 ] && echo "import fences: ok ($checked of 5 packages exist)"
+# Fence three: configuration enters at cmd and goes no deeper, so no package
+# under internal/ imports internal/config. This one is read from the other side,
+# because the rule names every importer rather than one importee. Test imports
+# count: a test that needs a config file is the same coupling.
+if [ -d internal/config ]; then
+	checked=$((checked + 1))
+	list='{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}'
+	if ! all=$(go list -f "$list" ./internal/...); then
+		echo "FAIL: go list failed for ./internal/..."
+		status=1
+	elif importers=$(grep -v "^$module/internal/config " <<<"$all" | grep " $module/internal/config\( \|$\)" | cut -d' ' -f1); then
+		echo "FAIL: these packages import internal/config:"
+		sed 's/^/  /' <<<"$importers"
+		status=1
+	fi
+fi
+
+[ "$status" -eq 0 ] && echo "import fences: ok, $checked of 6 checks had a package to run against"
 exit "$status"

@@ -94,3 +94,13 @@ func TestPolicyRefusesASlotThatIsNotARule(t *testing.T) {
 		t.Error("banana is not a Rule and should not decode")
 	}
 }
+
+// A sixth slot is refused too. The five are the closed set, so a name outside it
+// is a policy the writer thinks is in force and the Daemon would never read.
+func TestPolicyRefusesASlotNobodyKnows(t *testing.T) {
+	var p Policy
+	err := json.Unmarshal([]byte(`{"read":"auto","edit":"wait","execute":"wait","fetch":"wait","other":"wait","network":"auto"}`), &p)
+	if err == nil {
+		t.Error("network is not a ToolKind and should not decode")
+	}
+}

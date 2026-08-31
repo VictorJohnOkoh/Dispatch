@@ -1,6 +1,7 @@
 package event
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -86,12 +87,16 @@ func (p Policy) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON refuses a policy with a slot missing or a slot set to something
-// that is not a Rule, because the five are always all set and what may run
-// unattended is not a field to be lenient about.
+// UnmarshalJSON refuses a policy with a slot missing, a slot set to something
+// that is not a Rule, or a slot nobody has heard of, because the five are always
+// all set and what may run unattended is not a field to be lenient about. It
+// decodes strictly on its own, because a caller's DisallowUnknownFields stops at
+// a custom unmarshaler.
 func (p *Policy) UnmarshalJSON(b []byte) error {
 	var s policySlots
-	if err := json.Unmarshal(b, &s); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
 		return err
 	}
 	slots := Policy{s.Read, s.Edit, s.Execute, s.Fetch, s.Other}
