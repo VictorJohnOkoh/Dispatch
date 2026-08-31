@@ -2,14 +2,20 @@
 I am Victor, a second year Computer Science and AI student and I am tryign to improve my architecture design and software engineering skills 
 I like simple solutions and understandable code
 Make sure that when deciding with how you write out feature that you always choose the more efficient and imple to understand and maintain option
-When choosing a data structure I prtefer using only what is necessary. 
+When choosing a data structure I prefer using only what is necessary. 
 Example:
 - Using a hash map when the data needed is a known certain amount and the data structure is expected to be fully populated. <br>
-Comments are very nice but they should be used sparingly and only when they add value. <br>
+Comments are very nice but they should be used quitesparingly and only when they add value. <br>
 Good Example:
 - For a function that adds 3 numbers together should be commented with "# adds 2 numbers together and returns the sum" <br>
 Bad Example:
 - For a function that adds 3 numbers together "Takes in 3 integers, performs the addition operation and returns the result as an integer" 
+Bad Example for a variable/constant: type Support uint8
+- // Support is a Vendor's answer about one Capability. Unknown is an answer and not a
+- // missing value, so nothing here is a pointer and no caller writes a nil check.
+- // Unknown is the zero value, which makes an unfilled Capabilities honest rather
+- // than wrong.
+
 ## Speech Pattern
 When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language.
 Dumb down complex topics/options afterwards by describing them using more colloquial language
