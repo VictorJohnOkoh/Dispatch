@@ -258,6 +258,16 @@ Two fixes, and both were needed: pass `winpath` so curl gets a path it can
 write, and check the file after the fetch rather than the status line. A run
 now reports `HTTP 200 but NO FILE WRITTEN` instead of a silent gap.
 
+**Closed 2026-08-31.** The bodies exist and are checked in, at
+[`captures/ollama-vendor/`](captures/ollama-vendor/) with a table saying which
+endpoint each one came from. Six of them, from a real Ollama v0.33.2 on loopback:
+`/api/version`, `/api/tags`, `/v1/models`, `/api/ps` loaded and empty, and three
+`/api/chat` answers for load, unload and a Model that does not exist. They are
+copied into `internal/vendors/testdata/ollama/` and replayed through a
+caller-supplied `http.RoundTripper`, so the tier-two tests for `vendors` open no
+socket. Recording them cost a `curl` and a save, exactly as `SPEC.md` predicted
+once M3 had Ollama running anyway.
+
 This is the same fault as R4 in a new place. Across this exercise the capture
 has claimed success from a multiplexing error, from a pipeline's exit code,
 from a launcher stub that never ran, and now from a status line. **Every one of

@@ -1,0 +1,247 @@
+package vendors
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// recorded replays the bodies in testdata/ollama, which were captured from a real
+// Ollama v0.33.2 on loopback. The fixtures are the specification here, and no test
+// in this file opens a socket.
+type recorded struct {
+	status map[string]int
+	body   map[string]string // path to a file under testdata/ollama
+
+	seen []*http.Request
+}
+
+func (r *recorded) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.seen = append(r.seen, req)
+
+	name, ok := r.body[req.URL.Path]
+	if !ok {
+		return nil, errors.New("no fixture for " + req.URL.Path)
+	}
+	body, err := os.ReadFile(filepath.Join("testdata", "ollama", name))
+	if err != nil {
+		return nil, err
+	}
+
+	status := r.status[req.URL.Path]
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func ollamaFrom(t *testing.T, r *recorded) *OllamaAdapter {
+	t.Helper()
+	return NewOllama("http://127.0.0.1:11434", r)
+}
+
+func TestCatalogueReadsTheModelsOllamaServes(t *testing.T) {
+	o := ollamaFrom(t, &recorded{body: map[string]string{"/api/tags": "tags.json"}})
+
+	models, err := o.Catalogue(context.Background())
+	if err != nil {
+		t.Fatalf("Catalogue: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("Catalogue returned %d Models, want 2", len(models))
+	}
+
+	want := Model{
+		ID:             "qwen3.5:9b",
+		Name:           "qwen3.5:9b",
+		Caps:           Capabilities{Chat: Yes, Tools: Yes, Reasoning: Yes, Vision: Yes},
+		TrainedContext: 262144,
+		Quant:          "Q4_K_M",
+		DiskBytes:      6594474711,
+	}
+	if models[0] != want {
+		t.Errorf("Catalogue[0] = %+v, want %+v", models[0], want)
+	}
+}
+
+// Absent is not No. qwen3:latest lists no vision capability, and an Ollama older
+// than v0.30.2 lists none at all. Reading either absence as No would hide a usable
+// Model, which is the mistake ADR 0007 made Support three-valued to prevent.
+func TestNoCapabilityIsEverReportedAsNo(t *testing.T) {
+	o := ollamaFrom(t, &recorded{body: map[string]string{"/api/tags": "tags.json"}})
+
+	models, err := o.Catalogue(context.Background())
+	if err != nil {
+		t.Fatalf("Catalogue: %v", err)
+	}
+	for _, m := range models {
+		for _, c := range []struct {
+			name string
+			got  Support
+		}{{"Chat", m.Caps.Chat}, {"Tools", m.Caps.Tools}, {"Reasoning", m.Caps.Reasoning}, {"Vision", m.Caps.Vision}} {
+			if c.got == No {
+				t.Errorf("%s reports %s as No, want Yes or Unknown", m.ID, c.name)
+			}
+		}
+	}
+
+	if got := models[1].Caps.Vision; got != Unknown {
+		t.Errorf("qwen3:latest lists no vision, so Vision is %d, want Unknown", got)
+	}
+}
+
+func TestCapabilitiesAreAllUnknownWhenOllamaSendsNone(t *testing.T) {
+	// An Ollama older than v0.30.2: the same listing with no capabilities key.
+	var caps Capabilities
+	if got := capabilities(nil); got != caps {
+		t.Errorf("capabilities(nil) = %+v, want every field Unknown", got)
+	}
+}
+
+// Resident is a different answer from Catalogue, and the fixtures prove it: two
+// Models on disk, one in memory, and a LoadedContext that is not TrainedContext.
+func TestResidentIsADifferentAnswerFromCatalogue(t *testing.T) {
+	o := ollamaFrom(t, &recorded{body: map[string]string{
+		"/api/tags": "tags.json",
+		"/api/ps":   "ps.json",
+	}})
+
+	models, err := o.Catalogue(context.Background())
+	if err != nil {
+		t.Fatalf("Catalogue: %v", err)
+	}
+	resident, err := o.Resident(context.Background())
+	if err != nil {
+		t.Fatalf("Resident: %v", err)
+	}
+
+	if len(models) == len(resident) {
+		t.Fatalf("Catalogue and Resident both returned %d, want different answers", len(models))
+	}
+	want := Resident{ModelID: "qwen3:latest", LoadedContext: 40960, VRAM: 11194387660}
+	if resident[0] != want {
+		t.Errorf("Resident[0] = %+v, want %+v", resident[0], want)
+	}
+
+	// The same Model on disk was trained for the same 40960, but the bytes in VRAM
+	// are twice the bytes on disk, which is what makes these two calls worth having.
+	if resident[0].VRAM <= models[1].DiskBytes {
+		t.Errorf("VRAM %d is not more than DiskBytes %d", resident[0].VRAM, models[1].DiskBytes)
+	}
+}
+
+// Nothing loaded and nobody answering are different answers.
+func TestResidentReturnsEmptyWhenNothingIsLoaded(t *testing.T) {
+	o := ollamaFrom(t, &recorded{body: map[string]string{"/api/ps": "ps-empty.json"}})
+
+	resident, err := o.Resident(context.Background())
+	if err != nil {
+		t.Fatalf("Resident: %v", err)
+	}
+	if len(resident) != 0 {
+		t.Errorf("Resident returned %d, want none", len(resident))
+	}
+}
+
+func TestLoadTurnsOffOllamasOwnEvictor(t *testing.T) {
+	rt := &recorded{body: map[string]string{"/api/chat": "chat-load-ok.json"}}
+	o := ollamaFrom(t, rt)
+
+	if err := o.Load(context.Background(), "qwen3:latest"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	sent := decodeSent(t, rt.seen[0])
+	if sent.Model != "qwen3:latest" {
+		t.Errorf("Load sent model %q, want qwen3:latest", sent.Model)
+	}
+	if sent.KeepAlive != -1 {
+		t.Errorf("Load sent keep_alive %d, want -1", sent.KeepAlive)
+	}
+	if len(sent.Messages) != 0 {
+		t.Errorf("Load sent %d messages, want an empty chat", len(sent.Messages))
+	}
+}
+
+func TestUnloadSendsKeepAliveZero(t *testing.T) {
+	rt := &recorded{body: map[string]string{"/api/chat": "chat-unload-ok.json"}}
+	o := ollamaFrom(t, rt)
+
+	if err := o.Unload(context.Background(), "qwen3:latest"); err != nil {
+		t.Fatalf("Unload: %v", err)
+	}
+	if got := decodeSent(t, rt.seen[0]).KeepAlive; got != 0 {
+		t.Errorf("Unload sent keep_alive %d, want 0", got)
+	}
+}
+
+func TestLoadNamesAModelOllamaDoesNotHave(t *testing.T) {
+	o := ollamaFrom(t, &recorded{
+		body:   map[string]string{"/api/chat": "chat-load-missing.json"},
+		status: map[string]int{"/api/chat": http.StatusNotFound},
+	})
+
+	err := o.Load(context.Background(), "no-such-model:v9")
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("Load of a missing Model returned %v, want ErrModelNotFound", err)
+	}
+	// The Vendor's own words survive, because they name the Model the user typed.
+	if want := "no-such-model:v9"; !bytes.Contains([]byte(err.Error()), []byte(want)) {
+		t.Errorf("the error is %q and does not name %q", err, want)
+	}
+}
+
+// A Vendor is reachable exactly when a call to it succeeds, so a transport that
+// cannot dial is an error rather than an empty answer.
+func TestAVendorThatDoesNotAnswerIsAnError(t *testing.T) {
+	o := ollamaFrom(t, &recorded{body: map[string]string{}})
+
+	if _, err := o.Catalogue(context.Background()); err == nil {
+		t.Error("Catalogue against a Vendor that does not answer returned no error")
+	}
+	if _, err := o.Resident(context.Background()); err == nil {
+		t.Error("Resident against a Vendor that does not answer returned no error")
+	}
+}
+
+func TestEndpointIsTheOllamaRoot(t *testing.T) {
+	o := NewOllama("http://127.0.0.1:11434/", nil)
+
+	want := Endpoint{Kind: Ollama, Base: "http://127.0.0.1:11434"}
+	if o.Endpoint() != want {
+		t.Errorf("Endpoint = %+v, want %+v", o.Endpoint(), want)
+	}
+}
+
+// The adapter satisfies the interface the Daemon holds.
+var _ Adapter = (*OllamaAdapter)(nil)
+
+type sentChat struct {
+	Model     string   `json:"model"`
+	Messages  []string `json:"messages"`
+	KeepAlive int      `json:"keep_alive"`
+}
+
+func decodeSent(t *testing.T, req *http.Request) sentChat {
+	t.Helper()
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read the sent body: %v", err)
+	}
+	var sent sentChat
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("decode the sent body: %v", err)
+	}
+	return sent
+}
