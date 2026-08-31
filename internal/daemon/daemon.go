@@ -22,6 +22,7 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/harness"
+	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
 )
@@ -50,6 +51,10 @@ type Daemon struct {
 	// chooses it.
 	admit admission.Policy
 
+	// keepalive is the beat every Event stream writes its comment on. It is a field
+	// only so a test may shorten it.
+	keepalive time.Duration
+
 	sessions sessions
 
 	// starting makes admission and the registry entry it decided on one step.
@@ -74,6 +79,7 @@ func New(log *slog.Logger, events *eventlog.Log, root workspace.Root, adapters [
 		vendors:   newVendors(adapters, log),
 		harnesses: harnesses,
 		admit:     admission.SingleSession{},
+		keepalive: protocol.KeepaliveInterval,
 		base:      context.Background(),
 	}
 }

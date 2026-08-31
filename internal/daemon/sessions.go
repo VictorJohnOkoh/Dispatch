@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -174,6 +175,74 @@ func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(struct {
 		Sessions []SessionView `json:"sessions"`
 	}{d.sessions.views()})
+}
+
+// The page GET /v1/sessions/{session}/events serves when the request asks for no
+// size, and the largest it will serve whatever the request asks for.
+const (
+	defaultPage = 200
+	maxPage     = 1000
+)
+
+// sessionEvents pages one Session's Events, oldest first. It reads the log rather
+// than the registry, because the rows are the wire shape already and a Session
+// that ended long ago is still in the file.
+func (d *Daemon) sessionEvents(w http.ResponseWriter, r *http.Request) {
+	id := event.SessionID(r.PathValue("session"))
+	after, limit, err := page(r)
+	if err != nil {
+		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
+			Reason: protocol.ReasonMalformed, Detail: err.Error(),
+		})
+		return
+	}
+
+	events, err := d.events.SessionPage(id, after, limit)
+	if err != nil {
+		http.Error(w, "the Event log could not be read", http.StatusInternalServerError)
+		return
+	}
+	// A first page with nothing in it is a Session this Host never had. The log is
+	// asked rather than the registry, because the registry is memory and a Daemon
+	// that restarted has none of it while the rows are all still there.
+	if len(events) == 0 && after == 0 {
+		refuse(w, protocol.StatusNoSession, protocol.Refusal{
+			Reason: protocol.ReasonUnknownSession,
+			Detail: fmt.Sprintf("this Host has no Session %q", id),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Events []protocol.Event `json:"events"`
+	}{events})
+}
+
+// page reads where the request wants to read from and how much of it. A size of
+// zero would page forever, so the request is clipped at both ends.
+func page(r *http.Request) (after uint64, limit int, err error) {
+	if after, err = number(r, "after", 0); err != nil {
+		return 0, 0, err
+	}
+	asked, err := number(r, "limit", defaultPage)
+	if err != nil {
+		return 0, 0, err
+	}
+	return after, max(1, int(min(asked, maxPage))), nil
+}
+
+// number reads one query parameter, or its default when the request omits it.
+func number(r *http.Request, name string, missing uint64) (uint64, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return missing, nil
+	}
+	n, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a number", name, raw)
+	}
+	return n, nil
 }
 
 // SessionView is one row of GET /v1/sessions.

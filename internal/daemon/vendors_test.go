@@ -163,8 +163,8 @@ func TestAVendorThatStopsAnsweringEmptiesItsLine(t *testing.T) {
 	if line.Base != f.endpoint.Base {
 		t.Errorf("base = %q, want the configured one", line.Base)
 	}
-	if frame := v.Frame()[0]; frame.Reachable || len(frame.Resident) != 0 {
-		t.Errorf("frame = %+v, want an empty one", frame)
+	if frame, _ := v.Watch(); frame[0].Reachable || len(frame[0].Resident) != 0 {
+		t.Errorf("frame = %+v, want an empty one", frame[0])
 	}
 }
 
@@ -177,8 +177,8 @@ func TestHalfABeatIsNotABeat(t *testing.T) {
 	v := newVendors([]vendors.Adapter{f}, quiet())
 	v.pollAll(t.Context())
 
-	if frame := v.Frame()[0]; frame.Reachable {
-		t.Errorf("frame = %+v, want an unreachable Vendor", frame)
+	if frame, _ := v.Watch(); frame[0].Reachable {
+		t.Errorf("frame = %+v, want an unreachable Vendor", frame[0])
 	}
 	if line := v.Catalogue()[0]; line.At != 0 || len(line.Models) != 0 {
 		t.Errorf("line = %+v, want an empty one", line)
@@ -189,7 +189,7 @@ func TestTheFrameCarriesReachabilityBesideTheResidentList(t *testing.T) {
 	v := newVendors([]vendors.Adapter{ollamaFake()}, quiet())
 	v.pollAll(t.Context())
 
-	frame := v.Frame()
+	frame, _ := v.Watch()
 	if len(frame) != 1 || !frame[0].Reachable {
 		t.Fatalf("frame = %+v", frame)
 	}
@@ -266,4 +266,36 @@ func (c *countingFake) count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.n
+}
+
+// Watch hands out the lines and a channel the next beat closes, so a stream sends
+// what it has now and waits for the next change without registering anything.
+func TestWatchClosesOnTheNextBeat(t *testing.T) {
+	f := ollamaFake()
+	v := newVendors([]vendors.Adapter{f}, quiet())
+
+	before, beat := v.Watch()
+	if len(before) != 1 || before[0].Reachable {
+		t.Fatalf("before the first beat = %+v", before)
+	}
+	select {
+	case <-beat:
+		t.Fatal("the beat closed before a poll")
+	default:
+	}
+
+	v.pollAll(t.Context())
+	select {
+	case <-beat:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a poll did not close the beat")
+	}
+
+	after, next := v.Watch()
+	if len(after) != 1 || !after[0].Reachable {
+		t.Errorf("after the beat = %+v", after)
+	}
+	if next == beat {
+		t.Error("Watch handed back the beat that already closed")
+	}
 }

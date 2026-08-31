@@ -51,6 +51,10 @@ const subscriberBuffer = 256
 type Frame struct {
 	Event *event.Event
 	Delta *protocol.Delta
+
+	// Open says this Event is appendable and still taking text. A Cursor may not
+	// pass it until its final Delta, so a reader stamps no id on it.
+	Open bool
 }
 
 // openMessage is one appendable Event whose text is still arriving. The text is
@@ -162,10 +166,11 @@ func (l *Log) Append(e event.Event) (event.Event, error) {
 	}
 	e.Seq = uint64(seq)
 
-	if text, isOpen := openingText(e); isOpen {
+	text, isOpen := openingText(e)
+	if isOpen {
 		l.open[e.Seq] = &openMessage{session: e.Session, kind: e.Kind, text: []byte(text), stored: len(text)}
 	}
-	l.publish(Frame{Event: &e})
+	l.publish(Frame{Event: &e, Open: isOpen})
 
 	// The Event is committed and sent, so a failed flush here is reported beside
 	// it rather than in place of it.

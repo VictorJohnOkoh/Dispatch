@@ -33,6 +33,11 @@ type Vendors struct {
 	mu    sync.Mutex
 	beats []beat // one per adapter, in the order the config named them
 
+	// beat is closed and replaced by every poll, so any number of streams wait on
+	// the change without registering. A stream that is slow misses beats and reads
+	// the state after them, which is right for a fact that is worthless when old.
+	beat chan struct{}
+
 	// polled is closed after the first beat, so a server can wait for a Catalogue
 	// that has been filled before it answers a request that reads one.
 	polled chan struct{}
@@ -59,6 +64,7 @@ func newVendors(adapters []vendors.Adapter, log *slog.Logger) *Vendors {
 		every:    pollInterval,
 		log:      log,
 		beats:    make([]beat, len(adapters)),
+		beat:     make(chan struct{}),
 		polled:   make(chan struct{}),
 	}
 }
@@ -95,6 +101,8 @@ func (v *Vendors) pollAll(ctx context.Context) {
 
 	v.mu.Lock()
 	v.beats = next
+	close(v.beat)
+	v.beat = make(chan struct{})
 	v.mu.Unlock()
 
 	v.first.Do(func() { close(v.polled) })
@@ -166,13 +174,17 @@ func (v *Vendors) serving(model string) vendors.Adapter {
 	return nil
 }
 
-// Frame is the content of the vendors frame: reachability beside what is in memory
-// now. It is pushed on the beat rather than fetched, because a Resident list is
-// worthless when old.
-func (v *Vendors) Frame() []VendorView {
+// Watch is the content of the vendors frame as it stands, and a channel the next
+// beat closes. It is reachability beside what is in memory now, pushed on the beat
+// rather than fetched, because a Resident list is worthless when old.
+func (v *Vendors) Watch() ([]VendorView, <-chan struct{}) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	return v.frame(), v.beat
+}
 
+// frame builds the lines. The caller holds the mutex.
+func (v *Vendors) frame() []VendorView {
 	out := make([]VendorView, len(v.adapters))
 	for i, b := range v.beats {
 		out[i] = VendorView{
