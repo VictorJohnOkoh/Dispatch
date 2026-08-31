@@ -243,37 +243,6 @@ func TestAnEventIsInTheFileBeforeItIsOnTheWire(t *testing.T) {
 	}
 }
 
-func TestSessionEventsPagesOneSessionAndNoOther(t *testing.T) {
-	h := newHost(t)
-	mine := &Session{id: "s-mine", cancel: func() {}}
-	other := &Session{id: "s-other", cancel: func() {}}
-	h.sessions.add(mine)
-	h.sessions.add(other)
-	h.write(mine, event.KindPromptSubmitted, &event.PromptSubmitted{Text: "mine"})
-	h.write(other, event.KindPromptSubmitted, &event.PromptSubmitted{Text: "other"})
-	h.write(mine, event.KindPromptSubmitted, &event.PromptSubmitted{Text: "mine again"})
-
-	page := h.page(t, "/v1/sessions/s-mine/events")
-	if len(page) != 2 {
-		t.Fatalf("%d Events, want 2: %+v", len(page), page)
-	}
-	for _, e := range page {
-		if e.Session != "s-mine" {
-			t.Fatalf("the page carries %s", e.Session)
-		}
-	}
-
-	if page := h.page(t, "/v1/sessions/s-mine/events?after=1&limit=1"); len(page) != 1 || page[0].Seq != 3 {
-		t.Fatalf("after=1&limit=1 = %+v", page)
-	}
-	if w := get(t, h.Daemon, "/v1/sessions/s-gone/events"); w.Code != protocol.StatusNoSession {
-		t.Errorf("an unknown Session answers %d", w.Code)
-	}
-	if w := get(t, h.Daemon, "/v1/sessions/s-mine/events?limit=nine"); w.Code != protocol.StatusUnprocessable {
-		t.Errorf("a limit that is not a number answers %d", w.Code)
-	}
-}
-
 // The Cursor is the highest Seq below every open message, so an Event written
 // while one is open does not move it either.
 func TestCursorHoldsBelowTheOldestOpenMessage(t *testing.T) {

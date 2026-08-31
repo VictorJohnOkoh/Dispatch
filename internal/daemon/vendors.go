@@ -174,17 +174,9 @@ func (v *Vendors) serving(model string) vendors.Adapter {
 	return nil
 }
 
-// Frame is the content of the vendors frame: reachability beside what is in memory
-// now. It is pushed on the beat rather than fetched, because a Resident list is
-// worthless when old.
-func (v *Vendors) Frame() []VendorView {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.frame()
-}
-
-// Watch is the Vendor lines as they stand and a channel the next beat closes. It
-// is how a stream sends the whole current state first and a change after that.
+// Watch is the content of the vendors frame as it stands, and a channel the next
+// beat closes. It is reachability beside what is in memory now, pushed on the beat
+// rather than fetched, because a Resident list is worthless when old.
 func (v *Vendors) Watch() ([]VendorView, <-chan struct{}) {
 	v.mu.Lock()
 	defer v.mu.Unlock()

@@ -163,8 +163,8 @@ func TestAVendorThatStopsAnsweringEmptiesItsLine(t *testing.T) {
 	if line.Base != f.endpoint.Base {
 		t.Errorf("base = %q, want the configured one", line.Base)
 	}
-	if frame := v.Frame()[0]; frame.Reachable || len(frame.Resident) != 0 {
-		t.Errorf("frame = %+v, want an empty one", frame)
+	if frame, _ := v.Watch(); frame[0].Reachable || len(frame[0].Resident) != 0 {
+		t.Errorf("frame = %+v, want an empty one", frame[0])
 	}
 }
 
@@ -177,8 +177,8 @@ func TestHalfABeatIsNotABeat(t *testing.T) {
 	v := newVendors([]vendors.Adapter{f}, quiet())
 	v.pollAll(t.Context())
 
-	if frame := v.Frame()[0]; frame.Reachable {
-		t.Errorf("frame = %+v, want an unreachable Vendor", frame)
+	if frame, _ := v.Watch(); frame[0].Reachable {
+		t.Errorf("frame = %+v, want an unreachable Vendor", frame[0])
 	}
 	if line := v.Catalogue()[0]; line.At != 0 || len(line.Models) != 0 {
 		t.Errorf("line = %+v, want an empty one", line)
@@ -189,7 +189,7 @@ func TestTheFrameCarriesReachabilityBesideTheResidentList(t *testing.T) {
 	v := newVendors([]vendors.Adapter{ollamaFake()}, quiet())
 	v.pollAll(t.Context())
 
-	frame := v.Frame()
+	frame, _ := v.Watch()
 	if len(frame) != 1 || !frame[0].Reachable {
 		t.Fatalf("frame = %+v", frame)
 	}

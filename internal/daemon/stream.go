@@ -10,16 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
-)
-
-// The page GET /v1/sessions/{session}/events serves when the request asks for no
-// size, and the largest it will serve whatever the request asks for.
-const (
-	defaultPage = 200
-	maxPage     = 1000
 )
 
 // streamEvents serves this Host's Event stream. It subscribes to the log first and
@@ -52,8 +44,10 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// hello is first on every connection, and the whole Vendor state follows it, so
-	// a Client that attached between two beats has a Vendor row to draw.
-	out := &sse{w: w, flush: flush}
+	// a Client that attached between two beats has a Vendor row to draw. The Cursor
+	// starts where the log stands, because this connection starts at the live edge
+	// and nothing below that is sent on it.
+	out := &sse{w: w, flush: flush, at: cursor{at: latest, seen: latest}}
 	out.frame(protocol.FrameHello, "", protocol.Hello{Protocol: protocol.Version, Latest: latest})
 	views, beat := d.vendors.Watch()
 	out.frame(protocol.FrameVendors, "", vendorsBody{views})
@@ -61,7 +55,6 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(d.keepalive)
 	defer keepalive.Stop()
 
-	var at cursor
 	for out.err == nil {
 		select {
 		case <-r.Context().Done():
@@ -72,7 +65,7 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 				// connection costs one reconnect, which is what a Cursor is for.
 				return
 			}
-			out.log(&at, f)
+			out.fromLog(f)
 		case <-beat:
 			views, beat = d.vendors.Watch()
 			out.frame(protocol.FrameVendors, "", vendorsBody{views})
@@ -87,7 +80,10 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 // is refused here, and one that names none is served, because curl names none.
 func (d *Daemon) speaks(w http.ResponseWriter, r *http.Request) bool {
 	asked := r.Header.Get(protocol.VersionHeader)
-	if asked == "" || slices.Contains(protocol.ServedVersions[:], atoi(asked)) {
+	if asked == "" {
+		return true
+	}
+	if n, err := strconv.Atoi(asked); err == nil && slices.Contains(protocol.ServedVersions[:], n) {
 		return true
 	}
 	refuse(w, protocol.StatusUpgradeRequired, protocol.Refusal{
@@ -98,68 +94,10 @@ func (d *Daemon) speaks(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// atoi is the version header as a number, and 0 for anything that is not one. No
-// build serves version 0, so an unreadable header is refused with the rest.
-func atoi(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-// vendorsBody is the vendors frame. It names its list exactly as GET /v1/models
-// does, so the two answers about Vendors have one shape.
+// vendorsBody is the vendors frame. It names its list vendors, as the answer to
+// GET /v1/models does, so the two are read the same way.
 type vendorsBody struct {
 	Vendors []VendorView `json:"vendors"`
-}
-
-// sessionEvents pages one Session's Events, oldest first. It reads the log rather
-// than the registry, because the rows are already the wire shape and a Session
-// that ended long ago is still in the file.
-func (d *Daemon) sessionEvents(w http.ResponseWriter, r *http.Request) {
-	id := event.SessionID(r.PathValue("session"))
-	if !d.sessions.known(id) {
-		refuse(w, protocol.StatusNoSession, protocol.Refusal{
-			Reason: protocol.ReasonUnknownSession,
-			Detail: fmt.Sprintf("this Host has no Session %q", id),
-		})
-		return
-	}
-
-	after, err := number(r, "after", 0)
-	if err != nil {
-		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{Reason: protocol.ReasonMalformed, Detail: err.Error()})
-		return
-	}
-	limit, err := number(r, "limit", defaultPage)
-	if err != nil {
-		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{Reason: protocol.ReasonMalformed, Detail: err.Error()})
-		return
-	}
-
-	page, err := d.events.SessionPage(id, after, min(int(limit), maxPage))
-	if err != nil {
-		http.Error(w, "the Event log could not be read", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(struct {
-		Events []protocol.Event `json:"events"`
-	}{page})
-}
-
-// number reads one query parameter, or its default when the request omits it.
-func number(r *http.Request, name string, missing uint64) (uint64, error) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return missing, nil
-	}
-	n, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("%s=%q is not a number", name, raw)
-	}
-	return n, nil
 }
 
 // cursor is where this connection may resume: the highest Sequence Number below
@@ -208,21 +146,23 @@ func (c *cursor) settle() (protocol.Cursor, bool) {
 	return protocol.Cursor(to), true
 }
 
-// sse writes Frames to one connection. The first write that fails is kept and
-// every call after it does nothing, so the loop above checks in one place.
+// sse writes Frames to one connection and holds the Cursor it stamps them with.
+// The first write that fails is kept and every call after it does nothing, so the
+// loop above checks in one place.
 type sse struct {
 	w     io.Writer
 	flush http.Flusher
+	at    cursor
 	err   error
 }
 
-// log writes one Frame the Event log fanned out, as an event or as a delta.
-func (s *sse) log(at *cursor, f eventlog.Frame) {
+// fromLog writes one Frame the Event log fanned out, as an event or as a delta.
+func (s *sse) fromLog(f eventlog.Frame) {
 	switch {
 	case f.Event != nil:
-		s.frame(protocol.FrameEvent, id(at.event(f.Event.Seq, f.Open)), f.Event)
+		s.frame(protocol.FrameEvent, stamp(s.at.event(f.Event.Seq, f.Open)), f.Event)
 	case f.Delta != nil:
-		s.frame(protocol.FrameDelta, id(at.delta(f.Delta)), f.Delta)
+		s.frame(protocol.FrameDelta, stamp(s.at.delta(f.Delta)), f.Delta)
 	}
 }
 
@@ -259,9 +199,9 @@ func (s *sse) write(b []byte) {
 	s.flush.Flush()
 }
 
-// id spells a Cursor for the id: line, and spells nothing when the Cursor did not
-// move.
-func id(at protocol.Cursor, moved bool) string {
+// stamp spells a Cursor for the id: line, and spells nothing when the Cursor did
+// not move.
+func stamp(at protocol.Cursor, moved bool) string {
 	if !moved {
 		return ""
 	}

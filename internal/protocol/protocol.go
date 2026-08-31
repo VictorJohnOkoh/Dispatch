@@ -38,8 +38,9 @@ type Hello struct {
 	Protocol int `json:"protocol"`
 
 	// LogID is the identity of the log this stream reads from. A reader whose
-	// Cursor came from a different one throws that Cursor away.
-	LogID string `json:"logId"`
+	// Cursor came from a different one throws that Cursor away. It is omitted while
+	// a Daemon has none, so a reader compares nothing rather than comparing "".
+	LogID string `json:"logId,omitempty"`
 
 	// Latest is the log's highest Seq, which tells a Cursor that is merely behind
 	// from one that is impossible before a byte of replay is sent.
