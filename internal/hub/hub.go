@@ -4,11 +4,15 @@ package hub
 
 import "github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
 
+type Host = hostset.Host
+type HostID = hostset.HostID
+type HostDialer = hostset.HostDialer
+
 type Hub struct {
 	hosts  hostset.Table
 	dialer hostset.HostDialer
 }
 
-func New(hosts []hostset.Host, dialer hostset.HostDialer) *Hub {
+func New(hosts []Host, dialer HostDialer) *Hub {
 	return &Hub{hosts: hostset.New(hosts), dialer: dialer}
 }
