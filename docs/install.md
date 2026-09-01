@@ -286,6 +286,32 @@ curl.exe http://127.0.0.1:7700/v1/hosts/workstation/sessions
 The first answers from the Hub alone and lists what `hub.json` names. The second travels down the
 tunnel and is answered by the Daemon on the Host. When both answer, the install is done.
 
+## 10. Check the Event stream
+
+The two commands above are a request and a reply. The Event stream is the long connection the Client
+holds open, and it is worth proving on its own.
+
+```powershell
+curl.exe -N http://127.0.0.1:7700/v1/events
+```
+
+**Write `curl.exe`, not `curl`.** In Windows PowerShell, `curl` is an alias for `Invoke-WebRequest`,
+which reads the whole reply into memory before it prints anything. A stream never ends, so it prints
+nothing at all and shows a counter climbing under "Reading response stream". The stream is fine and
+you are looking at the wrong tool.
+
+A Hub with nothing happening on it sends `: keepalive` and a blank line every ten seconds. That beat
+is the stream working. Ctrl+C ends it.
+
+To watch the beat with the time on each line, PowerShell can read the stream itself:
+
+```powershell
+Add-Type -AssemblyName System.Net.Http
+$client = [System.Net.Http.HttpClient]::new()
+$reader = [System.IO.StreamReader]::new($client.GetStreamAsync("http://127.0.0.1:7700/v1/events").Result)
+while ($null -ne ($line = $reader.ReadLine())) { "{0:HH:mm:ss} {1}" -f (Get-Date), $line }
+```
+
 ## When it does not work
 
 The Hub names five failures. Each one has one place to look.
