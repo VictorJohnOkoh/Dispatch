@@ -178,11 +178,14 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 }
 
 // listSessions answers with this Host's Sessions, live and ended, in start order.
+// The Cursor beside them is where the log stood when they were read, so a Client
+// that opens the stream there loses nothing that fell in between.
 func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
-		Sessions []SessionView `json:"sessions"`
-	}{d.sessions.views()})
+		Sessions []SessionView   `json:"sessions"`
+		Cursor   protocol.Cursor `json:"cursor"`
+	}{d.sessions.views(), d.events.Cursor()})
 }
 
 // The page GET /v1/sessions/{session}/events serves when the request asks for no
@@ -224,7 +227,8 @@ func (d *Daemon) sessionEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
 		Events []protocol.Event `json:"events"`
-	}{events})
+		Cursor protocol.Cursor  `json:"cursor"`
+	}{events, d.events.Cursor()})
 }
 
 // page reads where the request wants to read from and how much of it. A size of

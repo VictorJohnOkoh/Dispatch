@@ -127,6 +127,12 @@ func (d *Daemon) Serve(ctx context.Context, listen string) error {
 	if err := loopbackOnly(listen); err != nil {
 		return err
 	}
+	// The boot sweep runs before anything can be answered, so a reconnecting Hub
+	// never reads a Session that is Working in the log and dead in reality.
+	if err := d.sweep(); err != nil {
+		return err
+	}
+
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("daemon: %w", err)

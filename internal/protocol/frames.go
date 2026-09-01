@@ -65,6 +65,13 @@ const Keepalive = ": keepalive\n\n"
 // allowed to look alive.
 const KeepaliveInterval = 10 * time.Second
 
+// Resync says a Cursor cannot be served, and carries what a reader needs to start
+// again: the identity of the log it is actually reading and where that log stands.
+type Resync struct {
+	LogID  string `json:"logId"`
+	Latest uint64 `json:"latest"`
+}
+
 // Delta is text for an open appendable Event the log already holds. It is never
 // stored, never given a Sequence Number of its own, and never carries information
 // its Event will not eventually hold.

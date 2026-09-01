@@ -26,10 +26,19 @@ func Held(events []event.Event) []string {
 	return inspect(events).held
 }
 
+// OpenCalls is the Tool Calls no ToolCallEnded has closed, oldest first. ADR 0005
+// promises exactly one ToolCallEnded for every ToolCallRequested, and a Session
+// that died mid-Prompt has none for the calls that were in flight, so the boot
+// sweep reads this to close them.
+func OpenCalls(events []event.Event) []string {
+	return inspect(events).calls
+}
+
 type inspection struct {
 	state  State
 	reason event.EndReason
 	held   []string
+	calls  []string
 }
 
 func inspect(events []event.Event) inspection {
@@ -40,6 +49,7 @@ func inspect(events []event.Event) inspection {
 		case event.KindSessionEnded:
 			view.state = Ended
 			view.held = nil
+			view.calls = nil
 			if p, ok := e.Payload.(*event.SessionEnded); ok {
 				view.reason = p.Reason
 			}
@@ -62,6 +72,16 @@ func inspect(events []event.Event) inspection {
 		case event.KindApprovalDecided:
 			if p, ok := e.Payload.(*event.ApprovalDecided); ok {
 				view.held = remove(view.held, p.ToolCallID)
+			}
+
+		case event.KindToolCallRequested:
+			if p, ok := e.Payload.(*event.ToolCallRequested); ok {
+				view.calls = append(view.calls, p.ToolCallID)
+			}
+
+		case event.KindToolCallEnded:
+			if p, ok := e.Payload.(*event.ToolCallEnded); ok {
+				view.calls = remove(view.calls, p.ToolCallID)
 			}
 		}
 	}

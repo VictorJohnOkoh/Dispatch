@@ -18,16 +18,16 @@ func promptIn(session event.SessionID, text string) event.Event {
 func TestLatestIsTheHighestSeqAllocated(t *testing.T) {
 	log := openLog(t, tempPath(t))
 
-	if got, err := log.Latest(); err != nil || got != 0 {
-		t.Fatalf("Latest on an empty log = %d, %v", got, err)
+	if got := log.Latest(); got != 0 {
+		t.Fatalf("Latest on an empty log = %d", got)
 	}
 	for range 3 {
 		if _, err := log.Append(prompt("p")); err != nil {
 			t.Fatalf("Append: %v", err)
 		}
 	}
-	if got, err := log.Latest(); err != nil || got != 3 {
-		t.Fatalf("Latest = %d, %v, want 3", got, err)
+	if got := log.Latest(); got != 3 {
+		t.Fatalf("Latest = %d, want 3", got)
 	}
 }
 

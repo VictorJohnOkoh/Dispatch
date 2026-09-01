@@ -11,6 +11,19 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 )
 
+// decodeGet reads one GET answer into a body a test names for itself, which is
+// how a test reads one field of an answer without repeating the whole shape.
+func decodeGet(t *testing.T, d *Daemon, path string, into any) {
+	t.Helper()
+	w := get(t, d, path)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET %s: status %d: %s", path, w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), into); err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+}
+
 func get(t *testing.T, d *Daemon, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -20,7 +33,7 @@ func get(t *testing.T, d *Daemon, path string) *httptest.ResponseRecorder {
 
 func TestListModelsAnswersFromTheCache(t *testing.T) {
 	f := ollamaFake()
-	d := plain([]vendors.Adapter{f}, quiet())
+	d := plain(t, []vendors.Adapter{f}, quiet())
 	d.vendors.pollAll(t.Context())
 	before := f.calls
 
@@ -47,7 +60,7 @@ func TestListModelsAnswersFromTheCache(t *testing.T) {
 // A Daemon whose Vendor has never answered still has a line for it, with the stamp
 // at zero, so the Client draws an empty Vendor row rather than nothing.
 func TestListModelsAnswersBeforeTheFirstBeat(t *testing.T) {
-	d := plain([]vendors.Adapter{ollamaFake()}, quiet())
+	d := plain(t, []vendors.Adapter{ollamaFake()}, quiet())
 
 	w := get(t, d, "/v1/models")
 	if w.Code != http.StatusOK {
@@ -59,7 +72,7 @@ func TestListModelsAnswersBeforeTheFirstBeat(t *testing.T) {
 }
 
 func TestPprofAnswersOnTheDaemonsListener(t *testing.T) {
-	d := plain(nil, quiet())
+	d := plain(t, nil, quiet())
 	for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1", "/debug/pprof/cmdline"} {
 		if w := get(t, d, path); w.Code != http.StatusOK {
 			t.Errorf("%s: status %d", path, w.Code)
