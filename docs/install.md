@@ -3,6 +3,10 @@
 This is the v1 install. You copy two files to the Host and start the Daemon yourself. The Hub does
 not install anything, and nothing here runs from the Client.
 
+ADR 0013 specifies `dispatch host add` for automatic Host Registration, but that command is not in
+the current build yet. Until it lands, steps 6 to 8 are the supported manual fallback. The command
+will automate those steps without changing the `hub.json` format.
+
 Follow this page from the top and type nothing from memory. `SPEC.md` behaviour 13 is a person doing
 exactly that on a machine that has never had a Daemon.
 

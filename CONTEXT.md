@@ -34,6 +34,10 @@ _Avoid_: inference channel, API layer
 
 ### Reachability
 
+**Host Registration**:
+The one-time process that establishes trust between a Hub and a Host and adds the Host to the Hub's configured Host list. It does not install the Daemon or SSH on the Host.
+_Avoid_: setup, pairing, onboarding, connection setup
+
 **Host State**:
 The Hub's view of one Host, and the only place that view exists. One of `Connecting`, `Ready`, `Down` (carrying a cause of `unreachable` or `no-daemon`), or `Incompatible`. Derived from the liveness of the Hub's Event stream to that Host, never stored.
 _Avoid_: status, availability, online, offline, health
