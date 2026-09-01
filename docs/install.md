@@ -22,10 +22,10 @@ On the Host:
 
 On the Client machine:
 
-- Go 1.25 or later, to build the binary.
 - The OpenSSH client. Windows 11 has it. Check with `ssh -V`.
 
-You do not install Go on the Host. You build the binary here and copy it there.
+Go 1.25 or later on one of the two machines, to build the binary. It does not matter which one. One
+binary runs both roles, so you build it once and copy it to the other machine.
 
 ## 1. Turn on the SSH server on the Host
 
@@ -55,9 +55,10 @@ Now find the Host's address and account name, because every later step needs bot
 $env:USERNAME
 ```
 
-## 2. Build the Daemon binary for the Host
+## 2. Build the binary
 
-Build on the Client machine. The SQLite driver is pure Go, so `CGO_ENABLED=0` gives one file with
+One binary runs both roles, so this is the only build. Run it on whichever machine has Go and copy
+the file to the other one. The SQLite driver is pure Go, so `CGO_ENABLED=0` gives one file with
 nothing to install beside it.
 
 ```powershell
@@ -176,10 +177,14 @@ An account in the Administrators group does not use its own `.ssh\authorized_key
 which account you have, in a PowerShell window **on the Host**:
 
 ```powershell
-([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrators")
+Get-LocalGroupMember -Group Administrators | Select-Object -ExpandProperty Name
 ```
 
-`True` is an administrator. Run this on the Host, as Administrator:
+Ask for the group, not for the current token. `IsInRole("Administrators")` answers `False` in an
+ordinary window even for an account that is in the group, because Windows removes the group from the
+token until you elevate. Reading that answer sends you to the wrong file.
+
+Your account in that list means an administrator. Run this on the Host, as Administrator:
 
 ```powershell
 Get-Content C:\Users\victor\dispatch_hub.pub | Add-Content -Path C:\ProgramData\ssh\administrators_authorized_keys -Encoding ascii
@@ -189,7 +194,7 @@ icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "
 The `icacls` line is not optional. `sshd` ignores that file if any other account can write it, and it
 says nothing about why.
 
-`False` is an ordinary account. Run this on the Host instead:
+Your account absent from that list means an ordinary account. Run this on the Host instead:
 
 ```powershell
 New-Item -ItemType Directory -Force C:\Users\victor\.ssh | Out-Null
@@ -213,7 +218,8 @@ ssh-keyscan -H 192.168.1.20 | Add-Content -Path $HOME\.ssh\known_hosts -Encoding
 which reads like an attack and is a text encoding.
 
 `ssh-keyscan` trusts whoever answers, so run it on a network you trust. To be certain instead, copy
-the line out of `C:\ProgramData\ssh\ssh_host_ed25519_key.pub` on the Host.
+the line out of `C:\ProgramData\ssh\ssh_host_ed25519_key.pub` on the Host. That file needs an
+Administrator window to read, and the line needs the Host's address written in front of it.
 
 Now prove both keys work before the Hub uses them:
 
@@ -255,11 +261,14 @@ the message, rather than leaving a Host that never connects.
 
 ## 9. Start the Hub and reach the Host
 
-On the Client machine:
+On the Client machine, with the binary from step 2:
 
 ```powershell
-go run ./cmd/dispatch hub -config hub.json
+.\dispatch.exe hub -config hub.json
 ```
+
+On a Client machine that has the repository and Go, `go run ./cmd/dispatch hub -config hub.json` is
+the same thing.
 
 Then, from another window:
 
