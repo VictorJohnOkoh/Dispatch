@@ -30,6 +30,7 @@ type fake struct {
 
 	loadErr error
 	mu      sync.Mutex
+	loading chan struct{} // closed when Load starts
 	gate    chan struct{} // Load waits on this when it is not nil
 	loaded  []string
 }
@@ -64,9 +65,14 @@ func (f *fake) Resident(context.Context) ([]vendors.Resident, error) {
 func (f *fake) Load(ctx context.Context, modelID string) error {
 	f.mu.Lock()
 	f.loaded = append(f.loaded, modelID)
+	loading := f.loading
+	f.loading = nil
 	gate := f.gate
 	f.mu.Unlock()
 
+	if loading != nil {
+		close(loading)
+	}
 	if gate != nil {
 		select {
 		case <-gate:
