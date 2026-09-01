@@ -55,15 +55,25 @@ func TestTheMergedStreamCarriesEveryHostAndSplitsAReconnectCursor(t *testing.T) 
 	}
 	desk, _ := seen.Load(hostset.HostID("desk"))
 	pi, _ := seen.Load(hostset.HostID("pi"))
-	if desk != "0" || pi != "6" {
+	if desk != "0|" || pi != "6|" {
 		t.Errorf("Daemon cursors = %v and %v, want desk 0 and pi 6", desk, pi)
+	}
+
+	reconnect := httptest.NewRequest(http.MethodGet, "/v1/events", nil)
+	reconnect.Header.Set(protocol.CursorHeader, "desk=1,pi=7")
+	h.ServeHTTP(httptest.NewRecorder(), reconnect)
+	desk, _ = seen.Load(hostset.HostID("desk"))
+	pi, _ = seen.Load(hostset.HostID("pi"))
+	if desk != "1|desk-log" || pi != "7|pi-log" {
+		t.Errorf("reconnect = %v and %v", desk, pi)
 	}
 }
 
 func streamHost(id, kind string, seen *sync.Map, host hostset.HostID) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen.Store(host, r.Header.Get(protocol.CursorHeader))
+		seen.Store(host, r.Header.Get(protocol.CursorHeader)+"|"+r.Header.Get(protocol.LogHeader))
 		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "event: hello\ndata: {\"protocol\":1,\"logId\":%q,\"latest\":%s}\n\n", host+"-log", id)
 		fmt.Fprintf(w, "id: %s\nevent: event\ndata: {\"seq\":%s,\"session\":\"s\",\"at\":1,\"kind\":\"%s\",\"payload\":{}}\n\n", id, id, kind)
 	})
 }

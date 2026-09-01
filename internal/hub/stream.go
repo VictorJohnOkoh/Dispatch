@@ -3,6 +3,7 @@ package hub
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,8 @@ type daemonFrame struct {
 	name string
 	data []byte
 }
+
+const maxSSELine = 300 << 10
 
 func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 	flush, ok := w.(http.Flusher)
@@ -63,6 +66,12 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 			cursors[string(frame.host)] = at
 			fmt.Fprintf(w, "id: %s\n", cursors.String())
 		}
+		if frame.name == string(protocol.FrameHello) {
+			var hello protocol.Hello
+			if json.Unmarshal(frame.data, &hello) == nil {
+				h.setLogID(frame.host, hello.LogID)
+			}
+		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", frame.name, addHost(frame.data, frame.host))
 		flush.Flush()
 	}
@@ -80,6 +89,9 @@ func (h *Hub) readStream(ctx context.Context, id hostset.HostID, at protocol.Cur
 	req.Header.Set(protocol.VersionHeader, fmt.Sprint(protocol.Version))
 	if resuming {
 		req.Header.Set(protocol.CursorHeader, at.String())
+		if logID := h.logID(id); logID != "" {
+			req.Header.Set(protocol.LogHeader, logID)
+		}
 	}
 	if err := req.Write(conn); err != nil {
 		return
@@ -94,6 +106,7 @@ func (h *Hub) readStream(ctx context.Context, id hostset.HostID, at protocol.Cur
 
 func readFrames(ctx context.Context, host hostset.HostID, body io.Reader, out chan<- daemonFrame) {
 	scan := bufio.NewScanner(body)
+	scan.Buffer(make([]byte, 4096), maxSSELine)
 	frame := daemonFrame{host: host}
 	for scan.Scan() {
 		line := scan.Text()
@@ -112,7 +125,14 @@ func readFrames(ctx context.Context, host hostset.HostID, body io.Reader, out ch
 		case strings.HasPrefix(line, "event:"):
 			frame.name = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):
-			frame.data = append(frame.data, strings.TrimSpace(strings.TrimPrefix(line, "data:"))...)
+			data := strings.TrimPrefix(line, "data:")
+			if strings.HasPrefix(data, " ") {
+				data = data[1:]
+			}
+			if len(frame.data) > 0 {
+				frame.data = append(frame.data, '\n')
+			}
+			frame.data = append(frame.data, data...)
 		}
 	}
 }
