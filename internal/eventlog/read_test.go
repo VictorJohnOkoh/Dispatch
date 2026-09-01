@@ -1,10 +1,12 @@
 package eventlog
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
+	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
 // promptIn is a Prompt in a named Session, for the tests that need two Sessions
@@ -122,5 +124,63 @@ func TestFrameSaysWhetherTheEventIsStillTakingText(t *testing.T) {
 	}
 	if f := receive(t, frames); f.Open {
 		t.Errorf("a Prompt is Open")
+	}
+}
+
+// A message still arriving reads ahead of the row it was last flushed to, on both
+// read paths, so a reader that reattaches mid-message is given it whole rather
+// than blank.
+func TestAnOpenMessageReadsAheadOfItsLastFlush(t *testing.T) {
+	path := tempPath(t)
+	log := openLog(t, path)
+
+	opened, err := log.Append(openMessageEvent(event.KindAssistantMessage))
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := log.AppendText(opened.Seq, "still arriving", false); err != nil {
+		t.Fatalf("AppendText: %v", err)
+	}
+	if stored, _ := storedMessage(t, path, opened.Seq); stored != "" {
+		t.Fatalf("the row already holds %q, so this test proves nothing", stored)
+	}
+
+	for name, read := range map[string]func() ([]protocol.Event, error){
+		"Replay":      func() ([]protocol.Event, error) { return log.Replay(0, log.Latest(), 10) },
+		"SessionPage": func() ([]protocol.Event, error) { return log.SessionPage(opened.Session, 0, 10) },
+	} {
+		events, err := read()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var message event.AssistantMessage
+		if err := json.Unmarshal(events[len(events)-1].Payload, &message); err != nil {
+			t.Fatalf("%s payload: %v", name, err)
+		}
+		if message.Text != "still arriving" || message.Complete {
+			t.Errorf("%s read %q, complete %v, want the whole text and open", name, message.Text, message.Complete)
+		}
+	}
+}
+
+// A closed message reads from its row, so nothing overlays a message the log has
+// finished with.
+func TestAClosedMessageReadsFromItsRow(t *testing.T) {
+	log := openLog(t, tempPath(t))
+
+	opened, err := log.Append(openMessageEvent(event.KindAssistantMessage))
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := log.AppendText(opened.Seq, "the whole thing", true); err != nil {
+		t.Fatalf("AppendText: %v", err)
+	}
+
+	page, err := log.Replay(0, log.Latest(), 10)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if want := `{"text":"the whole thing","complete":true}`; string(page[0].Payload) != want {
+		t.Errorf("replay = %s, want %s", page[0].Payload, want)
 	}
 }

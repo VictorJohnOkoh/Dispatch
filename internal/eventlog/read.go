@@ -80,14 +80,14 @@ func (l *Log) Replay(after, upTo uint64, limit int) ([]protocol.Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("eventlog: replay from %d: %w", after, err)
 	}
-	return out, nil
+	return l.withOpenText(out)
 }
 
 // SessionPage is one page of one Session's Events, from after forward, at most
 // limit of them.
 //
-// A message that is still open pages as far as the last flush got it, with
-// complete false, which is the same torn message a crash would leave.
+// A message that is still open pages with everything that has arrived, and with
+// complete false. It is not clipped at the last flush; see withOpenText.
 func (l *Log) SessionPage(session event.SessionID, after uint64, limit int) ([]protocol.Event, error) {
 	rows, err := l.db.Query(
 		`SELECT seq, session, at, kind, payload FROM events
@@ -101,7 +101,39 @@ func (l *Log) SessionPage(session event.SessionID, after uint64, limit int) ([]p
 	if err != nil {
 		return nil, fmt.Errorf("eventlog: page %s: %w", session, err)
 	}
-	return out, nil
+	return l.withOpenText(out)
+}
+
+// withOpenText puts the text an open message holds now over the row it was last
+// flushed to. A row is written every FlushThreshold bytes, so it lags what has
+// arrived, and serving that lag would make the Cursor's own lag pointless: a
+// reader resumes below an open message precisely so the message replays whole.
+//
+// This is the second place a read carries text that is not yet durable, the first
+// being a Delta. It costs nothing a Delta did not already cost: a reader is handed
+// the same bytes either way, and a crash between the last flush and the read still
+// leaves the shorter message, because a crash is what the flush bounds. What it
+// buys is that a reader which reattaches while the Daemon is alive sees the whole
+// message instead of a blank row.
+//
+// A Delta names the position it writes at rather than appending, so a reader that
+// is ahead of a Delta still in flight is put right by the Deltas that follow.
+func (l *Log) withOpenText(events []protocol.Event) ([]protocol.Event, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for i, e := range events {
+		message, ok := l.open[e.Seq]
+		if !ok {
+			continue
+		}
+		payload, err := json.Marshal(message.payload(false))
+		if err != nil {
+			return nil, fmt.Errorf("eventlog: %s payload at %d: %w", message.kind, e.Seq, err)
+		}
+		events[i].Payload = payload
+	}
+	return events, nil
 }
 
 // wireRows reads rows the read path forwards without understanding them. It closes
