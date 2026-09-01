@@ -46,3 +46,25 @@ func TestMergedStreamSendsKeepaliveWhileHostsAreIdle(t *testing.T) {
 		t.Fatalf("first idle-stream line = %q, %v", line, err)
 	}
 }
+
+// The Client must learn the stream is open before the first frame or keepalive,
+// which can be ten seconds away. Go holds the header until something flushes, so
+// the handler flushes it itself.
+func TestMergedStreamSendsItsHeaderBeforeAnyFrame(t *testing.T) {
+	h := New([]Host{{ID: "desk"}}, idleDialer{})
+	h.keepalive = time.Hour
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("the header did not arrive on its own: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
