@@ -11,7 +11,7 @@ a term is capitalised here it means exactly what `CONTEXT.md` says it means.
 `docs/adr/` holds the arguments. Twelve ADRs, and each title is its decision, so the index in
 `CLAUDE.md` is usually the whole answer. Open an ADR when you change the area it owns.
 
-What this spec adds is the assembly, the decisions no earlier ticket owned, and four corrections to
+What this spec adds is the assembly, the decisions no earlier ticket owned, and five corrections to
 ADRs that contradict or under-specify something. Everything original to this document is marked
 **Decided here** so a reader can tell it apart from the summaries.
 
@@ -519,7 +519,7 @@ on the Host, not a green test. Number 12 needs two builds, which is an inconveni
 difficulty, and it is the only check that the Handshake is real. Number 13 fails if the install
 instructions do not exist, which is the point of writing it as a behaviour rather than as a task.
 
-## Decided here: four corrections to earlier ADRs
+## Decided here: five corrections to earlier ADRs
 
 Each of these contradicts or completes something an ADR already says. They live here, named, which is
 how this repo has handled every prior correction: ADR 0009 amended ADR 0005's cursor sentence, and
@@ -566,6 +566,21 @@ reasoned rather than measured: one Pi tool call in `captures/pi-gate/gate-deny-r
 raw bytes, so 64 MB is roughly 840 tool calls and a normal Session never reaches it. The Event log's
 promise that nothing is ever deleted is untouched, because a transcript is not the log: it is bytes in
 a file that no program reads, and its only reader is a human debugging an Adapter.
+
+**A read serves an open message whole, which makes ADR 0009's "only exception" two.** ADR 0009 says a
+Delta "may carry text that is not yet durable" and calls it "the only exception to committed-before-sent
+anywhere in this design", and it accepts as the cost that a Client which replays "sees at worst the last
+few paragraphs come back shorter". Taken to its limit that cost is worse than the words suggest: a
+message below the 4 KiB flush has written nothing, so a Client that reattaches mid-message is handed a
+blank row, not a shorter one. That is behaviour 2 failing, and behaviour 2 is the one ADR 0001 was
+chosen to make possible.
+
+**So `Replay` and `SessionPage` overlay the text an open message holds now**, and the read path becomes
+the second exception rather than the first staying alone. It buys back nothing a crash takes: the flush
+still bounds what survives one, and a reader is handed the same bytes a Delta would have handed it
+anyway. What changes is only the live case, where the Daemon holds the whole message in memory and used
+to refuse to say so. The Cursor's lag below an open message exists so that message replays whole, and
+clipping the replay at the last flush was the one thing that made the lag pointless.
 
 **ADR 0010 left the first paint to this ticket and it is decided.** `web` keeps its `event` import and
 renders the transcript, the rail and the Host cards on the server; JS applies live frames after that.

@@ -142,9 +142,10 @@ func TestReplayPagesAtTheLimit(t *testing.T) {
 	}
 }
 
-// A replay carries an open message as far as the last flush got it. The reader
-// resumes below it, so the whole message arrives again once it closes.
-func TestReplayCarriesAnOpenMessageAsFarAsItGot(t *testing.T) {
+// A replay carries an open message whole, above what the last flush wrote. The
+// reader resumes below it so that the message replays whole, and clipping it at
+// the flush would undo that.
+func TestReplayCarriesAnOpenMessageWhole(t *testing.T) {
 	log := openLog(t, tempPath(t))
 	message := appendAll(t, log, openMessageEvent(event.KindAssistantMessage))[0]
 	if _, err := log.AppendText(message.Seq, "half", false); err != nil {
@@ -155,7 +156,7 @@ func TestReplayCarriesAnOpenMessageAsFarAsItGot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
-	if len(page) != 1 || string(page[0].Payload) != `{"text":"","complete":false}` {
+	if len(page) != 1 || string(page[0].Payload) != `{"text":"half","complete":false}` {
 		t.Fatalf("replay = %+v", page)
 	}
 }
