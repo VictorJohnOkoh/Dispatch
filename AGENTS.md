@@ -1,4 +1,4 @@
-# Remote Harness Orchestrator — Agent Guide
+# Dispatch — Agent Guide
 I am Victor, a second year Computer Science and AI student and I am tryign to improve my architecture design and software engineering skills 
 I like simple solutions and understandable code
 Make sure that when deciding with how you write out feature that you always choose the more efficient and imple to understand and maintain option
