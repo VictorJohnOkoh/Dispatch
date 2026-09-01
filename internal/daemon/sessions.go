@@ -180,6 +180,7 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 		return
 	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
+	d.closeCalls(s, nil)
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
 	// A Harness that died still has a group, and on Windows that group is a handle
 	// that a child of its own may still be living inside.
@@ -201,19 +202,25 @@ func (d *Daemon) ladder(s *Session, run harness.Run) {
 			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
 		})
 	}
-	for _, call := range d.sessions.openCalls(s) {
-		// A call whose question this stop just refused ended because of that
-		// refusal. Any other was in flight, and nothing observed its result.
-		outcome := event.OutcomeUnknown
-		if slices.Contains(held, call) {
-			outcome = event.OutcomeRefused
-		}
-		d.write(s, event.KindToolCallEnded, &event.ToolCallEnded{ToolCallID: call, Outcome: outcome})
-	}
+	d.closeCalls(s, held)
 	if run != nil {
 		run.Close()
 	}
 	d.kill(s)
+}
+
+// closeCalls writes the ToolCallEnded every open Tool Call is owed. Every Tool
+// Call ends, so a Session that ended with one open would break that promise for
+// as long as the log exists. A call whose question was just refused ended because
+// of that refusal; any other was in flight and nothing observed its result.
+func (d *Daemon) closeCalls(s *Session, refused []string) {
+	for _, call := range d.sessions.openCalls(s) {
+		outcome := event.OutcomeUnknown
+		if slices.Contains(refused, call) {
+			outcome = event.OutcomeRefused
+		}
+		d.write(s, event.KindToolCallEnded, &event.ToolCallEnded{ToolCallID: call, Outcome: outcome})
+	}
 }
 
 // kill is the ladder's last three steps against whatever process this Session has.
@@ -425,7 +432,6 @@ func (r *sessions) held(s *Session) []string {
 	return session.Held(s.events)
 }
 
-// openCalls is the Tool Calls no ToolCallEnded has closed yet.
 func (r *sessions) openCalls(s *Session) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

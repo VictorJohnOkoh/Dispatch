@@ -61,8 +61,8 @@ type Daemon struct {
 	// only so a test may shorten it.
 	keepalive time.Duration
 
-	// stopWait is the ladder's fixed short wait before the kill. It is a field for
-	// the same reason, and no configuration names it.
+	// stopWait is the ladder's fixed short wait before the kill. It is a field only
+	// so a test may shorten it, and no configuration names it.
 	stopWait time.Duration
 
 	sessions sessions

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -151,6 +152,10 @@ func (h *host) failure(t *testing.T) string {
 type spawning struct {
 	launch harness.Launch
 
+	// hold keeps Start from returning, so a test can stop a Session that is still
+	// Starting and has no Run.
+	hold chan struct{}
+
 	mu     sync.Mutex
 	closed int
 }
@@ -162,6 +167,9 @@ func (a *spawning) Capabilities() harness.Capabilities {
 func (a *spawning) Start(ctx context.Context, spec harness.SessionSpec, _ harness.Sink) (harness.Run, error) {
 	if _, err := spec.Spawn(ctx, a.launch); err != nil {
 		return nil, err
+	}
+	if a.hold != nil {
+		<-a.hold
 	}
 	return a, nil
 }
@@ -248,5 +256,48 @@ func TestAHarnessThatLeavesOnItsOwnEndsTheSession(t *testing.T) {
 	}
 	if live := h.sessions.live(); len(live) != 0 {
 		t.Errorf("the registry still holds %d live Session, and its Harness is gone", len(live))
+	}
+}
+
+// A Session stopped while it is still Starting skips to step 4. There is no Run
+// to say goodbye to, and the process is already there, so the stop still has to
+// reach it.
+func TestAStopWhileStartingStillKillsTheHarness(t *testing.T) {
+	w := newTower(t)
+	h, a := stubHost(t, w, "deaf")
+	a.hold = make(chan struct{})
+	defer close(a.hold)
+
+	id := h.started(t, h.post(t, "/v1/sessions", stubStart)).Session
+	w.reported(t, "harness")
+
+	if got := h.post(t, "/v1/sessions/"+string(id)+"/stop", ""); got.Code != protocol.StatusAccepted {
+		t.Fatalf("stop: status %d: %s", got.Code, got.Body.String())
+	}
+	if view := h.waitState(t, id, "Ended"); view.EndReason != event.EndStopped {
+		t.Errorf("the Session ended %q, and the user asked for it", view.EndReason)
+	}
+	if a.closes() != 0 {
+		t.Error("Run.Close ran on a Session that never had a Run")
+	}
+	if !w.gone(t, "harness", 5*time.Second) {
+		t.Error("the Harness outlived a stop that caught it Starting")
+	}
+}
+
+// The tail never grows, so a Harness that writes forever costs one buffer, and
+// what it keeps is the end of the output, where the failure is.
+func TestTheStderrTailKeepsTheEnd(t *testing.T) {
+	kept := &stderrTail{}
+	for range 4 {
+		kept.Write(bytes.Repeat([]byte("x"), stderrKeep))
+	}
+	kept.Write([]byte("the last words"))
+
+	if len(kept.String()) != stderrKeep {
+		t.Errorf("the tail is %d bytes, and it keeps %d", len(kept.String()), stderrKeep)
+	}
+	if !strings.HasSuffix(kept.String(), "the last words") {
+		t.Error("the tail dropped the end rather than the beginning")
 	}
 }

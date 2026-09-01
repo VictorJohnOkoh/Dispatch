@@ -63,7 +63,7 @@ func (d *Daemon) spawner(s *Session, h *Harness) harness.Spawner {
 // A stop got here first when it took the end, and endFailed writes nothing then.
 func (d *Daemon) watchExit(s *Session, p *harnessProcess, kept *stderrTail) {
 	<-p.exited()
-	d.endFailed(s, event.ErrHarnessFailed, p.failure(kept.String()))
+	d.endFailed(s, event.ErrHarnessFailed, p.failure(kept, d.stopWait))
 }
 
 // harnessProcess is one Harness process as the Daemon holds it.
@@ -95,7 +95,7 @@ func spawn(exe, dir string, l harness.Launch, stderr io.Writer) (*harnessProcess
 	// Each pipe is made here rather than by StdinPipe and its two siblings, because
 	// those are closed by Wait and the Adapter is still reading stdout when the
 	// Daemon reaps.
-	in, out, errs, err := pipes()
+	in, out, errs, err := newPipes()
 	if err != nil {
 		return nil, harness.Pipes{}, err
 	}
@@ -130,6 +130,7 @@ func spawn(exe, dir string, l harness.Launch, stderr io.Writer) (*harnessProcess
 		// A process the Daemon cannot kill whole is the failure this design exists to
 		// prevent, so it is killed as far as it can be and the start fails.
 		cmd.Process.Kill()
+		cmd.Wait()
 		g.close()
 		shut()
 		return nil, harness.Pipes{}, err
@@ -163,7 +164,6 @@ func (p *harnessProcess) reap() {
 	p.status = p.cmd.Wait()
 }
 
-// exited is closed when the process has been reaped, whoever ended it.
 func (p *harnessProcess) exited() <-chan struct{} { return p.reaped }
 
 // closeStdin is the ladder's step 4. It is the step both Harnesses answer, and the
@@ -186,6 +186,9 @@ func (p *harnessProcess) stop(wait time.Duration) error {
 		case <-p.reaped:
 		case <-time.After(wait):
 		}
+		// The kill runs even when the Harness already left. On Unix its children can
+		// still be in the group, and on Windows the job is a handle that has to be
+		// closed whatever happened to the process inside it.
 		if p.killed = p.group.kill(p.cmd); p.killed != nil {
 			// The group would not take it, so the one process is taken instead.
 			p.cmd.Process.Kill()
@@ -204,8 +207,17 @@ func (p *harnessProcess) stop(wait time.Duration) error {
 // failure is what an unprompted exit is written into the log as. A Harness in RPC
 // or ACP mode does not end by itself, so exit code 0 is not evidence of a clean
 // finish and the tail of stderr is the only evidence there is.
-func (p *harnessProcess) failure(stderr string) string {
+//
+// The drain is waited on and not only the exit. Wait returns as soon as the
+// process is gone, and the words a dying Harness wrote are still in the pipe at
+// that moment.
+func (p *harnessProcess) failure(kept *stderrTail, wait time.Duration) string {
 	<-p.reaped
+	select {
+	case <-p.drained:
+	case <-time.After(wait):
+	}
+	stderr := kept.String()
 	if p.status == nil {
 		return "the Harness exited on its own, which is a failure whatever the exit code" + tail(stderr)
 	}
@@ -227,9 +239,9 @@ func (p pipe) close() {
 	p.write.Close()
 }
 
-// pipes makes the three a spawn needs. os.Pipe fails only when the process has no
+// newPipes makes the three a spawn needs. os.Pipe fails only when the process has no
 // handles left, and then the ones already made are closed rather than leaked.
-func pipes() (in, out, errs pipe, err error) {
+func newPipes() (in, out, errs pipe, err error) {
 	if in, err = newPipe(); err != nil {
 		return
 	}

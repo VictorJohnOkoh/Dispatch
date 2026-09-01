@@ -22,9 +22,9 @@ import (
 // with real children, behaving exactly as badly as the test tells it to.
 
 const (
-	stubRole = "DISPATCH_STUB"       // which behaviour this process runs
-	stubName = "DISPATCH_STUB_NAME"  // what it calls itself when it reports
-	stubHome = "DISPATCH_STUB_TOWER" // where it reports that it is alive
+	stubRole  = "DISPATCH_STUB"       // which behaviour this process runs
+	stubName  = "DISPATCH_STUB_NAME"  // what it calls itself when it reports
+	stubTower = "DISPATCH_STUB_TOWER" // where it reports that it is alive
 )
 
 // lastWords is what the stub that leaves on its own writes to stderr first.
@@ -80,14 +80,14 @@ func stub(role string) {
 	os.Exit(0)
 }
 
-// held keeps the stub's report open for the life of the process. A net.Conn that
+// link keeps the stub's report open for the life of the process. A net.Conn that
 // nothing refers to is closed by its finaliser, and this conn closing is what the
 // test reads as death.
-var held net.Conn
+var link net.Conn
 
 // report tells the tower this process is alive and holds the connection.
 func report() {
-	addr := os.Getenv(stubHome)
+	addr := os.Getenv(stubTower)
 	if addr == "" {
 		return
 	}
@@ -100,7 +100,7 @@ func report() {
 		name = "harness"
 	}
 	fmt.Fprintln(conn, name)
-	held = conn
+	link = conn
 }
 
 // tower is how a test sees a stub process from outside. Every stub dials it and
@@ -186,6 +186,6 @@ func stubLaunch(t *testing.T, w *tower, role string) (string, harness.Launch) {
 	}
 	return exe, harness.Launch{
 		Args: []string{"-test.run=TestHarnessHelper"},
-		Env:  []string{stubRole + "=" + role, stubHome + "=" + w.addr()},
+		Env:  []string{stubRole + "=" + role, stubTower + "=" + w.addr()},
 	}
 }
