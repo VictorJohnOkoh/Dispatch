@@ -12,14 +12,14 @@ import (
 type Host = hostset.Host
 type HostID = hostset.HostID
 type HostDialer = hostset.HostDialer
-type SSHHost = hostset.SSHHost
+type SSHProfile = hostset.SSHProfile
 
 // SSHDialer is the reach ADR 0004 chose: an in-process SSH client opening a
 // direct-tcpip channel to each Daemon's loopback port. It is re-exported here
 // because hostset is internal to this package and main builds the dialer.
 type SSHDialer = hostset.SSHDialer
 
-func NewSSHDialer(hosts []SSHHost, timeout time.Duration) (*SSHDialer, error) {
+func NewSSHDialer(hosts []SSHProfile, timeout time.Duration) (*SSHDialer, error) {
 	return hostset.NewSSHDialer(hosts, timeout)
 }
 

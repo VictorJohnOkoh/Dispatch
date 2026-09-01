@@ -159,7 +159,7 @@ func startHub(ctx context.Context, path string, log *slog.Logger) error {
 		return err
 	}
 	hosts := make([]hub.Host, len(cfg.Hosts))
-	profiles := make([]hub.SSHHost, len(cfg.Hosts))
+	profiles := make([]hub.SSHProfile, len(cfg.Hosts))
 	for i, host := range cfg.Hosts {
 		if !protocol.ValidHostID(host.ID) {
 			return fmt.Errorf("%s: %q is not a Host id", path, host.ID)
@@ -171,7 +171,7 @@ func startHub(ctx context.Context, path string, log *slog.Logger) error {
 			}
 		}
 		hosts[i] = hub.Host{ID: hub.HostID(host.ID)}
-		profiles[i] = hub.SSHHost{
+		profiles[i] = hub.SSHProfile{
 			ID: hub.HostID(host.ID), Address: host.Address, User: host.User,
 			KeyPath: host.KeyPath, KnownHosts: known, DaemonPort: host.DaemonPort,
 		}

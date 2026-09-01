@@ -21,10 +21,16 @@ var (
 	ErrNoDaemon    = errors.New("the Host answers but no Daemon is listening")
 	ErrAuth        = errors.New("the Host refused this key")
 	ErrHostKey     = errors.New("the Host's key is not the one in known_hosts")
+
+	// ErrForwarding is sshd saying no to the channel itself, which is what
+	// AllowTcpForwarding off looks like. It is apart from ErrNoDaemon because the
+	// two send the reader to different machines: this one is sshd_config.
+	ErrForwarding = errors.New("the Host will not forward a channel")
 )
 
-// SSHHost is one Host's SSH profile, which is what the Hub needs to reach it.
-type SSHHost struct {
+// SSHProfile is what the Hub needs to reach one Host. A Host is the machine,
+// and this is the way in, so the two are named apart.
+type SSHProfile struct {
 	ID HostID
 
 	// Address is the sshd endpoint, host:port.
@@ -33,7 +39,7 @@ type SSHHost struct {
 	User string
 
 	// KeyPath is an ed25519 private key with no passphrase. Key auth is the whole
-	// security boundary, so there is no password fallback.
+	// security boundary, so there is no password fallback and no other key type.
 	KeyPath string
 
 	// KnownHosts is the file the Host's key is checked against. There is no
@@ -49,7 +55,9 @@ type SSHHost struct {
 //
 // One SSH connection per Host is kept and reused, because the Client's leg makes
 // one request per command on top of the long-lived Event stream, and a handshake
-// per request would be paid on every one of them.
+// per request would be paid on every one of them. A second caller waits for a
+// connect that is already running and then reuses it, rather than opening a
+// second connection that one of the two would throw away.
 type SSHDialer struct {
 	targets map[HostID]*sshTarget
 }
@@ -57,7 +65,6 @@ type SSHDialer struct {
 type sshTarget struct {
 	address string
 	daemon  string
-	timeout time.Duration
 	config  *ssh.ClientConfig
 
 	mu     sync.Mutex
@@ -67,7 +74,7 @@ type sshTarget struct {
 // NewSSHDialer reads every key and known_hosts file now rather than at the first
 // Dial, so a mistyped path is a startup error and not a Host that is Down for a
 // reason nobody can see.
-func NewSSHDialer(hosts []SSHHost, timeout time.Duration) (*SSHDialer, error) {
+func NewSSHDialer(hosts []SSHProfile, timeout time.Duration) (*SSHDialer, error) {
 	dialer := &SSHDialer{targets: make(map[HostID]*sshTarget, len(hosts))}
 	for _, host := range hosts {
 		pem, err := os.ReadFile(host.KeyPath)
@@ -78,6 +85,9 @@ func NewSSHDialer(hosts []SSHHost, timeout time.Duration) (*SSHDialer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Host %s: %s: %w", host.ID, host.KeyPath, err)
 		}
+		if got := key.PublicKey().Type(); got != ssh.KeyAlgoED25519 {
+			return nil, fmt.Errorf("Host %s: %s is %s, and this Hub uses ed25519", host.ID, host.KeyPath, got)
+		}
 		check, err := knownhosts.New(host.KnownHosts)
 		if err != nil {
 			return nil, fmt.Errorf("Host %s: %w", host.ID, err)
@@ -85,7 +95,6 @@ func NewSSHDialer(hosts []SSHHost, timeout time.Duration) (*SSHDialer, error) {
 		dialer.targets[host.ID] = &sshTarget{
 			address: host.Address,
 			daemon:  net.JoinHostPort("127.0.0.1", fmt.Sprint(host.DaemonPort)),
-			timeout: timeout,
 			config: &ssh.ClientConfig{
 				User:            host.User,
 				Auth:            []ssh.AuthMethod{ssh.PublicKeys(key)},
@@ -128,11 +137,11 @@ func (t *sshTarget) dial(ctx context.Context) (net.Conn, error) {
 		if err == nil {
 			return conn, nil
 		}
-		// sshd rejecting the channel means the connection is alive and the Daemon
+		// sshd rejecting the channel means the connection is alive and the far end
 		// is not. Any other failure is the connection itself, so it is replaced.
 		var rejected *ssh.OpenChannelError
 		if errors.As(err, &rejected) {
-			return nil, fmt.Errorf("%w on %s: %w", ErrNoDaemon, t.daemon, err)
+			return nil, t.channelCause(err, rejected)
 		}
 		t.client.Close()
 		t.client = nil
@@ -144,20 +153,36 @@ func (t *sshTarget) dial(ctx context.Context) (net.Conn, error) {
 	}
 	conn, err := client.DialContext(ctx, "tcp", t.daemon)
 	if err != nil {
-		return nil, fmt.Errorf("%w on %s: %w", ErrNoDaemon, t.daemon, err)
+		var rejected *ssh.OpenChannelError
+		if !errors.As(err, &rejected) {
+			client.Close()
+			return nil, fmt.Errorf("%w at %s: %w", ErrUnreachable, t.address, err)
+		}
+		t.client = client
+		return nil, t.channelCause(err, rejected)
 	}
 	t.client = client
 	return conn, nil
 }
 
+// channelCause splits a refused channel in two. sshd reports a closed port as
+// ConnectionFailed, and everything else it refuses is its own policy, which is
+// AllowTcpForwarding in practice.
+func (t *sshTarget) channelCause(err error, rejected *ssh.OpenChannelError) error {
+	if rejected.Reason == ssh.ConnectionFailed {
+		return fmt.Errorf("%w on %s: %w", ErrNoDaemon, t.daemon, err)
+	}
+	return fmt.Errorf("%w at %s: %w", ErrForwarding, t.address, err)
+}
+
 // connect makes the SSH connection and names why it failed. A wrong key ends
 // here with ErrAuth rather than a retry, because no amount of waiting fixes it.
 func (t *sshTarget) connect(ctx context.Context) (*ssh.Client, error) {
-	tcp, err := (&net.Dialer{Timeout: t.timeout}).DialContext(ctx, "tcp", t.address)
+	tcp, err := (&net.Dialer{Timeout: t.config.Timeout}).DialContext(ctx, "tcp", t.address)
 	if err != nil {
 		return nil, fmt.Errorf("%w at %s: %w", ErrUnreachable, t.address, err)
 	}
-	tcp.SetDeadline(time.Now().Add(t.timeout))
+	tcp.SetDeadline(time.Now().Add(t.config.Timeout))
 	conn, channels, requests, err := ssh.NewClientConn(tcp, t.address, t.config)
 	if err != nil {
 		tcp.Close()

@@ -58,11 +58,8 @@ func hubConfig(t *testing.T, dir string) string {
 	}
 	key := filepath.Join(dir, "id_ed25519")
 	known := filepath.Join(dir, "known_hosts")
-	for path, content := range map[string][]byte{key: pem.EncodeToMemory(block), known: nil} {
-		if err := os.WriteFile(path, content, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeConfig(t, dir, "id_ed25519", string(pem.EncodeToMemory(block)))
+	writeConfig(t, dir, "known_hosts", "")
 	s := strings.ReplaceAll(string(body), `"/home/victor/.ssh/id_ed25519"`, strconv.Quote(filepath.ToSlash(key)))
 	s = strings.ReplaceAll(s, `"/home/victor/.ssh/known_hosts"`, strconv.Quote(filepath.ToSlash(known)))
 	return strings.Replace(s, `"127.0.0.1:7700"`, `"127.0.0.1:0"`, 1)

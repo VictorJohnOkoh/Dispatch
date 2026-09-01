@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -11,6 +13,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,8 +45,8 @@ func TestTheDialerReachesTheDaemonPortThroughTheTunnel(t *testing.T) {
 		t.Fatalf("second Dial = %v, want a channel", err)
 	}
 	defer second.Close()
-	if world.handshakes() != 1 {
-		t.Errorf("handshakes = %d, want 1", world.handshakes())
+	if got := world.handshakes.Load(); got != 1 {
+		t.Errorf("handshakes = %d, want 1", got)
 	}
 }
 
@@ -53,7 +57,7 @@ func TestAWrongKeyIsNamedAndDoesNotHang(t *testing.T) {
 	other := writeKey(t, filepath.Join(t.TempDir(), "other"))
 	profile := world.profile(portOf(t, daemon.Addr().String()))
 	profile.KeyPath = other
-	dialer, err := hostset.NewSSHDialer([]hostset.SSHHost{profile}, time.Second)
+	dialer, err := hostset.NewSSHDialer([]hostset.SSHProfile{profile}, time.Second)
 	if err != nil {
 		t.Fatalf("NewSSHDialer = %v", err)
 	}
@@ -80,7 +84,7 @@ func TestAHostKeyThatIsNotInKnownHostsIsRefused(t *testing.T) {
 
 	profile := world.profile(portOf(t, daemon.Addr().String()))
 	profile.KnownHosts = emptyKnownHosts(t)
-	dialer, err := hostset.NewSSHDialer([]hostset.SSHHost{profile}, time.Second)
+	dialer, err := hostset.NewSSHDialer([]hostset.SSHProfile{profile}, time.Second)
 	if err != nil {
 		t.Fatalf("NewSSHDialer = %v", err)
 	}
@@ -105,6 +109,45 @@ func TestNothingBehindTheTunnelIsNoDaemon(t *testing.T) {
 	}
 }
 
+func TestAHostThatWillNotForwardIsNamedApartFromANoDaemon(t *testing.T) {
+	world := newSSHWorld(t)
+	world.forbidden = true
+	daemon := echoListener(t)
+
+	dialer := world.dialer(t, portOf(t, daemon.Addr().String()))
+	defer dialer.Close()
+
+	_, err := dialer.Dial(context.Background(), "desk")
+	if !errors.Is(err, hostset.ErrForwarding) {
+		t.Fatalf("Dial = %v, want ErrForwarding", err)
+	}
+	if errors.Is(err, hostset.ErrNoDaemon) {
+		t.Error("a Host that will not forward reads as a Daemon that is not running")
+	}
+}
+
+// The key is the whole security boundary, so the Hub takes one kind of key and
+// says so at start rather than falling back to whatever the file holds.
+func TestAKeyThatIsNotEd25519IsRefusedAtStart(t *testing.T) {
+	dir := t.TempDir()
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "id_rsa")
+	writeFile(t, path, string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(rsaKey),
+	})))
+
+	_, err = hostset.NewSSHDialer([]hostset.SSHProfile{{
+		ID: "desk", Address: "127.0.0.1:22", User: "victor",
+		KeyPath: path, KnownHosts: emptyKnownHosts(t), DaemonPort: 7777,
+	}}, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "ed25519") {
+		t.Fatalf("NewSSHDialer = %v, want an error naming ed25519", err)
+	}
+}
+
 func TestAHostThatDoesNotAnswerIsUnreachable(t *testing.T) {
 	dead, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -113,7 +156,7 @@ func TestAHostThatDoesNotAnswerIsUnreachable(t *testing.T) {
 	address := dead.Addr().String()
 	dead.Close()
 
-	dialer, err := hostset.NewSSHDialer([]hostset.SSHHost{{
+	dialer, err := hostset.NewSSHDialer([]hostset.SSHProfile{{
 		ID: "desk", Address: address, User: "victor",
 		KeyPath:    writeKey(t, filepath.Join(t.TempDir(), "id")),
 		KnownHosts: emptyKnownHosts(t), DaemonPort: 7777,
@@ -129,7 +172,7 @@ func TestAHostThatDoesNotAnswerIsUnreachable(t *testing.T) {
 }
 
 func TestAKeyThatIsNotThereFailsAtStart(t *testing.T) {
-	_, err := hostset.NewSSHDialer([]hostset.SSHHost{{
+	_, err := hostset.NewSSHDialer([]hostset.SSHProfile{{
 		ID: "desk", Address: "127.0.0.1:22", User: "victor",
 		KeyPath:    filepath.Join(t.TempDir(), "absent"),
 		KnownHosts: emptyKnownHosts(t), DaemonPort: 7777,
@@ -144,13 +187,17 @@ type sshWorld struct {
 	address    string
 	keyPath    string
 	knownHosts string
-	tries      chan struct{}
+	handshakes atomic.Int64
+
+	// forbidden is sshd with AllowTcpForwarding off, which refuses the channel
+	// for its own reasons rather than because nothing is listening.
+	forbidden bool
 }
 
 func newSSHWorld(t *testing.T) *sshWorld {
 	t.Helper()
 	dir := t.TempDir()
-	world := &sshWorld{keyPath: writeKey(t, filepath.Join(dir, "id_ed25519")), tries: make(chan struct{}, 32)}
+	world := &sshWorld{keyPath: writeKey(t, filepath.Join(dir, "id_ed25519"))}
 
 	authorized, err := ssh.ParsePrivateKey(readFile(t, world.keyPath))
 	if err != nil {
@@ -194,7 +241,7 @@ func (w *sshWorld) serve(tcp net.Conn, config *ssh.ServerConfig) {
 		tcp.Close()
 		return
 	}
-	w.tries <- struct{}{}
+	w.handshakes.Add(1)
 	defer conn.Close()
 	go ssh.DiscardRequests(requests)
 	for newChannel := range channels {
@@ -210,6 +257,10 @@ func (w *sshWorld) serve(tcp net.Conn, config *ssh.ServerConfig) {
 		}
 		if err := ssh.Unmarshal(newChannel.ExtraData(), &request); err != nil {
 			newChannel.Reject(ssh.ConnectionFailed, "bad payload")
+			continue
+		}
+		if w.forbidden {
+			newChannel.Reject(ssh.Prohibited, "administratively prohibited")
 			continue
 		}
 		target, err := net.Dial("tcp", net.JoinHostPort(request.DestAddr, fmt.Sprint(request.DestPort)))
@@ -228,10 +279,8 @@ func (w *sshWorld) serve(tcp net.Conn, config *ssh.ServerConfig) {
 	}
 }
 
-func (w *sshWorld) handshakes() int { return len(w.tries) }
-
-func (w *sshWorld) profile(daemonPort int) hostset.SSHHost {
-	return hostset.SSHHost{
+func (w *sshWorld) profile(daemonPort int) hostset.SSHProfile {
+	return hostset.SSHProfile{
 		ID: "desk", Address: w.address, User: "victor",
 		KeyPath: w.keyPath, KnownHosts: w.knownHosts, DaemonPort: daemonPort,
 	}
@@ -239,7 +288,7 @@ func (w *sshWorld) profile(daemonPort int) hostset.SSHHost {
 
 func (w *sshWorld) dialer(t *testing.T, daemonPort int) *hostset.SSHDialer {
 	t.Helper()
-	dialer, err := hostset.NewSSHDialer([]hostset.SSHHost{w.profile(daemonPort)}, time.Second)
+	dialer, err := hostset.NewSSHDialer([]hostset.SSHProfile{w.profile(daemonPort)}, time.Second)
 	if err != nil {
 		t.Fatalf("NewSSHDialer = %v", err)
 	}

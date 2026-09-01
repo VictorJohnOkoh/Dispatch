@@ -15,7 +15,8 @@ this page assumes they are not.
 On the Host:
 
 - An account you can reach with `ssh`.
-- `sshd` running.
+- `sshd` running, with `AllowTcpForwarding` on. It is on by default. The Hub opens a channel through
+  it, so a Host with it off refuses every connection.
 - A directory for the Workspace Root. Every Session works below it.
 
 On the Client machine:
@@ -129,8 +130,8 @@ the Host and not in the tunnel. Fix it here before you go back to the Client mac
 The Hub is an SSH client in its own process. It does not read `~/.ssh/config`, so every value it
 needs is in `hub.json`.
 
-Make an ed25519 key with no passphrase, on the Client machine. The Hub cannot answer a passphrase
-prompt.
+Make an ed25519 key with no passphrase, on the Client machine. The Hub takes no other key type and
+cannot answer a passphrase prompt. It stops at start if the file holds either.
 
 ```powershell
 ssh-keygen -t ed25519 -f $HOME\.ssh\dispatch_hub -N '""'
@@ -212,6 +213,7 @@ The Hub names four failures. Each one has one place to look.
 | `the Host refused this key` | `sshd` rejected the key | Check `keyPath` and `authorized_keys` on the Host. Step 5's `ssh` command proves both |
 | `the Host's key is not the one in known_hosts` | The Host answered with an unexpected key | Run `ssh-keyscan` again. If the Host was rebuilt, delete its old line first |
 | `the Host answers but no Daemon is listening` | SSH works and the port is closed | The Daemon is not running, or `daemonPort` and the Host's `listen` port differ |
+| `the Host will not forward a channel` | `sshd` refused the channel itself | Set `AllowTcpForwarding yes` in `/etc/ssh/sshd_config` on the Host and restart `sshd` |
 
 The last one is the useful one. It tells you the machine is up and the tunnel is open, so the
 problem is the Daemon and not the network.
