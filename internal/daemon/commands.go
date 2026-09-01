@@ -47,17 +47,19 @@ func (d *Daemon) submitPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := d.write(s, event.KindPromptSubmitted, &event.PromptSubmitted{Text: req.Text})
-	d.commanding.Unlock()
 	if err != nil {
+		d.commanding.Unlock()
 		logRefused(w)
 		return
 	}
 
 	if err := run.Prompt(r.Context(), req.Text); err != nil {
 		d.boundFailed(s, err)
+		d.commanding.Unlock()
 		http.Error(w, "the Harness would not take the Prompt", http.StatusInternalServerError)
 		return
 	}
+	d.commanding.Unlock()
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
@@ -65,15 +67,8 @@ func (d *Daemon) submitPrompt(w http.ResponseWriter, r *http.Request) {
 // already in the log, so an unbounded Prompt would leave the Session Working and
 // refusing every Prompt after it.
 //
-// A stop that landed while the Harness was being asked has already ended the
-// Session, and SessionEnded is always last, so nothing is written after it.
+// The caller holds d.commanding, so no command can overtake this boundary.
 func (d *Daemon) boundFailed(s *Session, err error) {
-	d.commanding.Lock()
-	defer d.commanding.Unlock()
-
-	if d.sessions.ending(s) {
-		return
-	}
 	d.write(s, event.KindError, &event.Error{Code: event.ErrVendor, Message: err.Error()})
 	d.write(s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: event.StopError})
 }
@@ -81,10 +76,6 @@ func (d *Daemon) boundFailed(s *Session, err error) {
 // interrupt abandons the Prompt in flight and keeps the Session. It returns once
 // the Adapter has stopped reading, and the Adapter is what writes PromptCompleted,
 // so the Session is Idle again by the time this answers.
-//
-// One narrow window is not covered. A Prompt is Working from the moment
-// PromptSubmitted is written, which is before the Harness has been asked, and an
-// interrupt landing in there finds nothing in flight and abandons nothing.
 func (d *Daemon) interrupt(w http.ResponseWriter, r *http.Request) {
 	d.commanding.Lock()
 	s, run, ok := d.allow(w, r, session.Working, session.Asking)
