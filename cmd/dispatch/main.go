@@ -14,13 +14,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/config"
 	"github.com/VictorJohnOkoh/Dispatch/internal/daemon"
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/harness"
+	"github.com/VictorJohnOkoh/Dispatch/internal/hub"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
@@ -28,16 +32,20 @@ import (
 
 const usage = "usage: dispatch <daemon|hub> [-config path]"
 
+// sshTimeout bounds the TCP connect and the handshake, so a Host that accepts a
+// connection and then says nothing fails instead of holding the request open.
+const sshTimeout = 10 * time.Second
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(ctx, os.Args[1:], os.Stderr))
 }
 
 // run selects the role and returns the process exit code. main is the only
 // caller of os.Exit, so a role can defer its shutdown. It returns when ctx is
 // done, which is what an interrupt cancels.
-func run(ctx context.Context, args []string, out, errOut io.Writer) int {
+func run(ctx context.Context, args []string, errOut io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(errOut, usage)
 		return 2
@@ -56,7 +64,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		start = func(ctx context.Context, p string) error { return startDaemon(ctx, p, log) }
 	case "hub":
 		path = "hub.json"
-		start = func(_ context.Context, p string) error { return startHub(p, out) }
+		start = func(ctx context.Context, p string) error { return startHub(ctx, p, log) }
 	default:
 		fmt.Fprintf(errOut, "dispatch: unknown role %q\n%s\n", role, usage)
 		return 2
@@ -142,18 +150,51 @@ func newVendor(endpoint vendors.Endpoint) (vendors.Adapter, error) {
 	}
 }
 
-// startHub loads the Host list. The Host id rule lives in protocol, which config
-// may not import, so the check is here.
-func startHub(path string, out io.Writer) error {
+// startHub loads the Host list and builds the SSH reach ADR 0004 chose. The Host
+// id rule lives in protocol, which config may not import, so the check is here,
+// and so is the default known_hosts path, because config reads no environment.
+func startHub(ctx context.Context, path string, log *slog.Logger) error {
 	cfg, err := config.LoadHub(path)
 	if err != nil {
 		return err
 	}
-	for _, host := range cfg.Hosts {
+	hosts := make([]hub.Host, len(cfg.Hosts))
+	profiles := make([]hub.SSHHost, len(cfg.Hosts))
+	for i, host := range cfg.Hosts {
 		if !protocol.ValidHostID(host.ID) {
 			return fmt.Errorf("%s: %q is not a Host id", path, host.ID)
 		}
+		known := host.KnownHosts
+		if known == "" {
+			if known, err = defaultKnownHosts(); err != nil {
+				return err
+			}
+		}
+		hosts[i] = hub.Host{ID: hub.HostID(host.ID)}
+		profiles[i] = hub.SSHHost{
+			ID: hub.HostID(host.ID), Address: host.Address, User: host.User,
+			KeyPath: host.KeyPath, KnownHosts: known, DaemonPort: host.DaemonPort,
+		}
 	}
-	fmt.Fprintf(out, "dispatch: role hub, %d Hosts\n", len(cfg.Hosts))
+	dialer, err := hub.NewSSHDialer(profiles, sshTimeout)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	defer dialer.Close()
+
+	server := &http.Server{Addr: cfg.Listen, Handler: hub.New(hosts, dialer).Handler()}
+	context.AfterFunc(ctx, func() { server.Close() })
+	log.Info("dispatch starting", "role", "hub", "hosts", len(hosts), "listen", cfg.Listen)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
+}
+
+func defaultKnownHosts() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no knownHosts is named and this user has no home directory: %w", err)
+	}
+	return filepath.Join(home, ".ssh", "known_hosts"), nil
 }

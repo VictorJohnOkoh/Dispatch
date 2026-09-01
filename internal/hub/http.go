@@ -39,7 +39,10 @@ func (h *Hub) forward(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := h.dialer.Dial(r.Context(), id)
 	if err != nil {
-		http.Error(w, "the Host is not Ready", http.StatusServiceUnavailable)
+		// The dialer names why it could not reach the Host, and the answer carries
+		// that name. Until Host State lands, this is the only place the user sees
+		// the difference between a Host that is off and a Daemon that is not running.
+		http.Error(w, "the Host is not Ready: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	defer conn.Close()

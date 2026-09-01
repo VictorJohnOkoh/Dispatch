@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func writeConfig(t *testing.T, dir, name, body string) string {
@@ -34,6 +39,35 @@ func daemonConfig(t *testing.T, root string) string {
 	return strings.Replace(s, `"127.0.0.1:7717"`, `"127.0.0.1:0"`, 1)
 }
 
+// hubConfig is the example file with a key and a known_hosts file that are
+// really there, because the Hub reads both at start, and with a port the kernel
+// picks.
+func hubConfig(t *testing.T, dir string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "..", "hub.example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(private, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(dir, "id_ed25519")
+	known := filepath.Join(dir, "known_hosts")
+	for path, content := range map[string][]byte{key: pem.EncodeToMemory(block), known: nil} {
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := strings.ReplaceAll(string(body), `"/home/victor/.ssh/id_ed25519"`, strconv.Quote(filepath.ToSlash(key)))
+	s = strings.ReplaceAll(s, `"/home/victor/.ssh/known_hosts"`, strconv.Quote(filepath.ToSlash(known)))
+	return strings.Replace(s, `"127.0.0.1:7700"`, `"127.0.0.1:0"`, 1)
+}
+
 // done is a context that is already cancelled, so a role that serves binds, sees
 // the interrupt it was given and shuts down.
 func done(t *testing.T) context.Context {
@@ -47,7 +81,7 @@ func TestDaemonStartsFromTheExampleFile(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConfig(t, dir, "daemon.json", daemonConfig(t, dir))
 	var log strings.Builder
-	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &log); code != 0 {
+	if code := run(done(t), []string{"daemon", "-config", path}, &log); code != 0 {
 		t.Fatalf("exit %d: %s", code, log.String())
 	}
 	for _, want := range []string{"dispatch starting", "vendors=1", "daemon listening"} {
@@ -64,7 +98,7 @@ func TestDaemonRefusesAVendorWithNoAdapter(t *testing.T) {
 	body := strings.Replace(daemonConfig(t, dir), `"ollama"`, `"lmstudio"`, 1)
 	path := writeConfig(t, dir, "daemon.json", body)
 	var errOut strings.Builder
-	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &errOut); code != 1 {
+	if code := run(done(t), []string{"daemon", "-config", path}, &errOut); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
 	if !strings.Contains(errOut.String(), "no Adapter yet") {
@@ -79,7 +113,7 @@ func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConfig(t, dir, "daemon.json", daemonConfig(t, dir))
 	var log strings.Builder
-	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &log); code != 0 {
+	if code := run(done(t), []string{"daemon", "-config", path}, &log); code != 0 {
 		t.Fatalf("exit %d: %s", code, log.String())
 	}
 	if !strings.Contains(log.String(), "harness=opencode") {
@@ -89,7 +123,7 @@ func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	only := strings.Replace(daemonConfig(t, dir), `{"name": "passthrough"},`, "", 1)
 	path = writeConfig(t, dir, "none.json", only)
 	var errOut strings.Builder
-	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &errOut); code != 1 {
+	if code := run(done(t), []string{"daemon", "-config", path}, &errOut); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
 	if !strings.Contains(errOut.String(), "no Harness in this file has an Adapter yet") {
@@ -103,7 +137,7 @@ func TestDaemonRefusesAWorkspaceRootThatIsNotThere(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConfig(t, dir, "daemon.json", daemonConfig(t, filepath.Join(dir, "absent")))
 	var errOut strings.Builder
-	if code := run(done(t), []string{"daemon", "-config", path}, io.Discard, &errOut); code != 1 {
+	if code := run(done(t), []string{"daemon", "-config", path}, &errOut); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
 	if !strings.Contains(errOut.String(), "Workspace Root") {
@@ -112,12 +146,31 @@ func TestDaemonRefusesAWorkspaceRootThatIsNotThere(t *testing.T) {
 }
 
 func TestHubStartsFromTheExampleFile(t *testing.T) {
-	var out strings.Builder
-	if code := run(t.Context(), []string{"hub", "-config", filepath.Join("..", "..", "hub.example.json")}, &out, io.Discard); code != 0 {
-		t.Fatalf("exit %d", code)
+	dir := t.TempDir()
+	path := writeConfig(t, dir, "hub.json", hubConfig(t, dir))
+	var log strings.Builder
+	if code := run(done(t), []string{"hub", "-config", path}, &log); code != 0 {
+		t.Fatalf("exit %d: %s", code, log.String())
 	}
-	if !strings.Contains(out.String(), "2 Hosts") {
-		t.Errorf("out = %q", out.String())
+	for _, want := range []string{"role=hub", "hosts=2"} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log = %q, want %q in it", log.String(), want)
+		}
+	}
+}
+
+// The Hub reads every key at start, so a Host whose key is not there stops it
+// rather than becoming a Host that is Down for a reason nobody can see.
+func TestHubRefusesAKeyThatIsNotThere(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(hubConfig(t, dir), "id_ed25519", "absent", 1)
+	path := writeConfig(t, dir, "hub.json", body)
+	var errOut strings.Builder
+	if code := run(done(t), []string{"hub", "-config", path}, &errOut); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "absent") {
+		t.Errorf("stderr = %q", errOut.String())
 	}
 }
 
@@ -131,7 +184,7 @@ func TestHubRefusesAHostIDThatIsNotOne(t *testing.T) {
 	}
 	path := writeConfig(t, dir, "hub.json", strings.Replace(string(body), `"workstation"`, `"work station"`, 1))
 	var errOut strings.Builder
-	if code := run(t.Context(), []string{"hub", "-config", path}, io.Discard, &errOut); code != 1 {
+	if code := run(t.Context(), []string{"hub", "-config", path}, &errOut); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
 	if !strings.Contains(errOut.String(), "not a Host id") {
@@ -141,7 +194,7 @@ func TestHubRefusesAHostIDThatIsNotOne(t *testing.T) {
 
 func TestRunRefusesWhatIsNotARole(t *testing.T) {
 	for _, args := range [][]string{{}, {"hubb"}} {
-		if code := run(t.Context(), args, io.Discard, io.Discard); code != 2 {
+		if code := run(t.Context(), args, io.Discard); code != 2 {
 			t.Errorf("run(%q) = %d, want 2", args, code)
 		}
 	}
