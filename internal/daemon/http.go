@@ -33,6 +33,10 @@ func (d *Daemon) handler() http.Handler {
 	return mux
 }
 
+// Handler is the Daemon's Control Plane without a listener. The Hub's tier-three
+// test serves it over net.Pipe, so both roles run in one process without SSH.
+func (d *Daemon) Handler() http.Handler { return d.handler() }
+
 // listModels answers from the cache the poll fills. It calls no Vendor, so a
 // Vendor that is slow or gone cannot make this request slow or gone.
 func (d *Daemon) listModels(w http.ResponseWriter, r *http.Request) {
