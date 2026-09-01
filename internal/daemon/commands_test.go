@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
@@ -18,15 +19,21 @@ import (
 // chatFake is the Vendor's completion surface, as a passthrough Session reaches
 // it. Only /v1/chat/completions exists, because that is the only call one makes.
 type chatFake struct {
-	mu     sync.Mutex
-	stream string // the SSE body to serve
-	halt   bool   // hold the body open after stream, until the request is cancelled
-	status int    // the status to answer with, 0 meaning 200
+	mu      sync.Mutex
+	stream  string // the SSE body to serve
+	halt    bool   // hold the body open after stream, until the request is cancelled
+	status  int    // the status to answer with, 0 meaning 200
+	entered chan struct{}
+	proceed chan struct{}
 }
 
 func (c *chatFake) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL.Path != "/v1/chat/completions" {
 		return nil, errors.New("no fixture for " + req.URL.Path)
+	}
+	if c.entered != nil {
+		close(c.entered)
+		<-c.proceed
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -308,6 +315,39 @@ func TestInterruptAbandonsThePromptAndKeepsTheSession(t *testing.T) {
 	// stop.
 	h.chat.serve(helloStream, false)
 	h.command(t, id, "prompts", promptBody)
+	h.waitState(t, id, "Idle")
+}
+
+func TestInterruptCannotOvertakePromptRegistration(t *testing.T) {
+	h := newHost(t)
+	h.chat.serve(halfStream, true)
+	h.chat.entered = make(chan struct{})
+	h.chat.proceed = make(chan struct{})
+	id := h.idle(t)
+
+	promptDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		promptDone <- h.post(t, "/v1/sessions/"+string(id)+"/prompts", promptBody)
+	}()
+	<-h.chat.entered
+
+	interruptDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		interruptDone <- h.post(t, "/v1/sessions/"+string(id)+"/interrupt", "")
+	}()
+	select {
+	case <-interruptDone:
+		t.Fatal("Interrupt returned before the Harness registered the Prompt")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(h.chat.proceed)
+	if w := <-promptDone; w.Code != protocol.StatusAccepted {
+		t.Fatalf("prompt: status %d: %s", w.Code, w.Body.String())
+	}
+	if w := <-interruptDone; w.Code != protocol.StatusAccepted {
+		t.Fatalf("interrupt: status %d: %s", w.Code, w.Body.String())
+	}
 	h.waitState(t, id, "Idle")
 }
 

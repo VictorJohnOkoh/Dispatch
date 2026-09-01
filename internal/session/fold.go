@@ -12,40 +12,8 @@ import (
 // A slice with no SessionStarted folds to Starting, which is what the Session will
 // be the moment its first Event lands.
 func Fold(events []event.Event) (State, event.EndReason) {
-	var ready, prompting bool
-
-	for _, e := range events {
-		switch e.Kind {
-		case event.KindSessionEnded:
-			// Terminal and always last, so nothing after it can change the answer.
-			var reason event.EndReason
-			if p, ok := e.Payload.(*event.SessionEnded); ok {
-				reason = p.Reason
-			}
-			return Ended, reason
-
-		case event.KindSessionReady:
-			ready = true
-
-		case event.KindPromptSubmitted:
-			prompting = true
-
-		case event.KindPromptCompleted:
-			prompting = false
-		}
-	}
-
-	// Asking is more specific than Working and both folds are true at once, so it
-	// is answered first.
-	switch {
-	case len(Held(events)) > 0:
-		return Asking, ""
-	case prompting:
-		return Working, ""
-	case ready:
-		return Idle, ""
-	}
-	return Starting, ""
+	view := inspect(events)
+	return view.state, view.reason
 }
 
 // Held is the Tool Calls whose question no ApprovalDecided has answered. Parallel
@@ -55,23 +23,61 @@ func Fold(events []event.Event) (State, event.EndReason) {
 // It is the set Fold answers Asking on, and it is also what the Daemon reads to
 // tell a decision on an open question from one on a question nobody asked.
 func Held(events []event.Event) []string {
-	var open []string
+	return inspect(events).held
+}
+
+type inspection struct {
+	state  State
+	reason event.EndReason
+	held   []string
+}
+
+func inspect(events []event.Event) inspection {
+	view := inspection{}
+	var ready, prompting bool
 	for _, e := range events {
 		switch e.Kind {
 		case event.KindSessionEnded:
-			// Terminal, and an ended Session holds nothing.
-			return nil
+			view.state = Ended
+			view.held = nil
+			if p, ok := e.Payload.(*event.SessionEnded); ok {
+				view.reason = p.Reason
+			}
+			return view
+
+		case event.KindSessionReady:
+			ready = true
+
+		case event.KindPromptSubmitted:
+			prompting = true
+
+		case event.KindPromptCompleted:
+			prompting = false
 
 		case event.KindApprovalRequested:
 			if p, ok := e.Payload.(*event.ApprovalRequested); ok {
-				open = append(open, p.ToolCallID)
+				view.held = append(view.held, p.ToolCallID)
 			}
 
 		case event.KindApprovalDecided:
 			if p, ok := e.Payload.(*event.ApprovalDecided); ok {
-				open = slices.DeleteFunc(open, func(id string) bool { return id == p.ToolCallID })
+				view.held = remove(view.held, p.ToolCallID)
 			}
 		}
 	}
-	return open
+	switch {
+	case len(view.held) > 0:
+		view.state = Asking
+	case prompting:
+		view.state = Working
+	case ready:
+		view.state = Idle
+	default:
+		view.state = Starting
+	}
+	return view
+}
+
+func remove(ids []string, target string) []string {
+	return slices.DeleteFunc(ids, func(id string) bool { return id == target })
 }
