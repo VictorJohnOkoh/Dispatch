@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -65,7 +66,8 @@ type HostProfile struct {
 	// which this package may not import, so main.go checks the shape.
 	ID string `json:"id"`
 
-	// Address is the SSH endpoint, host:port.
+	// Address is the SSH endpoint, and it is host:port. Port 22 is not assumed,
+	// because the Hub dials this string as it is written.
 	Address string `json:"address"`
 
 	User    string `json:"user"`
@@ -182,6 +184,11 @@ func (h Hub) Validate() error {
 		}
 		if host.Address == "" {
 			return fmt.Errorf("Host %q has no address", host.ID)
+		}
+		// The Hub dials this string, so a missing port is caught here rather than by
+		// every request failing later with net's own words.
+		if _, port, err := net.SplitHostPort(host.Address); err != nil || port == "" {
+			return fmt.Errorf("Host %q: address %q needs a port, as in %q", host.ID, host.Address, host.Address+":22")
 		}
 		if host.User == "" {
 			return fmt.Errorf("Host %q has no user", host.ID)
