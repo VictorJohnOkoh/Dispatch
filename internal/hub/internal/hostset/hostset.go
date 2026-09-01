@@ -4,7 +4,11 @@ package hostset
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"sync"
+
+	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
 type HostID string
@@ -18,11 +22,27 @@ type HostDialer interface {
 }
 
 type Table struct {
+	mu    *sync.Mutex
 	hosts []Host
+	logs  map[HostID]string
 }
 
 func New(hosts []Host) Table {
-	return Table{hosts: append([]Host(nil), hosts...)}
+	return Table{mu: &sync.Mutex{}, hosts: append([]Host(nil), hosts...), logs: make(map[HostID]string)}
+}
+
+func (t Table) LogID(id HostID) string { t.mu.Lock(); defer t.mu.Unlock(); return t.logs[id] }
+func (t Table) SetLogID(id HostID, value string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.logs[id] = value
+}
+
+func (t Table) ObserveHello(id HostID, data []byte) {
+	var hello protocol.Hello
+	if json.Unmarshal(data, &hello) == nil {
+		t.SetLogID(id, hello.LogID)
+	}
 }
 
 func (t Table) All() []Host { return append([]Host(nil), t.hosts...) }
