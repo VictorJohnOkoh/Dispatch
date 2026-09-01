@@ -23,7 +23,10 @@ ADRs that contradict or under-specify something. Everything original to this doc
 
 - Many Hosts, each running a Daemon on loopback, reached by the Hub over SSH with ed25519 key auth.
 - Manual Daemon install. Copy one binary and one JSON file to the Host and start it by hand.
-- One binary, two roles. `dispatch daemon` and `dispatch hub`.
+- Client-driven Host Registration. `dispatch host add` uses one password login to establish SSH trust,
+  verifies the Handshake, then writes the Host to `hub.json`; see ADR 0013.
+- One binary, two roles and one management command. `dispatch daemon`, `dispatch hub` and
+  `dispatch host add`.
 
 **Sessions**
 
@@ -504,10 +507,12 @@ hold.
     rather than as a blank, and every Session runs anyway.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.
-13. **Put a Daemon on a Host that has never had one.** Copy the binary and `daemon.json`, start it,
-    and have the Hub reach it, following only the written instructions and typing nothing from
-    memory. Manual install is a frozen v1 feature with nothing else checking it, and a silent `scp`
-    that landed nowhere has already cost this repo two runs.
+13. **Register a Host that has never had a Daemon.** Install OpenSSH, copy the binary and
+    `daemon.json`, and start the Daemon. On the Client machine, run `dispatch host add`, confirm the
+    Host fingerprint and enter the local Windows account password once. The command proves key-only
+    SSH and the Handshake before it writes `hub.json`; the user does not edit an authorized-key file,
+    `known_hosts` or `hub.json`. Manual Daemon install remains a frozen v1 feature, and Host
+    Registration is the only supported automatic setup in v1.
 
 Three of these get skipped unless they are called out, so they are called out. Number 6 needs a shell
 on the Host, not a green test. Number 12 needs two builds, which is an inconvenience rather than a
@@ -586,8 +591,8 @@ than a second code path, and ADR 0005 confirmed it costs nothing: it is a strict
 with nothing bent, and the ones it never writes are the five about tools, which it does not have.
 Events are normalised and typed, the Client never sees raw Harness output, and the log is transport,
 replay buffer and history at once. Daemons bind loopback, reach is an SSH tunnel with Tailscale as the
-later upgrade, and there is no self-rolled internet-facing auth. Manual Daemon install now and
-Client-driven later, which is the other half of the design-the-seam note and is unchanged.
+later upgrade, and there is no self-rolled internet-facing auth. Daemon and OpenSSH installation stay
+manual. Host Registration is Client-driven in v1; Client-driven installation remains later work.
 
 **Confirmed, and it was the one most at risk.** [ADR 0001](docs/adr/0001-resident-daemon-on-host.md),
 the resident Daemon, was decided while charting and before any Host existed. Everything since has

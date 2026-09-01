@@ -54,9 +54,10 @@ in the last column when you do.
 | 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import (`SPEC.md` adds the two per-OS `supervise` files and settles the first paint it deferred) | the package tree, imports, concurrency ownership, testing tiers, where config enters | 41 KB |
 | 0011 | One binary runs both roles, and the Hub is the only place a second Host can be named | the role split, one binary against two, deployment | 6 KB |
 | 0012 | A Harness reaches only its own Host's Vendor, and no type on the wire can say otherwise | cross-Host Sessions, the Data Plane, Vendor addresses | 4 KB |
+| 0013 | Host Registration bootstraps SSH trust with one password login | Host Registration, SSH trust bootstrap, managed Hub keys | 6 KB |
 
-Everything after 0004 is long. The twelve together are about 68,000 tokens, which is why
-they are indexed here and not read by default. 0011 and 0012 are the exceptions and
+Everything after 0004 is long. The thirteen together are about 70,000 tokens, which is why
+they are indexed here and not read by default. 0011, 0012 and 0013 are the exceptions and
 are short enough to open on a hunch.
 
 ### The build spec
