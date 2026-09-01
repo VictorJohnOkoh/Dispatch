@@ -312,6 +312,41 @@ $reader = [System.IO.StreamReader]::new($client.GetStreamAsync("http://127.0.0.1
 while ($null -ne ($line = $reader.ReadLine())) { "{0:HH:mm:ss} {1}" -f (Get-Date), $line }
 ```
 
+## 11. Check that a stop leaves nothing behind
+
+Behaviour 6 is checked from a shell on the Host, not from the Client. The Client can only tell you
+what the Daemon believes. A shell tells you what is running.
+
+Start a Session, then find the Harness and the children it started. On Windows:
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.ParentProcessId -eq (Get-Process dispatch).Id } |
+  Select-Object ProcessId, Name, CommandLine
+```
+
+Note the process ids, including the ones the Harness started itself. Stop the Session from the
+Client, wait five seconds, then ask for those ids again:
+
+```powershell
+Get-Process -Id 1234, 5678 -ErrorAction SilentlyContinue
+```
+
+Nothing must answer. A process that is still there is the orphan a Job Object exists to prevent, and
+it holds the Model in VRAM while the Daemon believes the slot is free.
+
+On Linux the same check is two commands:
+
+```bash
+pgrep -P $(pgrep -x dispatch) -a     # before the stop
+ps -p 1234,5678                      # after it
+```
+
+**This check needs a Harness that starts a process.** Passthrough starts none, so until the OpenCode
+Adapter lands there is nothing on the Host to look for. What stands in the meantime is
+`TestTheWholeTreeGoesWithTheHarness`, which kills a real process tree and asks the children
+themselves whether they are alive.
+
 ## When it does not work
 
 The Hub names five failures. Each one has one place to look.

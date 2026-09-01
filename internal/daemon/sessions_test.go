@@ -35,7 +35,7 @@ type host struct {
 	lines   *lines
 }
 
-func newHost(t *testing.T) *host {
+func newHost(t *testing.T, extra ...Harness) *host {
 	t.Helper()
 	dir := t.TempDir()
 	root, err := workspace.NewRoot(dir)
@@ -52,8 +52,8 @@ func newHost(t *testing.T) *host {
 	f := ollamaFake()
 	chat := &chatFake{}
 	written := &lines{}
-	d := New(slog.New(slog.NewTextHandler(written, nil)), events, root,
-		[]vendors.Adapter{f}, []Harness{{Name: "passthrough", Adapter: harness.NewPassthrough(chat)}})
+	harnesses := append([]Harness{{Name: "passthrough", Adapter: harness.NewPassthrough(chat)}}, extra...)
+	d := New(slog.New(slog.NewTextHandler(written, nil)), events, root, []vendors.Adapter{f}, harnesses)
 	d.vendors.pollAll(t.Context())
 
 	return &host{Daemon: d, root: dir, logPath: path, vendor: f, chat: chat, lines: written}

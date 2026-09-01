@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -48,8 +49,8 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	adapter := d.harness(req.Harness)
-	if adapter == nil {
+	h := d.harness(req.Harness)
+	if h == nil {
 		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
 			Reason: protocol.ReasonUnknownHarness,
 			Detail: fmt.Sprintf("this Host serves no Harness named %q", req.Harness),
@@ -105,7 +106,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 	s := &Session{
 		id:      d.sessions.newID(),
 		harness: req.Harness,
-		caps:    adapter.Capabilities(),
+		caps:    h.Adapter.Capabilities(),
 		model:   req.Model,
 		vendor:  vendor.Endpoint().Base,
 		dir:     dir,
@@ -124,7 +125,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 	}
 	d.sessions.add(s)
 
-	go d.launch(ctx, s, adapter, vendor)
+	go d.launch(ctx, s, h, vendor)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(protocol.StatusStarted)
@@ -138,19 +139,20 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 // for the Session's life, which is what makes Idle mean idle rather than a Prompt
 // that costs twenty seconds. Nothing calls Unload: that is reserved for the VRAM
 // policy which is out of v1.
-func (d *Daemon) launch(ctx context.Context, s *Session, adapter harness.Adapter, vendor vendors.Adapter) {
+func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vendors.Adapter) {
 	if err := vendor.Load(ctx, s.model); err != nil {
 		d.endFailed(s, event.ErrVendor, fmt.Sprintf("the Model %s would not load: %v", s.model, err))
 		return
 	}
 
-	// Spawn and Files are not filled: passthrough calls neither, and the process
-	// supervisor and the contained file access they name have not landed.
-	run, err := adapter.Start(ctx, harness.SessionSpec{
+	// Files is not filled: the contained file access it names has not landed.
+	// Passthrough calls neither it nor Spawn.
+	run, err := h.Adapter.Start(ctx, harness.SessionSpec{
 		Session: s.id,
 		Model:   s.model,
 		Vendor:  vendor.Endpoint(),
 		Dir:     s.dir,
+		Spawn:   d.spawner(s, h),
 	}, &sink{d: d, s: s})
 	if err != nil {
 		d.endFailed(s, event.ErrHarnessFailed, err.Error())
@@ -158,6 +160,11 @@ func (d *Daemon) launch(ctx context.Context, s *Session, adapter harness.Adapter
 	}
 	d.sessions.setRun(s, run)
 
+	// A Harness that died during its own launch has ended the Session already, and
+	// a Session that is Ready after it Ended reads as a Session that came back.
+	if d.sessions.ending(s) {
+		return
+	}
 	d.write(s, event.KindSessionReady, &event.SessionReady{Model: s.model})
 }
 
@@ -174,7 +181,52 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
+	// A Harness that died still has a group, and on Windows that group is a handle
+	// that a child of its own may still be living inside.
+	d.kill(s)
 	s.cancel()
+}
+
+// ladder is ADR 0008's shutdown ladder, in order. Steps 1 and 2 free a Harness
+// that is blocked on an answer nobody is going to give it, so a stop that skips
+// them leaves it blocked until the kill. Steps 4 to 6 are the process, and a
+// Session stopped while it is still Starting reaches them with no Run, which is
+// the skip to step 4 the ladder names.
+//
+// Because step 6 is a kill, a stop always finishes.
+func (d *Daemon) ladder(s *Session, run harness.Run) {
+	held := d.sessions.held(s)
+	for _, call := range held {
+		d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
+			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
+		})
+	}
+	for _, call := range d.sessions.openCalls(s) {
+		// A call whose question this stop just refused ended because of that
+		// refusal. Any other was in flight, and nothing observed its result.
+		outcome := event.OutcomeUnknown
+		if slices.Contains(held, call) {
+			outcome = event.OutcomeRefused
+		}
+		d.write(s, event.KindToolCallEnded, &event.ToolCallEnded{ToolCallID: call, Outcome: outcome})
+	}
+	if run != nil {
+		run.Close()
+	}
+	d.kill(s)
+}
+
+// kill is the ladder's last three steps against whatever process this Session has.
+// A Session whose Harness spawns none, or one that failed before it spawned, has
+// nothing here to do.
+func (d *Daemon) kill(s *Session) {
+	p := d.sessions.process(s)
+	if p == nil {
+		return
+	}
+	if err := p.stop(d.stopWait); err != nil {
+		d.log.Error("the Harness process tree may have outlived its Session", "session", s.id, "err", err)
+	}
 }
 
 // listSessions answers with this Host's Sessions, live and ended, in start order.
@@ -318,6 +370,10 @@ type Session struct {
 	// Harness is up, and stays nil for a launch that failed.
 	run harness.Run
 
+	// proc is the Harness process, which the Daemon owns and the Adapter never
+	// sees. It is nil for a Harness that spawns none, and passthrough is one.
+	proc *harnessProcess
+
 	// events is this Session's own Events, in Seq order, which is what the fold
 	// reads. Deltas are not Events and never land here.
 	events []event.Event
@@ -369,6 +425,13 @@ func (r *sessions) held(s *Session) []string {
 	return session.Held(s.events)
 }
 
+// openCalls is the Tool Calls no ToolCallEnded has closed yet.
+func (r *sessions) openCalls(s *Session) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return session.OpenCalls(s.events)
+}
+
 // ending reports whether someone has already taken on writing SessionEnded.
 func (r *sessions) ending(s *Session) bool {
 	r.mu.Lock()
@@ -392,6 +455,18 @@ func (r *sessions) setRun(s *Session, run harness.Run) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s.run = run
+}
+
+func (r *sessions) setProcess(s *Session, p *harnessProcess) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s.proc = p
+}
+
+func (r *sessions) process(s *Session) *harnessProcess {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return s.proc
 }
 
 // record keeps one Event against the Session it belongs to, so the fold has

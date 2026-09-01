@@ -112,11 +112,9 @@ func (d *Daemon) stopSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// run is nil while the Session is Starting, and cancelling is what ends a launch
-	// that has not produced one yet.
-	if run != nil {
-		run.Close()
-	}
+	// run is nil while the Session is Starting, and the ladder skips to step 4 for
+	// it: there is nothing to say goodbye to and nothing open to close.
+	d.ladder(s, run)
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndStopped})
 	s.cancel()
 

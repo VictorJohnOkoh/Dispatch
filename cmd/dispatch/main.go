@@ -127,7 +127,9 @@ func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.
 	for _, profile := range profiles {
 		switch profile.Name {
 		case "passthrough":
-			out = append(out, daemon.Harness{Name: profile.Name, Adapter: harness.NewPassthrough(nil)})
+			out = append(out, daemon.Harness{
+				Name: profile.Name, Exe: profile.Exe, Adapter: harness.NewPassthrough(nil),
+			})
 		default:
 			log.Warn("this Harness has no Adapter yet, and no Session may name it", "harness", profile.Name)
 		}
