@@ -6,6 +6,7 @@
       "address": "192.168.1.20:22",
       "user": "victor",
       "keyPath": "/home/victor/.ssh/id_ed25519",
+      "knownHosts": "/home/victor/.ssh/known_hosts",
       "daemonPort": 7717
     },
     {
@@ -13,6 +14,7 @@
       "address": "192.168.1.21:22",
       "user": "victor",
       "keyPath": "/home/victor/.ssh/id_ed25519",
+      "knownHosts": "/home/victor/.ssh/known_hosts",
       "daemonPort": 7717
     }
   ]

@@ -399,3 +399,26 @@ func has(body string, wants []string) bool {
 	}
 	return true
 }
+
+// A Host the Hub cannot reach answers 503 with the dialer's own words in it, so
+// a Host that is off and a Daemon that is not running do not read the same.
+func TestAHostThatCannotBeReachedNamesWhy(t *testing.T) {
+	dialer := dialFunc(func(context.Context, hostset.HostID) (net.Conn, error) {
+		return nil, hostset.ErrNoDaemon
+	})
+	srv := httptest.NewServer(hub.New([]hostset.Host{{ID: "desk"}}, dialer).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/hosts/desk/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), hostset.ErrNoDaemon.Error()) {
+		t.Errorf("body = %q, want the dialer's error in it", body)
+	}
+}

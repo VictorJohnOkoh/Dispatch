@@ -71,6 +71,10 @@ type HostProfile struct {
 	User    string `json:"user"`
 	KeyPath string `json:"keyPath"`
 
+	// KnownHosts is the file this Host's key is checked against. It is empty for
+	// the user's own ~/.ssh/known_hosts, which main.go resolves.
+	KnownHosts string `json:"knownHosts"`
+
 	// DaemonPort is the loopback port the direct-tcpip channel opens onto.
 	DaemonPort int `json:"daemonPort"`
 }
