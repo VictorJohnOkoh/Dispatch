@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -66,7 +67,7 @@ func draw(e event.Event) row {
 		r.Text, r.Appendable = p.Text, true
 	case *event.ToolCallRequested:
 		r.Title = "Tool call: " + p.Name
-		r.Detail = strings.TrimSpace(p.Title + " " + string(p.Args))
+		r.Detail = strings.TrimSpace(p.Title + " " + args(p.Args))
 	case *event.ApprovalRequested:
 		r.Title = "Approval requested: " + p.Title
 		r.Detail = p.Detail
@@ -85,9 +86,36 @@ func draw(e event.Event) row {
 	case *event.SessionEnded:
 		r.Title = "Session ended: " + string(p.Reason)
 	case json.RawMessage:
-		r.Detail = string(p)
+		r.Detail = compact(p)
 	}
 	return r
+}
+
+// compact spells a raw payload the way page.js spells it. The Hub forwards what
+// the Harness sent, byte for byte, and JSON.stringify writes no space between a
+// key and its value, so the same Event drawn here and drawn live would otherwise
+// differ by whitespace alone.
+func compact(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var out bytes.Buffer
+	if err := json.Compact(&out, raw); err != nil {
+		// A payload that is not JSON still reaches the reader. This package draws
+		// what it was given and never drops a row.
+		return string(raw)
+	}
+	return out.String()
+}
+
+// args is a Tool Call's arguments, and nothing at all for a call that carries
+// none. A Harness that sends the literal null means no arguments, and "null" on
+// the line reads as an argument whose value is null.
+func args(raw json.RawMessage) string {
+	if spelt := compact(raw); spelt != "null" {
+		return spelt
+	}
+	return ""
 }
 
 // note is the line for the three Kinds that carry no payload, and the Kind's own

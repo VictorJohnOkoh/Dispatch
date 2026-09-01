@@ -12,7 +12,26 @@ const session = list.dataset.session;
 // rows is every row on the page by Sequence Number, so a Delta finds its message
 // without searching, and a replayed Event replaces its row instead of doubling it.
 const rows = new Map();
-for (const el of list.children) rows.set(Number(el.dataset.seq), el);
+
+// held is how much text each of those rows holds. A Delta that carries on from
+// exactly that much is appended, and only one that does not has to read the
+// message back out of the DOM. Without it, a message that arrives in a thousand
+// Deltas is copied whole a thousand times.
+const held = new Map();
+
+for (const el of list.children) {
+  const seq = Number(el.dataset.seq);
+  rows.set(seq, el);
+  remember(seq, el);
+}
+
+// remember records what one row's message holds, or forgets a row that has no
+// message to add to.
+function remember(seq, el) {
+  const text = el.querySelector(".text");
+  if (text) held.set(seq, text.textContent.length);
+  else held.delete(seq);
+}
 
 // The stream resumes at the Cursor the first paint was drawn at. It goes in the
 // query because an EventSource sets no headers; on every reconnect after this the
@@ -28,6 +47,7 @@ stream.addEventListener("event", (frame) => {
   if (old) old.replaceWith(el);
   else list.append(el);
   rows.set(f.seq, el);
+  remember(f.seq, el);
 });
 
 stream.addEventListener("delta", (frame) => {
@@ -37,9 +57,21 @@ stream.addEventListener("delta", (frame) => {
   // Sequence Number this page has no row for is another Session's message.
   const text = rows.get(f.seq)?.querySelector(".text");
   if (!text) return;
-  // The final Delta carries the whole text and replaces, so a page that dropped
-  // one repairs itself here.
-  text.textContent = f.final ? f.text : text.textContent.slice(0, f.n) + f.text;
+  if (f.final) {
+    // The final Delta carries the whole text and replaces it.
+    text.textContent = f.text;
+    held.set(f.seq, f.text.length);
+  } else if (f.n === held.get(f.seq)) {
+    // This Delta carries on from where the row stands, which is every Delta of a
+    // message that nothing went wrong with. Appending touches only the new text.
+    text.append(f.text);
+    held.set(f.seq, f.n + f.text.length);
+  } else {
+    // The row holds more or less than this Delta expects, so the page dropped one.
+    // It repairs itself by rewriting from where the Delta says the text stood.
+    text.textContent = text.textContent.slice(0, f.n) + f.text;
+    held.set(f.seq, f.n + f.text.length);
+  }
 });
 
 // A resync says this page's Cursor is outside the log. The answer is to discard
