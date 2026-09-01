@@ -22,6 +22,17 @@ type Cursor uint64
 
 func (c Cursor) String() string { return strconv.FormatUint(uint64(c), 10) }
 
+// CursorHeader carries a Cursor on a request, under SSE's own name so that a
+// browser's EventSource sends it unaided.
+const CursorHeader = "Last-Event-ID"
+
+// LogHeader carries the identity of the log a reader's Cursor came from. It is a
+// header and not part of the Cursor because a Daemon's Cursor is one number and
+// stays one number, and it is optional because a reader that has never connected
+// holds no identity to send. A Daemon that is handed one it does not match answers
+// a resync Frame.
+const LogHeader = "Dispatch-Log"
+
 // ParseCursor reads a Daemon's Last-Event-ID, which is one number and stays one
 // number because the Hub splits the merged spelling before a Daemon sees it.
 func ParseCursor(s string) (Cursor, error) {

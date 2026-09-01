@@ -109,7 +109,7 @@ One thing sent on an Event stream. An Event is one Frame; a Delta, a Vendor push
 _Avoid_: packet, envelope, record
 
 **Cursor**:
-Where a reader may resume an Event stream, carried as `Last-Event-ID`. It is the highest Sequence Number below every open appendable Event, so it is not the last Sequence Number a reader saw and it lags a message that is still arriving. That lag is what makes an unfinished message replay whole after a reconnect. A Daemon's Cursor is one number; a Client's carries one per Host, because its stream is merged.
+Where a reader may resume an Event stream, carried as `Last-Event-ID`. It is the highest Sequence Number below every open appendable Event, so it is not the last Sequence Number a reader saw and it lags a message that is still arriving. That lag is what makes an unfinished message replay whole after a reconnect. A Daemon's Cursor is one number; a Client's carries one per Host, because its stream is merged. The identity of the log a Cursor came from travels beside it in a `Dispatch-Log` header rather than inside it, so the Cursor stays one number.
 _Avoid_: offset, position, checkpoint, watermark
 
 **Resync**:

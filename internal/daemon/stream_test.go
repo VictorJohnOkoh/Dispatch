@@ -48,10 +48,16 @@ func (h *host) stream(t *testing.T) (*httptest.Server, *reader) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
+	return srv, newReader(t, resp)
+}
+
+// newReader reads Frames off a stream that has answered.
+func newReader(t *testing.T, resp *http.Response) *reader {
+	t.Helper()
 	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Fatalf("content type %q", got)
 	}
-	return srv, &reader{body: bufio.NewScanner(resp.Body), close: func() { resp.Body.Close() }}
+	return &reader{body: bufio.NewScanner(resp.Body), close: func() { resp.Body.Close() }}
 }
 
 // next reads one Frame. A blank line ends a Frame, which is the whole of SSE

@@ -259,6 +259,12 @@ it is the whole reason the Client can draw the pair on a Session row.
 `id:` appears only where a frame advances the cursor, and the Hub rewrites it to the whole compound
 cursor, because an `EventSource` keeps only one `Last-Event-ID`.
 
+**A reader names the log its cursor came from in a `Dispatch-Log` header**, beside `Last-Event-ID` on
+`GET /v1/events`. ADR 0009 fixed a Daemon's cursor at one number and gave the identity to `hello`,
+which arrives after the Daemon has already begun replaying, so the identity travels with the request
+instead. The header is optional: a reader that has never connected holds no identity, sends none, and
+is served. This is additive, so the protocol version does not move.
+
 The log is SQLite with write-ahead logging, one `events` table whose five columns are the wire shape,
 one index. An Event is committed before it is sent. An open message flushes every 4 KiB, so a crash
 keeps what it had. Nothing is ever deleted, so a cursor is never too old, and a `resync` means the

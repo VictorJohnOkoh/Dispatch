@@ -14,12 +14,17 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
+// replayPage is how many Events one read of a replay holds. A log is never pruned,
+// so a Cursor from last month is a long read, and it is paged rather than loaded.
+const replayPage = 500
+
 // streamEvents serves this Host's Event stream. It subscribes to the log first and
 // reads anything else second, so nothing written in between is missed.
 //
-// Last-Event-ID resumes a stream, and serving a resume is not here yet: this
-// connection starts at the live edge. hello carries no log identity for the same
-// reason, because nothing can compare one until a Cursor is served.
+// Last-Event-ID resumes a stream. A Cursor this log cannot serve is answered with
+// a resync Frame rather than an HTTP error, because the stream's liveness is the
+// Host's presence: failing the request would tell the user their machine is
+// unreachable when the log was merely replaced.
 func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 	if !d.speaks(w, r) {
 		return
@@ -30,25 +35,45 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	from, resuming, err := resumeAt(r)
+	if err != nil {
+		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
+			Reason: protocol.ReasonMalformed, Detail: err.Error(),
+		})
+		return
+	}
+
 	frames, stop := d.events.Subscribe()
 	defer stop()
 
-	latest, err := d.events.Latest()
-	if err != nil {
-		http.Error(w, "the Event log could not be read", http.StatusInternalServerError)
-		return
-	}
+	// One view of the log, so the replay below and the Cursor it ends on describe
+	// the same moment. Everything above it arrives on the subscription instead.
+	at := d.events.Resume()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 
-	// hello is first on every connection, and the whole Vendor state follows it, so
-	// a Client that attached between two beats has a Vendor row to draw. The Cursor
-	// starts where the log stands, because this connection starts at the live edge
-	// and nothing below that is sent on it.
-	out := &sse{w: w, flush: flush, at: cursor{at: latest, seen: latest}}
-	out.frame(protocol.FrameHello, "", protocol.Hello{Protocol: protocol.Version, Latest: latest})
+	// hello is first on every connection. The Cursor starts where a reader that has
+	// read all of this view stands, which lags an open message, so a reconnect from
+	// it replays that message whole.
+	out := &sse{w: w, flush: flush, at: newCursor(at.Latest, at.Open)}
+	out.frame(protocol.FrameHello, "", protocol.Hello{
+		Protocol: protocol.Version, LogID: at.LogID, Latest: at.Latest,
+	})
+
+	switch {
+	case !resuming:
+		// This connection starts at the live edge, and nothing below it is sent.
+	case unservable(r.Header.Get(protocol.LogHeader), from, at):
+		out.frame(protocol.FrameResync, "", protocol.Resync{LogID: at.LogID, Latest: at.Latest})
+	default:
+		out.at = newCursor(uint64(from), nil)
+		d.replay(out, from, at)
+	}
+
+	// The whole Vendor state follows, so a Client that attached between two beats
+	// has a Vendor row to draw.
 	views, beat := d.vendors.Watch()
 	out.frame(protocol.FrameVendors, "", vendorsBody{views})
 
@@ -65,7 +90,7 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 				// connection costs one reconnect, which is what a Cursor is for.
 				return
 			}
-			out.fromLog(f)
+			out.fromLog(f, at.Latest)
 		case <-beat:
 			views, beat = d.vendors.Watch()
 			out.frame(protocol.FrameVendors, "", vendorsBody{views})
@@ -74,6 +99,48 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.log.Debug("an Event stream failed to write", "err", out.err)
+}
+
+// resumeAt is where this connection resumes from. A reader that sends no
+// Last-Event-ID starts at the live edge, which is a different thing from a Cursor
+// of zero: zero is a real Cursor and it means the whole log.
+func resumeAt(r *http.Request) (protocol.Cursor, bool, error) {
+	raw := r.Header.Get(protocol.CursorHeader)
+	if raw == "" {
+		return 0, false, nil
+	}
+	from, err := protocol.ParseCursor(raw)
+	return from, true, err
+}
+
+// unservable is the resync rule, and there are only two ways to meet it. Nothing
+// is ever deleted, so a Cursor is never too old: it is unservable when it names a
+// Sequence Number this log never allotted, or when the reader says it took the
+// Cursor from a different log. A reader that names no log compares nothing, which
+// is what a fresh reader and a curl both do.
+func unservable(held string, from protocol.Cursor, at eventlog.Resume) bool {
+	return uint64(from) > at.Latest || (held != "" && held != at.LogID)
+}
+
+// replay writes every Event between a Cursor and the moment this reader joined,
+// oldest first and one page at a time. Deltas are not replayed: a Delta never
+// carries text its Event will not eventually hold, so the rows carry everything.
+func (d *Daemon) replay(out *sse, from protocol.Cursor, at eventlog.Resume) {
+	for after := uint64(from); out.err == nil; {
+		page, err := d.events.Replay(after, at.Latest, replayPage)
+		if err != nil {
+			d.log.Error("a replay could not be read", "from", after, "err", err)
+			out.err = err
+			return
+		}
+		for _, e := range page {
+			out.frame(protocol.FrameEvent, stamp(out.at.event(e.Seq, slices.Contains(at.Open, e.Seq))), e)
+			after = e.Seq
+		}
+		if len(page) < replayPage {
+			return
+		}
+	}
 }
 
 // speaks is the Handshake. A caller that names a version this Daemon cannot serve
@@ -110,6 +177,16 @@ type cursor struct {
 	at   uint64
 	seen uint64
 	open []uint64
+}
+
+// newCursor is where a reader that has read the log up to seen stands, given the
+// messages still open at or below it.
+func newCursor(seen uint64, open []uint64) cursor {
+	c := cursor{at: seen, seen: seen, open: open}
+	if len(open) > 0 {
+		c.at = open[0] - 1
+	}
+	return c
 }
 
 // event takes one Event and reports the Cursor to stamp on it, or false when the
@@ -157,9 +234,17 @@ type sse struct {
 }
 
 // fromLog writes one Frame the Event log fanned out, as an event or as a delta.
-func (s *sse) fromLog(f eventlog.Frame) {
+//
+// An Event at or below replayed was written before this reader joined and has been
+// sent already, so it is dropped rather than sent twice. A Delta is always
+// forwarded: it is at most once and never replayed, and the one for a message the
+// replay caught mid-flight is what carries that message the rest of the way.
+func (s *sse) fromLog(f eventlog.Frame, replayed uint64) {
 	switch {
 	case f.Event != nil:
+		if f.Event.Seq <= replayed {
+			return
+		}
 		s.frame(protocol.FrameEvent, stamp(s.at.event(f.Event.Seq, f.Open)), f.Event)
 	case f.Delta != nil:
 		s.frame(protocol.FrameDelta, stamp(s.at.delta(f.Delta)), f.Delta)

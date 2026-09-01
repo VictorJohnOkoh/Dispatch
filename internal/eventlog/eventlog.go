@@ -6,11 +6,16 @@
 // trust a Cursor. A Delta is the one exception: it may carry up to 4 KiB of text
 // the file does not hold yet.
 //
-// ADR 0009 owns the schema. Cursor, Replay and Sweep are not here yet.
+// Nothing is ever deleted, so a Cursor is never too old and there is no retention
+// pass anywhere in this package.
+//
+// ADR 0009 owns the schema.
 package eventlog
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -33,6 +38,12 @@ CREATE TABLE IF NOT EXISTS events (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS events_by_session ON events (session, seq);
+
+CREATE TABLE IF NOT EXISTS meta (
+  id       INTEGER PRIMARY KEY CHECK (id = 1),
+  log_id   TEXT    NOT NULL,
+  swept_to INTEGER NOT NULL
+) STRICT;
 `
 
 // FlushThreshold is how much new text an open message holds before it is written
@@ -96,9 +107,19 @@ func (s *subscriber) end() {
 type Log struct {
 	db *sql.DB
 
+	// logID is this file's identity, written once when it is created. A Sequence
+	// Number means nothing without it: a log that was deleted, restored or
+	// reimaged starts at 1 again while a reader still holds a Cursor of 900.
+	logID string
+
 	mu   sync.Mutex
 	open map[uint64]*openMessage
 	subs []*subscriber
+
+	// latest is the highest Sequence Number this log has allotted, reloaded from
+	// the file on Open. It is held here rather than queried so that it and the open
+	// messages below it are read as one moment.
+	latest uint64
 }
 
 // Open opens the log at path, creating the file and the schema if they are not
@@ -113,7 +134,31 @@ func Open(path string) (*Log, error) {
 		db.Close()
 		return nil, fmt.Errorf("eventlog: schema %s: %w", path, err)
 	}
-	return &Log{db: db, open: make(map[uint64]*openMessage)}, nil
+
+	l := &Log{db: db, open: make(map[uint64]*openMessage)}
+	if err := l.identify(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("eventlog: open %s: %w", path, err)
+	}
+	return l, nil
+}
+
+// identify writes the meta row if the file has none and reads back the identity
+// and the counter. The insert is ignored on a file that already has one, so a log
+// keeps the identity it was created with for as long as the file exists.
+func (l *Log) identify() error {
+	var id [4]byte
+	rand.Read(id[:])
+	if _, err := l.db.Exec(
+		`INSERT OR IGNORE INTO meta (id, log_id, swept_to) VALUES (1, ?, 0)`,
+		hex.EncodeToString(id[:]),
+	); err != nil {
+		return err
+	}
+	if err := l.db.QueryRow(`SELECT log_id FROM meta WHERE id = 1`).Scan(&l.logID); err != nil {
+		return err
+	}
+	return l.db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events`).Scan(&l.latest)
 }
 
 // Close flushes every message that is still open, ends every subscription and
@@ -165,6 +210,7 @@ func (l *Log) Append(e event.Event) (event.Event, error) {
 		return event.Event{}, fmt.Errorf("eventlog: append %s: %w", e.Kind, err)
 	}
 	e.Seq = uint64(seq)
+	l.latest = e.Seq
 
 	text, isOpen := openingText(e)
 	if isOpen {

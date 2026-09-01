@@ -6,11 +6,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
 )
@@ -33,10 +35,16 @@ func (l *lines) String() string {
 	return l.buf.String()
 }
 
-// plain is a Daemon with its Vendors and nothing else, for the tests that never
-// start a Session.
-func plain(adapters []vendors.Adapter, log *slog.Logger) *Daemon {
-	return New(log, nil, workspace.Root{}, adapters, nil)
+// plain is a Daemon with its Vendors and an empty Event log, for the tests that
+// never start a Session. The log is real because Serve sweeps it at boot.
+func plain(t *testing.T, adapters []vendors.Adapter, log *slog.Logger) *Daemon {
+	t.Helper()
+	events, err := eventlog.Open(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { events.Close() })
+	return New(log, events, workspace.Root{}, adapters, nil)
 }
 
 var addrLine = regexp.MustCompile(`addr=(\S+)`)
@@ -61,7 +69,7 @@ func boundAddr(t *testing.T, l *lines) string {
 // an operator reads.
 func TestServeBindsLoopbackAndStaysUp(t *testing.T) {
 	log := &lines{}
-	d := plain(nil, slog.New(slog.NewTextHandler(log, nil)))
+	d := plain(t, nil, slog.New(slog.NewTextHandler(log, nil)))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	served := make(chan error, 1)
@@ -95,7 +103,7 @@ func TestServeAnswersNothingUntilTheFirstBeat(t *testing.T) {
 	f := ollamaFake()
 	f.block = make(chan struct{})
 	log := &lines{}
-	d := plain([]vendors.Adapter{f}, slog.New(slog.NewTextHandler(log, nil)))
+	d := plain(t, []vendors.Adapter{f}, slog.New(slog.NewTextHandler(log, nil)))
 
 	go d.Serve(t.Context(), "127.0.0.1:0")
 	url := "http://" + boundAddr(t, log) + "/v1/models"
@@ -133,7 +141,7 @@ func TestServeAnswersNothingUntilTheFirstBeat(t *testing.T) {
 // interface is refused at start rather than bound.
 func TestServeRefusesAnAddressThatIsNotLoopback(t *testing.T) {
 	for _, listen := range []string{"0.0.0.0:7717", "192.168.1.4:7717", "localhost:7717", "7717"} {
-		if err := plain(nil, quiet()).Serve(t.Context(), listen); err == nil {
+		if err := plain(t, nil, quiet()).Serve(t.Context(), listen); err == nil {
 			t.Errorf("Serve(%q) = nil, want an error", listen)
 		}
 	}

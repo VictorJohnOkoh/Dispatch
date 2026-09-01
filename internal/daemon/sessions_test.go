@@ -210,10 +210,12 @@ func TestStartSessionAnswersWithTheSessionID(t *testing.T) {
 // keeps a cold Model load out of the first Prompt.
 func TestSessionReadyWaitsForTheModelToLoad(t *testing.T) {
 	h := newHost(t)
+	loading := make(chan struct{})
+	h.vendor.loading = loading
 	h.vendor.gate = make(chan struct{})
 
 	answer := h.started(t, h.post(t, "/v1/sessions", startBody))
-	h.waitState(t, answer.Session, "Starting")
+	<-loading
 
 	if got := h.kinds(t); len(got) != 1 || got[0] != "SessionStarted" {
 		t.Fatalf("log = %v, want SessionStarted alone while the Model loads", got)
