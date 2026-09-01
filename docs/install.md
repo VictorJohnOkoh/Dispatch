@@ -256,6 +256,8 @@ Copy `hub.example.json` and edit it. Every path in it is a path on the **Client 
 
 - `id` is the Host's name in every URL and every Cursor. Keep it short and use letters, digits and
   hyphens.
+- `address` needs the SSH port written out. The Hub dials the string as you write it and assumes
+  nothing, so `192.168.1.20` alone is refused at start and `192.168.1.20:22` is what you want.
 - `daemonPort` is the port from the Host's `listen`. The Hub opens a channel onto `127.0.0.1` at that
   port, on the far side of the tunnel.
 - `knownHosts` is optional. Leave it out and the Hub reads `%USERPROFILE%\.ssh\known_hosts`.

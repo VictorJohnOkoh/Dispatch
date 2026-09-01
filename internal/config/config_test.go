@@ -151,6 +151,8 @@ func TestLoadRefusesBadValues(t *testing.T) {
 			func(p string) error { _, err := LoadHub(p); return err }},
 		{"daemon port out of range", strings.Replace(goodHub, `"daemonPort": 7717`, `"daemonPort": 0`, 1),
 			func(p string) error { _, err := LoadHub(p); return err }},
+		{"host address with no port", strings.Replace(goodHub, `"address": "10.0.0.4:22"`, `"address": "10.0.0.4"`, 1),
+			func(p string) error { _, err := LoadHub(p); return err }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
