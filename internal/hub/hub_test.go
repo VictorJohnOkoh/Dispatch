@@ -69,7 +69,7 @@ func TestTheMergedStreamCarriesEveryHostAndSplitsAReconnectCursor(t *testing.T) 
 	// Cursor and answers each Host with a resync, because a Cursor it cannot check
 	// against a log would resume a replaced one at a number that means something
 	// else there.
-	merged(t, srv.URL, "desk=0,pi=6", `"host":"desk"`, `"host":"pi"`, `"kind":"FutureKind"`, "event: resync", `"logId":"desk-log"`, "id: desk=1,pi=7")
+	merged(t, srv.URL+"/v1/events", "desk=0,pi=6", `"host":"desk"`, `"host":"pi"`, `"kind":"FutureKind"`, "event: resync", `"logId":"desk-log"`, "id: desk=1,pi=7")
 	desk, _ := seen.Load(hostset.HostID("desk"))
 	pi, _ := seen.Load(hostset.HostID("pi"))
 	if desk != "|" || pi != "|" {
@@ -78,7 +78,7 @@ func TestTheMergedStreamCarriesEveryHostAndSplitsAReconnectCursor(t *testing.T) 
 
 	// The Hello named both logs, so this one resumes and each Daemon reads its own
 	// Cursor and its own log identity.
-	merged(t, srv.URL, "desk=1,pi=7", "id: desk=1,pi=7", `"host":"pi"`)
+	merged(t, srv.URL+"/v1/events", "desk=1,pi=7", "id: desk=1,pi=7", `"host":"pi"`)
 	desk, _ = seen.Load(hostset.HostID("desk"))
 	pi, _ = seen.Load(hostset.HostID("pi"))
 	if desk != "1|desk-log" || pi != "7|pi-log" {
@@ -100,20 +100,20 @@ func TestAHostThatIsDownDoesNotEndTheMergedStream(t *testing.T) {
 	srv := httptest.NewServer(hub.New([]hostset.Host{{ID: "desk"}}, d).Handler())
 	defer srv.Close()
 
-	merged(t, srv.URL, "", `"kind":"PromptSubmitted"`)
+	merged(t, srv.URL+"/v1/events", "", `"kind":"PromptSubmitted"`)
 	if dials.Load() < 2 {
 		t.Errorf("the Hub dialled %d times, want a retry", dials.Load())
 	}
 }
 
-// merged opens the Client's merged stream and reads it until every want has
+// merged opens the Client's merged stream at url and reads it until every want has
 // appeared. A stream that ends first is the failure: a Host that is down must not
 // end it.
 func merged(t *testing.T, url, cursor string, wants ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url+"/v1/events", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if cursor != "" {
 		req.Header.Set(protocol.CursorHeader, cursor)
 	}

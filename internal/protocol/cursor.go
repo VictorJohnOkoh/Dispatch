@@ -26,6 +26,13 @@ func (c Cursor) String() string { return strconv.FormatUint(uint64(c), 10) }
 // browser's EventSource sends it unaided.
 const CursorHeader = "Last-Event-ID"
 
+// CursorParam carries a Cursor on the Client's leg, where a header cannot. A
+// browser's EventSource sets no headers, and it sends Last-Event-ID only after it
+// has seen an id:, so the first connection after a server-rendered first paint has
+// nowhere else to put the Cursor that paint was made at. The header still wins
+// where a reader can set one.
+const CursorParam = "from"
+
 // LogHeader carries the identity of the log a reader's Cursor came from. It is a
 // header and not part of the Cursor because a Daemon's Cursor is one number and
 // stays one number, and it is optional because a reader that has never connected

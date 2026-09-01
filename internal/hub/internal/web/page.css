@@ -1,0 +1,27 @@
+:root { color-scheme: light dark; }
+
+body {
+  margin: 0 auto;
+  padding: 1.5rem;
+  max-width: 48rem;
+  font: 15px/1.5 system-ui, sans-serif;
+}
+
+header { border-bottom: 1px solid currentColor; margin-bottom: 1rem; }
+h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
+.host { margin: 0.2rem 0 0.8rem; opacity: 0.7; }
+
+#transcript { list-style: none; margin: 0; padding: 0; }
+
+.row { padding: 0.6rem 0; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
+.title { margin: 0; font-weight: 600; }
+.detail { margin: 0.3rem 0 0; opacity: 0.7; font-family: ui-monospace, monospace; }
+
+/* A transcript is mostly text a Harness wrote, so it keeps its own line breaks
+   and wraps rather than scrolling sideways. */
+.text {
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}

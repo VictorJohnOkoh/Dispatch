@@ -44,7 +44,7 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursors := make(protocol.MergedCursor)
-	if raw := r.Header.Get(protocol.CursorHeader); raw != "" {
+	if raw := resumeAt(r); raw != "" {
 		parsed, err := protocol.ParseMergedCursor(raw)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -108,6 +108,16 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 			flush.Flush()
 		}
 	}
+}
+
+// resumeAt is the Cursor this connection resumes on. A reader that can set a
+// header sends one; the browser's first stream after a server-rendered first paint
+// cannot, and puts the same Cursor in the query instead.
+func resumeAt(r *http.Request) string {
+	if raw := r.Header.Get(protocol.CursorHeader); raw != "" {
+		return raw
+	}
+	return r.URL.Query().Get(protocol.CursorParam)
 }
 
 // hostReader is one Host's leg of the merged stream. It holds where that Host

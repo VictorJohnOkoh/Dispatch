@@ -181,11 +181,15 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 // The Cursor beside them is where the log stood when they were read, so a Client
 // that opens the stream there loses nothing that fell in between.
 func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
+	// The Cursor is read first. One read behind the data replays what the answer
+	// already carried, which costs a redrawn row; one read ahead of it drops what
+	// landed in between, which is the loss this Cursor exists to prevent.
+	at := d.events.Cursor()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
 		Sessions []SessionView   `json:"sessions"`
 		Cursor   protocol.Cursor `json:"cursor"`
-	}{d.sessions.views(), d.events.Cursor()})
+	}{d.sessions.views(), at})
 }
 
 // The page GET /v1/sessions/{session}/events serves when the request asks for no
@@ -208,6 +212,8 @@ func (d *Daemon) sessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read before the page, for the reason listSessions gives.
+	at := d.events.Cursor()
 	events, err := d.events.SessionPage(id, after, limit)
 	if err != nil {
 		http.Error(w, "the Event log could not be read", http.StatusInternalServerError)
@@ -228,7 +234,7 @@ func (d *Daemon) sessionEvents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(struct {
 		Events []protocol.Event `json:"events"`
 		Cursor protocol.Cursor  `json:"cursor"`
-	}{events, d.events.Cursor()})
+	}{events, at})
 }
 
 // page reads where the request wants to read from and how much of it. A size of
