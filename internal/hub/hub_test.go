@@ -3,6 +3,7 @@ package hub_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,10 +31,29 @@ type pipeDialer struct {
 	seen     *sync.Map
 }
 
+type dialFunc func(context.Context, hostset.HostID) (net.Conn, error)
+
+func (f dialFunc) Dial(ctx context.Context, id hostset.HostID) (net.Conn, error) {
+	return f(ctx, id)
+}
+
 func (d pipeDialer) Dial(_ context.Context, id hostset.HostID) (net.Conn, error) {
 	client, server := net.Pipe()
-	go serveOne(server, d.handlers[id])
-	return client, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	go serveOne(ctx, server, d.handlers[id])
+	return pipeConn{Conn: client, cancel: cancel}, nil
+}
+
+// pipeConn ends the stub Daemon's request when the Hub hangs up, the way a real
+// server ends a handler when its connection closes.
+type pipeConn struct {
+	net.Conn
+	cancel context.CancelFunc
+}
+
+func (c pipeConn) Close() error {
+	c.cancel()
+	return c.Conn.Close()
 }
 
 func TestTheMergedStreamCarriesEveryHostAndSplitsAReconnectCursor(t *testing.T) {
@@ -41,32 +62,77 @@ func TestTheMergedStreamCarriesEveryHostAndSplitsAReconnectCursor(t *testing.T) 
 		"desk": streamHost("1", "FutureKind", seen, "desk"),
 		"pi":   streamHost("7", "PromptSubmitted", seen, "pi"),
 	}}
-	h := hub.New([]hostset.Host{{ID: "desk"}, {ID: "pi"}}, d).Handler()
-	req := httptest.NewRequest(http.MethodGet, "/v1/events", nil)
-	req.Header.Set(protocol.CursorHeader, "desk=0,pi=6")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	srv := httptest.NewServer(hub.New([]hostset.Host{{ID: "desk"}, {ID: "pi"}}, d).Handler())
+	defer srv.Close()
 
-	body := w.Body.String()
-	for _, want := range []string{`"host":"desk"`, `"host":"pi"`, `"kind":"FutureKind"`, "id: desk=1,pi=7"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("stream does not contain %q:\n%s", want, body)
-		}
-	}
+	// This Hub has heard no Hello, so it can name neither log. It sends neither
+	// Cursor and answers each Host with a resync, because a Cursor it cannot check
+	// against a log would resume a replaced one at a number that means something
+	// else there.
+	merged(t, srv.URL, "desk=0,pi=6", `"host":"desk"`, `"host":"pi"`, `"kind":"FutureKind"`, "event: resync", `"logId":"desk-log"`, "id: desk=1,pi=7")
 	desk, _ := seen.Load(hostset.HostID("desk"))
 	pi, _ := seen.Load(hostset.HostID("pi"))
-	if desk != "0|" || pi != "6|" {
-		t.Errorf("Daemon cursors = %v and %v, want desk 0 and pi 6", desk, pi)
+	if desk != "|" || pi != "|" {
+		t.Errorf("Daemon cursors = %v and %v, want neither sent", desk, pi)
 	}
 
-	reconnect := httptest.NewRequest(http.MethodGet, "/v1/events", nil)
-	reconnect.Header.Set(protocol.CursorHeader, "desk=1,pi=7")
-	h.ServeHTTP(httptest.NewRecorder(), reconnect)
+	// The Hello named both logs, so this one resumes and each Daemon reads its own
+	// Cursor and its own log identity.
+	merged(t, srv.URL, "desk=1,pi=7", "id: desk=1,pi=7")
 	desk, _ = seen.Load(hostset.HostID("desk"))
 	pi, _ = seen.Load(hostset.HostID("pi"))
 	if desk != "1|desk-log" || pi != "7|pi-log" {
 		t.Errorf("reconnect = %v and %v", desk, pi)
 	}
+}
+
+func TestAHostThatIsDownDoesNotEndTheMergedStream(t *testing.T) {
+	var dials atomic.Int32
+	pipes := pipeDialer{seen: &sync.Map{}, handlers: map[hostset.HostID]http.Handler{
+		"desk": streamHost("3", "PromptSubmitted", &sync.Map{}, "desk"),
+	}}
+	d := dialFunc(func(ctx context.Context, id hostset.HostID) (net.Conn, error) {
+		if dials.Add(1) == 1 {
+			return nil, errors.New("the Host is down")
+		}
+		return pipes.Dial(ctx, id)
+	})
+	srv := httptest.NewServer(hub.New([]hostset.Host{{ID: "desk"}}, d).Handler())
+	defer srv.Close()
+
+	merged(t, srv.URL, "", `"kind":"PromptSubmitted"`)
+	if dials.Load() < 2 {
+		t.Errorf("the Hub dialled %d times, want a retry", dials.Load())
+	}
+}
+
+// merged opens the Client's merged stream and reads it until every want has
+// appeared. A stream that ends first is the failure: a Host that is down must not
+// end it.
+func merged(t *testing.T, url, cursor string, wants ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url+"/v1/events", nil)
+	if cursor != "" {
+		req.Header.Set(protocol.CursorHeader, cursor)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body strings.Builder
+	scan := bufio.NewScanner(resp.Body)
+	for scan.Scan() {
+		body.WriteString(scan.Text())
+		body.WriteByte('\n')
+		if has(body.String(), wants) {
+			return body.String()
+		}
+	}
+	t.Fatalf("the merged stream ended before %q:\n%s", wants, body.String())
+	return ""
 }
 
 func streamHost(id, kind string, seen *sync.Map, host hostset.HostID) http.Handler {
@@ -75,17 +141,19 @@ func streamHost(id, kind string, seen *sync.Map, host hostset.HostID) http.Handl
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "event: hello\ndata: {\"protocol\":1,\"logId\":%q,\"latest\":%s}\n\n", host+"-log", id)
 		fmt.Fprintf(w, "id: %s\nevent: event\ndata: {\"seq\":%s,\"session\":\"s\",\"at\":1,\"kind\":\"%s\",\"payload\":{}}\n\n", id, id, kind)
+		// A real Daemon holds the stream open, and the Hub redials one that does not.
+		<-r.Context().Done()
 	})
 }
 
-func serveOne(conn net.Conn, handler http.Handler) {
+func serveOne(ctx context.Context, conn net.Conn, handler http.Handler) {
 	defer conn.Close()
 	req, err := http.ReadRequest(bufio.NewReader(conn))
 	if err != nil {
 		return
 	}
 	w := &pipeResponse{header: make(http.Header), conn: conn}
-	handler.ServeHTTP(w, req)
+	handler.ServeHTTP(w, req.WithContext(ctx))
 }
 
 type pipeResponse struct {
@@ -146,6 +214,94 @@ func TestTheHubListsHostsAndForwardsACommand(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/hosts/desk/sessions", strings.NewReader(`{}`)))
 	if w.Code != http.StatusAccepted || seen != "POST /v1/sessions" {
 		t.Fatalf("forwarded %q and answered %d", seen, w.Code)
+	}
+}
+
+func TestForwardedEventStreamFlushesEachFrame(t *testing.T) {
+	release := make(chan struct{})
+	wrote := make(chan struct{})
+	d := pipeDialer{handlers: map[hostset.HostID]http.Handler{
+		"desk": http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: event\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			close(wrote)
+			<-release
+		}),
+	}}
+	srv := httptest.NewServer(hub.New([]hostset.Host{{ID: "desk"}}, d).Handler())
+	defer srv.Close()
+	defer close(release)
+
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/hosts/desk/events", nil)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		resultCh <- result{resp: resp, err: err}
+	}()
+
+	<-wrote
+	select {
+	case got := <-resultCh:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		defer got.resp.Body.Close()
+		line, err := bufio.NewReader(got.resp.Body).ReadString('\n')
+		if err != nil || line != "event: event\n" {
+			t.Fatalf("first streamed line = %q, %v", line, err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("the forwarded Frame was not flushed")
+	}
+}
+
+func TestLeavingForwardedEventStreamClosesHostConnection(t *testing.T) {
+	connected := make(chan net.Conn, 1)
+	disconnected := make(chan struct{})
+	d := dialFunc(func(_ context.Context, _ hostset.HostID) (net.Conn, error) {
+		client, server := net.Pipe()
+		connected <- server
+		go func() {
+			defer server.Close()
+			if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
+				return
+			}
+			frame := []byte("event: event\ndata: {}\n\n")
+			fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+			fmt.Fprintf(server, "%x\r\n", len(frame))
+			server.Write(frame)
+			io.WriteString(server, "\r\n")
+			var b [1]byte
+			server.Read(b[:])
+			close(disconnected)
+		}()
+		return client, nil
+	})
+	srv := httptest.NewServer(hub.New([]hostset.Host{{ID: "desk"}}, d).Handler())
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/hosts/desk/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := <-connected
+	defer upstream.Close()
+	cancel()
+	resp.Body.Close()
+
+	select {
+	case <-disconnected:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("the Host connection stayed open after the Client left")
 	}
 }
 
@@ -233,4 +389,13 @@ func TestAllTenDaemonEndpointsUseTheOneHostHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func has(body string, wants []string) bool {
+	for _, want := range wants {
+		if !strings.Contains(body, want) {
+			return false
+		}
+	}
+	return true
 }

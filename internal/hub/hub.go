@@ -2,17 +2,23 @@
 // Host without storing Events or Session state.
 package hub
 
-import "github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
+import (
+	"time"
+
+	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
+	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
+)
 
 type Host = hostset.Host
 type HostID = hostset.HostID
 type HostDialer = hostset.HostDialer
 
 type Hub struct {
-	hosts  hostset.Table
-	dialer hostset.HostDialer
+	hosts     hostset.Table
+	dialer    hostset.HostDialer
+	keepalive time.Duration
 }
 
 func New(hosts []Host, dialer HostDialer) *Hub {
-	return &Hub{hosts: hostset.New(hosts), dialer: dialer}
+	return &Hub{hosts: hostset.New(hosts), dialer: dialer, keepalive: protocol.KeepaliveInterval}
 }

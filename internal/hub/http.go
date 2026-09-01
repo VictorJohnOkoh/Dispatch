@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -42,6 +43,8 @@ func (h *Hub) forward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	stop := context.AfterFunc(r.Context(), func() { conn.Close() })
+	defer stop()
 
 	out := r.Clone(r.Context())
 	out.RequestURI = ""
@@ -59,9 +62,29 @@ func (h *Hub) forward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	var destination io.Writer = w
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		flush, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "this server cannot stream", http.StatusInternalServerError)
+			return
+		}
+		destination = flushWriter{Writer: w, flush: flush}
+	}
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	io.Copy(destination, resp.Body)
+}
+
+type flushWriter struct {
+	io.Writer
+	flush http.Flusher
+}
+
+func (w flushWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	w.flush.Flush()
+	return n, err
 }
 
 func copyHeaders(to, from http.Header) {

@@ -38,11 +38,14 @@ func (t Table) SetLogID(id HostID, value string) {
 	t.logs[id] = value
 }
 
-func (t Table) ObserveHello(id HostID, data []byte) {
+// ObserveHello keeps the identity of the log a Host is serving and returns the
+// Hello, so a caller that needs the same fields parses them once.
+func (t Table) ObserveHello(id HostID, data []byte) protocol.Hello {
 	var hello protocol.Hello
 	if json.Unmarshal(data, &hello) == nil {
 		t.SetLogID(id, hello.LogID)
 	}
+	return hello
 }
 
 func (t Table) All() []Host { return append([]Host(nil), t.hosts...) }
