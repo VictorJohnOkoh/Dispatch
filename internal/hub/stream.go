@@ -56,6 +56,11 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
+	// Go holds the header until something flushes it, and the first thing to write
+	// may be a keepalive ten seconds away. A Client waiting that long cannot tell
+	// an open stream from a hung one, and a browser's EventSource does not open
+	// until the header lands.
+	flush.Flush()
 	frames := make(chan daemonFrame)
 	var readers sync.WaitGroup
 	for _, host := range h.hosts.All() {
