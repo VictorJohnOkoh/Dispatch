@@ -9,22 +9,25 @@
 <body>
 <nav class="rail">
   <h1>Dispatch</h1>
+  <div id="rail">
   {{- range .Rail}}
   {{- if .Session}}
   <a class="rrow{{if .On}} on{{end}}{{if not .Answering}} stale{{end}}"
-     href="/hosts/{{.Host}}/sessions/{{.Session}}" data-session-row="{{.Session}}" data-host="{{.Host}}">
+     href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}"
+     data-session-row="{{.Session}}" data-host="{{.Host}}">
     <b>{{.Cwd}}</b>
     <span class="meta">{{.Host}}</span>
     <span class="pill" data-session-state="{{.SessionState}}">{{.SessionState}}</span>
-    <span class="pill host" data-host-state="{{.HostState}}">{{.HostState}}</span>
+    <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
   </a>
   {{- else}}
-  <p class="rrow empty{{if not .Answering}} stale{{end}}">
+  <p class="rrow empty{{if not .Answering}} stale{{end}}" data-host="{{.Host}}">
     <span class="meta">{{.Host}}</span>
-    <span class="pill host" data-host-state="{{.HostState}}">{{.HostState}}</span>
+    <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
   </p>
   {{- end}}
   {{- end}}
+  </div>
 </nav>
 <main class="desk">
 <header>
@@ -32,7 +35,7 @@
   <p class="host">on {{.Host}}</p>
   <p class="pair">
     <span class="pill" id="state" data-session-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</span>
-    <span class="pill host" data-host-state="{{.HostState}}">{{.HostState}}</span>
+    <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
   </p>
 </header>
 <ol id="transcript" data-host="{{.Host}}" data-session="{{.Session}}" data-cursor="{{.Cursor}}">

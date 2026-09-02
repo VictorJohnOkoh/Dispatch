@@ -94,12 +94,12 @@ func TestASessionRowDrawsTheSessionStateAndTheHostState(t *testing.T) {
 	if !strings.Contains(body, `data-session-state="Working"`) {
 		t.Error("the row does not say what the Session is doing")
 	}
-	if !strings.Contains(body, `data-host-state="ready"`) {
+	if !strings.Contains(body, `data-host-answering="true"`) {
 		t.Error("the row does not say what the Host is doing")
 	}
 	// The Host that answered nothing keeps its place and says so, because a Host is
 	// never hidden for being unreachable.
-	if !strings.Contains(body, `data-host-state="not answering"`) {
+	if !strings.Contains(body, `data-host-answering="false"`) {
 		t.Error("the Host that said nothing was left out")
 	}
 	if !strings.Contains(body, "attic") {

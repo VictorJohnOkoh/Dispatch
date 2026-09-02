@@ -183,3 +183,42 @@ console.log(JSON.stringify({kind: row.dataset.kind, title: row.querySelector(".t
 		t.Errorf("the row says %q, and it carries the payload it could not read", got.Text)
 	}
 }
+
+// An Event for a Session this page is not drawing is still news: it is a rail row
+// that has changed. The rail is redrawn from the Hub, because the browser holds no
+// history for a Session it is not drawing and a fold over the tail of one would be
+// a guess.
+func TestAnEventOnAnotherHostRedrawsTheRail(t *testing.T) {
+	var got struct {
+		Rows    []string `json:"rows"`
+		Fetched []string `json:"fetched"`
+	}
+	pageUnder(t, `
+railAnswer = [
+  {Host: "desk", Session: "s-1", Cwd: "/w", SessionState: "Working", Answering: true, On: true},
+  {Host: "attic", Session: "s-9", Cwd: "/other", SessionState: "Asking", Answering: true},
+  {Host: "shed", Answering: false},
+];
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested", payload: {toolCallId: "c1"}});
+setTimeout(() => {
+  console.log(JSON.stringify({
+    rows: dom.rail.children.map((r) => r.textContent),
+    fetched: fetched.filter((u) => u.startsWith("/rail/")),
+  }));
+}, 0);
+`, &got)
+
+	if len(got.Fetched) == 0 {
+		t.Fatal("an Event on another Host redrew nothing")
+	}
+	if len(got.Rows) != 3 {
+		t.Fatalf("the rail holds %v", got.Rows)
+	}
+	if !strings.Contains(got.Rows[1], "Asking") || !strings.Contains(got.Rows[1], "/other") {
+		t.Errorf("the other Host's Session reads %q", got.Rows[1])
+	}
+	// The pair, on a row for a Session this page is not drawing.
+	if !strings.Contains(got.Rows[2], "not answering") {
+		t.Errorf("the Host that is not answering reads %q", got.Rows[2])
+	}
+}

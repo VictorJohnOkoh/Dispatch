@@ -106,10 +106,13 @@ const stateElement = new El("p");
 stateElement.dataset.state = "Starting";
 stateElement.textContent = "Starting";
 
+// The rail's rows, which page.js redraws whole.
+const railNav = new El("div");
+
 const body = new El("body");
 
 globalThis.document = {
-  getElementById: (id) => ({ transcript, state: stateElement, events: embedded })[id] ?? null,
+  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, rail: railNav })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
 };
@@ -138,6 +141,9 @@ globalThis.served = new Map();
 globalThis.fetched = [];
 globalThis.fetch = async (url) => {
   fetched.push(url);
+  if (url.startsWith("/rail/")) {
+    return { ok: true, json: async () => ({ rail: globalThis.railAnswer ?? [] }) };
+  }
   const after = new URL(url, "http://hub").searchParams.get("after") ?? "0";
   const page = served.get(after);
   if (page === undefined) return { ok: true, json: async () => ({ events: [] }) };
@@ -145,4 +151,4 @@ globalThis.fetch = async (url) => {
   return { ok: true, json: async () => ({ events: page }) };
 };
 
-globalThis.dom = { transcript, stateElement, embedded, body, row };
+globalThis.dom = { transcript, stateElement, embedded, rail: railNav, body, row };

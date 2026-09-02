@@ -38,15 +38,24 @@ type Hosts interface {
 //go:embed page.html page.css page.js fold.js render.js
 var files embed.FS
 
-var page = template.Must(template.ParseFS(files, "page.html"))
+// pathEscape is the one function the template calls. A Session id or a Host id
+// that held a slash would otherwise build a link to somewhere else.
+var page = template.Must(template.New("page.html").
+	Funcs(template.FuncMap{"pathEscape": url.PathEscape}).
+	ParseFS(files, "page.html"))
 
 // transcriptPage is how many Events one read of the transcript asks for. It is
 // the largest the Daemon serves, and a longer Session is several reads.
 const transcriptPage = 1000
 
-// The one page, one Session. The rail, the wizard and the Hosts view are later
-// work, so a human names the Session in the URL.
+// The one page, one Session, with every other Session beside it. The wizard and
+// the Hosts view are later work, so a human names the Session in the URL.
 const sessionPage = "GET /hosts/{host}/sessions/{session}"
+
+// railRoute answers the rail on its own, so the browser can redraw it when the
+// merged stream says a Session it is not drawing has changed. It is the Client's
+// own route and not one of the protocol's ten.
+const railRoute = "GET /rail/{host}/{session}"
 
 const indexHint = "Dispatch. Open /hosts/{host}/sessions/{session} to watch a Session.\n"
 
@@ -56,6 +65,7 @@ func New(hosts Hosts) http.Handler {
 	c := &client{hosts: hosts}
 	mux := http.NewServeMux()
 	mux.HandleFunc(sessionPage, c.session)
+	mux.HandleFunc(railRoute, c.railJSON)
 	mux.HandleFunc("GET /page.css", asset("page.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /page.js", asset("page.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
@@ -92,7 +102,7 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 		Cursor:    protocol.MergedCursor{host: at}.String(),
 		State:     state.String(),
 		Reason:    string(reason),
-		HostState: hostState(rail, host),
+		Answering: answering(rail, host),
 		Rail:      rail,
 		Rows:      rows(events),
 		Events:    payloads(events),
@@ -101,6 +111,18 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 		// answer with. The operational log is the Daemon's; the Hub's is stderr.
 		fmt.Fprintf(w, "<!-- the page could not be finished: %v -->", err)
 	}
+}
+
+// railJSON answers the rail as the browser redraws it from. The page is rendered
+// on the server and so is this: the Daemon folds a Session's State and the Client
+// draws what it is told, so a Session the browser holds no Events for is never
+// something it has to fold for itself.
+func (c *client) railJSON(w http.ResponseWriter, r *http.Request) {
+	rail := c.rail(r.Context(), r.PathValue("host"), r.PathValue("session"))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Rail []entry `json:"rail"`
+	}{rail})
 }
 
 // view is the page. Cursor is the merged spelling, because that is what the
@@ -116,9 +138,8 @@ type view struct {
 	State  string
 	Reason string
 
-	// HostState is this Hub's view of the machine the Session runs on. It is drawn
-	// beside the Session State and never instead of it.
-	HostState string
+	// Answering is the Host half of the pair for the Session on screen. See entry.
+	Answering bool
 
 	// Rail is every Session on every Host, which is the only place this page says
 	// that a second Host exists.
@@ -133,15 +154,15 @@ type view struct {
 	Events template.JS
 }
 
-// hostState is the rail's view of one Host, so the header and the rail rows agree
+// answering is the rail's view of one Host, so the header and the rail rows agree
 // rather than each asking separately and disagreeing by a moment.
-func hostState(rail []entry, host string) string {
+func answering(rail []entry, host string) bool {
 	for _, e := range rail {
 		if e.Host == host {
-			return e.HostState
+			return e.Answering
 		}
 	}
-	return "not answering"
+	return false
 }
 
 // payloads is the Events as the page carries them, in the shape the stream sends and

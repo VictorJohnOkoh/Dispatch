@@ -66,10 +66,73 @@ const stream = new EventSource(url);
 
 stream.addEventListener("event", (frame) => {
   const f = JSON.parse(frame.data);
-  if (f.host !== host || f.session !== session) return;
+  // Every Host's Events arrive on this one stream. The Session on screen is drawn
+  // from them; every other Session on every other Host is a rail row, and what it
+  // gets from an Event is that it has changed.
+  if (f.host !== host || f.session !== session) {
+    redrawRail();
+    return;
+  }
   apply(f);
   refold();
+  redrawRail();
 });
+
+// rail is the nav the server drew. The browser redraws it when the merged stream
+// says something changed, and it asks the Hub for the answer rather than folding
+// another Session's State out of the Events it happens to have seen: the browser
+// holds no history for a Session it is not drawing, and a fold over the tail of
+// one would be a guess.
+const rail = document.getElementById("rail");
+let redrawing = false;
+let again = false;
+
+async function redrawRail() {
+  // One redraw at a time, and one more if the stream spoke while it ran. A busy
+  // Host would otherwise put a read in flight for every Delta of every message.
+  if (redrawing) {
+    again = true;
+    return;
+  }
+  redrawing = true;
+  try {
+    const resp = await fetch(`/rail/${encodeURIComponent(host)}/${encodeURIComponent(session)}`);
+    if (resp.ok) drawRail((await resp.json()).rail ?? []);
+  } finally {
+    redrawing = false;
+    if (again) {
+      again = false;
+      redrawRail();
+    }
+  }
+}
+
+// drawRail replaces the rail's rows, matching page.html's shape element for
+// element, the way render() matches its rows.
+function drawRail(entries) {
+  const drawn = [];
+  for (const e of entries) {
+    const row = document.createElement(e.Session ? "a" : "p");
+    row.className = "rrow" + (e.On ? " on" : "") + (e.Answering ? "" : " stale") + (e.Session ? "" : " empty");
+    row.dataset.host = e.Host;
+    if (e.Session) {
+      row.dataset.sessionRow = e.Session;
+      row.href = `/hosts/${encodeURIComponent(e.Host)}/sessions/${encodeURIComponent(e.Session)}`;
+      row.append(node("b", "", e.Cwd));
+    }
+    row.append(node("span", "meta", e.Host));
+    if (e.Session) {
+      const state = node("span", "pill", e.SessionState);
+      state.dataset.sessionState = e.SessionState;
+      row.append(state);
+    }
+    const answering = node("span", "pill host", e.Answering ? "answering" : "not answering");
+    answering.dataset.hostAnswering = String(e.Answering);
+    row.append(answering);
+    drawn.push(row);
+  }
+  rail.replaceChildren(...drawn);
+}
 
 // apply puts one Event on the page, replacing the row it already had rather than
 // doubling it, so a replayed Event costs a redrawn row and nothing else. A row is
