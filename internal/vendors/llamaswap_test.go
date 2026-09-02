@@ -204,3 +204,30 @@ func TestLlamaSwapEndpointIsTheLlamaSwapRoot(t *testing.T) {
 }
 
 var _ Adapter = (*LlamaSwapAdapter)(nil)
+
+// A Model can be evicted between the /running answer and the props call. That is
+// an answer that went back to Unknown, not a Vendor that failed, and the rest of
+// the listing still has to arrive.
+func TestLlamaSwapCatalogueSurvivesAnEvictionMidAnswer(t *testing.T) {
+	ls := llamaSwapFrom(t, &recorded{
+		body: map[string]string{
+			"/v1/models":                         "models-one-loaded.json",
+			"/running":                           "running.json",
+			"/upstream/qwen2.5-coder-1.5b/props": "props-missing.json",
+		},
+		status: map[string]int{"/upstream/qwen2.5-coder-1.5b/props": http.StatusNotFound},
+	})
+
+	models, err := ls.Catalogue(context.Background())
+	if err != nil {
+		t.Fatalf("Catalogue: %v", err)
+	}
+	if len(models) != 4 {
+		t.Fatalf("Catalogue returned %d Models, want all 4", len(models))
+	}
+	for _, m := range models {
+		if (m.Caps != Capabilities{}) {
+			t.Errorf("%s reports %+v after the Model was evicted, want every Capability Unknown", m.ID, m.Caps)
+		}
+	}
+}

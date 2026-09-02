@@ -39,10 +39,11 @@ func TestOneModelListShowsAllThreeCapabilityValues(t *testing.T) {
 		}}),
 	}
 
-	seen := map[Kind]map[Support]bool{}
+	// Three Kinds and three Support values, both closed sets, so this is a grid
+	// and not a map.
+	var seen [3][3]bool
 	for _, adapter := range adapters {
 		kind := adapter.Endpoint().Kind
-		seen[kind] = map[Support]bool{}
 		models, err := adapter.Catalogue(t.Context())
 		if err != nil {
 			t.Fatalf("%s Catalogue: %v", kind, err)

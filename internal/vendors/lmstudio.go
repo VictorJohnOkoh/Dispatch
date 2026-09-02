@@ -16,9 +16,8 @@ import (
 // It is the only Vendor in v1 that answers Yes or No to a Capability, because it
 // is the only one whose listing carries typed booleans.
 //
-// A note for anyone reading token counts off this Vendor: LM Studio was the only
-// one of the three to count reasoning tokens for the same thinking output, 51
-// against 0 elsewhere. See Usage in stream.go.
+// The trap in this Vendor's token counts is that it alone counts reasoning
+// tokens. Usage in stream.go has it.
 type LMStudioAdapter struct {
 	endpoint Endpoint
 	client   *http.Client

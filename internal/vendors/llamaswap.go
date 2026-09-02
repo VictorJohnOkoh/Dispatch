@@ -3,8 +3,8 @@ package vendors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -18,9 +18,8 @@ import (
 // already in memory is asked for its capabilities, because asking is what starts
 // a Model that is not.
 //
-// A note for anyone reading token counts off this Vendor: llama-swap charged 24
-// input tokens against a 2986-token cached prefix where the others charged about
-// 3010 for the same prompt. See Usage in stream.go.
+// The trap in this Vendor's token counts is its input against cacheRead split.
+// Usage in stream.go has it.
 type LlamaSwapAdapter struct {
 	endpoint Endpoint
 	client   *http.Client
@@ -90,27 +89,38 @@ func (s *LlamaSwapAdapter) Catalogue(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 
-	loaded := make(map[string]bool, len(resident))
-	for _, r := range resident {
-		loaded[r.ModelID] = true
-	}
-
 	models := make([]Model, len(listing.Data))
 	for i, m := range listing.Data {
 		// The id is the only name llama-swap has for a Model.
 		models[i] = Model{ID: m.ID, Name: m.ID}
-		if !loaded[m.ID] {
+		if !isResident(resident, m.ID) {
 			continue
 		}
 
 		var props swapPropsBody
 		if err := s.call(ctx, http.MethodGet, propsPath(m.ID), &props); err != nil {
+			// The Model was resident a moment ago and is not now, which is an
+			// answer that went back to Unknown rather than a Vendor that failed.
+			if errors.Is(err, ErrModelNotFound) {
+				continue
+			}
 			return nil, err
 		}
 		models[i].Caps = swapCaps(props)
 		models[i].Quant = props.ModelFtype
 	}
 	return models, nil
+}
+
+// isResident scans rather than indexes, because a Host runs a handful of Models
+// at once and the list is never long enough for a map to pay for itself.
+func isResident(resident []Resident, modelID string) bool {
+	for _, r := range resident {
+		if r.ModelID == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 // Resident is what llama-swap is running. A Model appears here from the moment
@@ -167,23 +177,14 @@ func swapCaps(props swapPropsBody) Capabilities {
 // call does one request and decodes the body into out, which may be nil when only
 // the status matters.
 func (s *LlamaSwapAdapter) call(ctx context.Context, method, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, s.endpoint.Base+path, nil)
+	// Every call this Vendor makes is a GET or an empty POST, so there is no
+	// payload argument to carry.
+	status, body, err := request(ctx, s.client, method, s.endpoint.Base+path, nil)
 	if err != nil {
 		return fmt.Errorf("llamaswap: %s: %w", path, err)
 	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("llamaswap: %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("llamaswap: %s: %w", path, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return swapError(path, resp.StatusCode, body)
+	if status != http.StatusOK {
+		return swapError(path, status, body)
 	}
 	if out == nil {
 		return nil

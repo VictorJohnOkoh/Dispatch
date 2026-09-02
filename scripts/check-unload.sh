@@ -8,9 +8,11 @@
 # claim gets corrected rather than left quietly wrong.
 set -uo pipefail
 
+# The Adapters declare Unload and never call it, so the whole tree is searched and
+# only tests are excused. Excusing internal/vendors as well would let a caller hide
+# in the one package most likely to grow one.
 callers=$(grep -rn --include='*.go' --exclude-dir=.worktrees '\.Unload(' . |
-	grep -v '_test\.go:' |
-	grep -v '^\./internal/vendors/')
+	grep -v '_test\.go:')
 
 if [ -n "$callers" ]; then
 	echo "FAIL: v1 code calls Unload, which SPEC.md says nothing does:"
