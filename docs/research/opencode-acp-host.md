@@ -269,6 +269,20 @@ Named here so the answer on #16 cannot quietly overclaim.
   reports when it does, is untested. Hermes reported `denied by ACP client`
   without ever asking, so this is not a safe assumption to carry over.
 
+  The Adapter in `internal/harness/acp.go` now has to answer refusals, and what it
+  sends is the option whose `kind` is `reject_once`, picked by kind rather than by
+  the id that spells it. That much is in the recorded options. **What OpenCode does
+  after receiving one is still owed a capture**, and until that capture exists
+  nothing may claim the tool did not run on the strength of it: the Daemon's own
+  `ApprovalDecided` is the record of the refusal, and the Harness is read only as
+  corroboration.
+
+- **No Prompt was ever cancelled.** `session/cancel` is in ACP and in no captured
+  run, so what OpenCode does with one, and whether it still answers the
+  `session/prompt` that was in flight, is untested. The Adapter sends it on an
+  interrupt and bounds the Prompt on the answer as it always does, which means a
+  Harness that ignores it leaves the Session `Working`.
+
 ## Conclusion
 
 ADR 0003's conditional half resolves in favour of OpenCode. Gate 1 passes, which
