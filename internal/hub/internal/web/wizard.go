@@ -39,6 +39,11 @@ type wizard struct {
 	Harnesses []harnessChoice
 	Slots     []slotChoice
 
+	// Dir is the working directory the user typed, kept so a refusal that is
+	// answered with "stop that one" starts the Session the user filled in rather
+	// than a different one.
+	Dir string
+
 	// Refusal is the Host saying no. It names the Session holding the slot, and the
 	// wizard offers to stop that one and start this one. It is never a queue
 	// position, because there is no queue.
@@ -84,6 +89,7 @@ func (c *client) newSession(w http.ResponseWriter, r *http.Request) {
 		Host:     ask.Get("host"),
 		Model:    ask.Get("model"),
 		Harness:  ask.Get("harness"),
+		Dir:      ask.Get("dir"),
 		Refusal:  ask.Get("refusal"),
 		Blocking: ask["blocking"],
 	}
@@ -97,7 +103,7 @@ func (c *client) newSession(w http.ResponseWriter, r *http.Request) {
 	case "harness":
 		view.Harnesses = c.harnessChoices(r.Context(), view.Host)
 	case "policy":
-		view.Slots = slots(c.harnessChoices(r.Context(), view.Host), view.Harness)
+		view.Slots = chosenSlots(c.harnessChoices(r.Context(), view.Host), view.Harness, ask)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -187,6 +193,19 @@ func (c *client) harnessChoices(ctx context.Context, host string) []harnessChoic
 		return nil
 	}
 	return body.Harnesses
+}
+
+// chosenSlots is the Approval Policy step with whatever the user already chose
+// still chosen. A refusal sends the wizard back here, and a step that forgot the
+// answers would make the user set them again to say yes to the same question.
+func chosenSlots(harnesses []harnessChoice, name string, ask url.Values) []slotChoice {
+	out := slots(harnesses, name)
+	for i, slot := range out {
+		if chose := ask.Get("policy." + slot.Kind); chose != "" && slot.Gated {
+			out[i].Rule = chose
+		}
+	}
+	return out
 }
 
 // slots is the Approval Policy step for one Harness. A slot with no Gate is auto
@@ -325,6 +344,7 @@ func backTo(form url.Values, refusal protocol.Refusal) string {
 		"host":    {form.Get("host")},
 		"model":   {form.Get("model")},
 		"harness": {form.Get("harness")},
+		"dir":     {form.Get("dir")},
 		"refusal": {refusal.Detail},
 	}
 	if refusal.Detail == "" {

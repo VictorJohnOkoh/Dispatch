@@ -31,6 +31,10 @@
     <input type="hidden" name="host" value="{{$.Host}}">
     <input type="hidden" name="model" value="{{$.Model}}">
     <input type="hidden" name="harness" value="{{$.Harness}}">
+    <input type="hidden" name="dir" value="{{$.Dir}}">
+    {{- range $.Slots}}
+    <input type="hidden" name="policy.{{.Kind}}" value="{{.Rule}}">
+    {{- end}}
     <input type="hidden" name="stopFirst" value="{{.}}">
     <button type="submit">Stop {{.}} and start this one</button>
   </form>
@@ -84,7 +88,7 @@
   <input type="hidden" name="host" value="{{.Host}}">
   <input type="hidden" name="model" value="{{.Model}}">
   <input type="hidden" name="harness" value="{{.Harness}}">
-  <label>Working directory <input name="dir" value="" placeholder="the Workspace Root"></label>
+  <label>Working directory <input name="dir" value="{{.Dir}}" placeholder="the Workspace Root"></label>
   {{- if .Slots}}
   <ul class="choices">
     {{- range $slot := .Slots}}

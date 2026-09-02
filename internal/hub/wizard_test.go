@@ -189,7 +189,7 @@ func TestABusyHostIsRefusedAndOneClickStopsTheSessionHoldingTheSlot(t *testing.T
 	host := newStartingHost(t, busy)
 	h := wizardOn(t, host)
 
-	refused := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&policy.read=auto&policy.edit=wait&policy.execute=wait&policy.fetch=auto&policy.other=auto")
+	refused := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&dir=work&policy.read=auto&policy.edit=wait&policy.execute=refuse&policy.fetch=auto&policy.other=auto")
 	if refused.Code != http.StatusSeeOther {
 		t.Fatalf("the refusal answered %d", refused.Code)
 	}
@@ -210,9 +210,21 @@ func TestABusyHostIsRefusedAndOneClickStopsTheSessionHoldingTheSlot(t *testing.T
 		}
 	}
 
+	// The click carries everything the user filled in, so saying yes to the same
+	// question does not make them choose it all again.
+	for _, want := range []string{
+		`name="dir" value="work"`,
+		`name="policy.edit" value="wait"`,
+		`name="policy.execute" value="refuse"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the refusal dropped %s", want)
+		}
+	}
+
 	// The one click: stop that Session, then start this one, in that order.
 	*host.took = nil
-	again := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&stopFirst=s-busy")
+	again := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&dir=work&stopFirst=s-busy&policy.read=auto&policy.edit=wait&policy.execute=refuse&policy.fetch=auto&policy.other=auto")
 	if again.Code != http.StatusSeeOther {
 		t.Fatalf("the second start answered %d", again.Code)
 	}
@@ -220,7 +232,13 @@ func TestABusyHostIsRefusedAndOneClickStopsTheSessionHoldingTheSlot(t *testing.T
 		t.Fatalf("the Host was told %v, want the stop and then the start", *host.took)
 	}
 	if !strings.HasPrefix((*host.took)[1], "start ") {
-		t.Errorf("the Host was told %q second", (*host.took)[1])
+		t.Fatalf("the Host was told %q second", (*host.took)[1])
+	}
+	// And it is the Session the user filled in, not a different one.
+	for _, want := range []string{`"dir":"work"`, `"execute":"refuse"`} {
+		if !strings.Contains((*host.took)[1], want) {
+			t.Errorf("the second start asked for %s, and it is missing %s", (*host.took)[1], want)
+		}
 	}
 }
 
