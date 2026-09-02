@@ -82,11 +82,6 @@ type Daemon struct {
 	// Sequence Numbers, which is the order the fold reads them in.
 	writing sync.Mutex
 
-	// closing makes the ledger's fold and the ends it writes one step. ADR 0010 has
-	// the ledger holding no lock, on the grounds that the Sink is one goroutine, and
-	// that is true of one of its two triggers and not of the other.
-	closing sync.Mutex
-
 	// base is the context every Session hangs off, which is Serve's. A handler
 	// exercised without Serve gets the background one this starts as.
 	base context.Context

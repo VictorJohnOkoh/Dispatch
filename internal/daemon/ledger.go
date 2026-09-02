@@ -19,14 +19,12 @@ import (
 // question was just refused ended because of that refusal; any other was in flight
 // and nothing observed its result.
 //
-// The two triggers reach this from two goroutines: the Prompt completes on the
-// Adapter's reader and the Session ends on the request that stopped it. So the
-// fold and the writes it decided on are one step, and whichever trigger fires
-// first is the one that finds the call open.
+// The caller holds the Session's Sink mutex, so the fold and the writes it decided
+// on are one step against everything the Adapter reports. Both triggers reach this
+// through the Sink for that reason: the Prompt completes on the Adapter's reader,
+// the Session ends on the request that stopped it, and the Harness's own result
+// arrives on the reader beside them.
 func (d *Daemon) closeCalls(s *Session, refused []string) {
-	d.closing.Lock()
-	defer d.closing.Unlock()
-
 	for _, call := range d.sessions.openCalls(s) {
 		outcome := event.OutcomeUnknown
 		if slices.Contains(refused, call) {
