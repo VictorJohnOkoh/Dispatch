@@ -299,7 +299,8 @@ already, silently, and the only reason we know is that `session/new` reports the
 writes the file and assumes would have run a Session on the wrong Model, against a hosted endpoint, and
 logged the Model it intended.
 
-Hence the rule. A config file makes a Vendor reachable. Selecting the Model is a separate act, and the
+Hence the rule. A per-Session config makes a Vendor reachable. The Adapter passes it through
+`OPENCODE_CONFIG_CONTENT`, so it does not replace the project's `opencode.json`. Selecting the Model is a separate act, and the
 Adapter reads back what the Harness says it selected before `Start` returns. OpenCode reports it on
 `session/new`. Pi reports `api`, `provider` and `model` on every `message_end`.
 
@@ -328,7 +329,7 @@ overwrote the last and LM Studio had to be recovered from the Host; the recovery
 directory as well. ADR 0003's gates survive it, because Ollama alone passes all three. "The Event
 vocabulary is Vendor-independent, compared frame by frame across all three" does not.
 
-For the interface the answer is the same either way. A config file makes a Vendor reachable. Selecting
+For the interface the answer is the same either way. A per-Session config makes a Vendor reachable. Selecting
 the Model is a separate act through whatever the Harness offers, an argument on the command line or a
 call in the protocol, and the Adapter checks the answer before `Start` returns. Pi reports `api`,
 `provider` and `model` on every `message_end`, so its selection is checkable. OpenCode reports the

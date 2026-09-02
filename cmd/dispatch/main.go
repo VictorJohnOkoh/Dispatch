@@ -130,10 +130,6 @@ func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.
 			out = append(out, daemon.Harness{
 				Name: profile.Name, Exe: profile.Exe, Adapter: harness.NewPassthrough(nil),
 			})
-		case "opencode":
-			out = append(out, daemon.Harness{
-				Name: profile.Name, Exe: profile.Exe, Adapter: harness.NewOpenCode(),
-			})
 		default:
 			log.Warn("this Harness has no Adapter yet, and no Session may name it", "harness", profile.Name)
 		}

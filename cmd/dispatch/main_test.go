@@ -6,12 +6,14 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -126,6 +128,23 @@ func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "no Harness in this file has an Adapter yet") {
 		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestOpenCodeIsNotServedBeforeItsApprovalPolicyLands(t *testing.T) {
+	var lines strings.Builder
+	got, err := newHarnesses([]config.HarnessProfile{
+		{Name: "passthrough"},
+		{Name: "opencode", Exe: "/usr/local/bin/opencode"},
+	}, slog.New(slog.NewTextHandler(&lines, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "passthrough" {
+		t.Errorf("served Harnesses = %v", got)
+	}
+	if !strings.Contains(lines.String(), "harness=opencode") {
+		t.Errorf("warning = %q", lines.String())
 	}
 }
 
