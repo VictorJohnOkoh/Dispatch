@@ -22,7 +22,7 @@
            button and without losing the way forward. */ -}}
     {{- if .Host}}<a class="pill" href="/new">{{.Host}}</a>{{end}}
     {{- if .Model}}<a class="pill" href="/new?host={{.Host}}">{{.Model}}</a>{{end}}
-    {{- if .Harness}}<a class="pill" href="/new?host={{.Host}}&amp;model={{.Model}}">{{.Harness}}</a>{{end}}
+    {{- if .Harness}}<a class="pill" href="/new?host={{.Host}}&amp;model={{.Model}}&amp;vendor={{.Vendor}}">{{.Harness}}</a>{{end}}
   </p>
 </header>
 
@@ -33,6 +33,7 @@
   <form method="post" action="/start">
     <input type="hidden" name="host" value="{{$.Host}}">
     <input type="hidden" name="model" value="{{$.Model}}">
+    <input type="hidden" name="vendor" value="{{$.Vendor}}">
     <input type="hidden" name="harness" value="{{$.Harness}}">
     <input type="hidden" name="dir" value="{{$.Dir}}">
     {{- range $.Slots}}
@@ -63,7 +64,7 @@
 <ul class="choices">
   {{- range .Models}}
   <li>
-    <a href="/new?host={{$.Host}}&amp;model={{.ID}}">{{.ID}}</a>
+    <a href="/new?host={{$.Host}}&amp;model={{.ID}}&amp;vendor={{.Base}}">{{.ID}}</a>
     <span class="meta">{{.Vendor}}</span>
     {{- range .Capabilities}}
     <span class="pill cap">{{.}}</span>
@@ -76,7 +77,7 @@
 <ul class="choices">
   {{- range .Harnesses}}
   <li>
-    <a href="/new?host={{$.Host}}&amp;model={{$.Model}}&amp;harness={{.Name}}">{{.Name}}</a>
+    <a href="/new?host={{$.Host}}&amp;model={{$.Model}}&amp;vendor={{$.Vendor}}&amp;harness={{.Name}}">{{.Name}}</a>
     {{- if .Tools}}
     {{- range .Gates}}<span class="pill">gates {{.}}</span>{{end}}
     {{- else}}
@@ -90,6 +91,7 @@
 <form method="post" action="/start" class="policy">
   <input type="hidden" name="host" value="{{.Host}}">
   <input type="hidden" name="model" value="{{.Model}}">
+  <input type="hidden" name="vendor" value="{{.Vendor}}">
   <input type="hidden" name="harness" value="{{.Harness}}">
   <label>Working directory <input name="dir" value="{{.Dir}}" placeholder="the Workspace Root"></label>
   {{- if .Slots}}

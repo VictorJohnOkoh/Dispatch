@@ -6,7 +6,7 @@
 <title>Hosts</title>
 <link rel="stylesheet" href="/page.css">
 </head>
-<body data-cursor="{{.Cursor}}">
+<body data-cursor="{{.Cursor}}" data-drawn="{{.Drawn}}">
 <main class="machines">
 <header>
   <h1>Hosts</h1>
@@ -15,10 +15,12 @@
 
 {{- range .Cards}}
 <section class="card" data-host="{{.Host}}" data-host-state="{{.State}}">
-  <header>
+  <header class="who">
     <b>{{.Host}}</b>
     <span class="pill host" data-host-state="{{.State}}">{{.State}}{{if .Cause}} {{.Cause}}{{end}}</span>
-    {{- if .Asked}}
+    {{- if .Since}}
+    <span class="stamp">last answered at {{.Since}}</span>
+    {{- else if .Asked}}
     <span class="stamp">asked at {{.Asked}}, and it did not answer</span>
     {{- end}}
   </header>

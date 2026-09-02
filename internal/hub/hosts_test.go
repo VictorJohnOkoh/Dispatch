@@ -3,7 +3,9 @@ package hub_test
 import (
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub"
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
@@ -46,10 +48,8 @@ func TestTheHostsViewListsEveryHostAndStartsNothing(t *testing.T) {
 	}
 }
 
-// A Host is never hidden for being unreachable. Its Sessions keeping their
-// last-known state beside it is the half this build owes: the rail reads a Host's
-// Sessions live, so a Host that says nothing contributes none, and the Hub has
-// nowhere to keep what it last said until it tracks presence.
+// A Host is never hidden for being unreachable, and one this Hub has never reached
+// has no last-known content to keep.
 func TestAHostThatIsNotAnsweringKeepsItsCardAndSaysSo(t *testing.T) {
 	body := machines(t)
 
@@ -57,9 +57,9 @@ func TestAHostThatIsNotAnsweringKeepsItsCardAndSaysSo(t *testing.T) {
 	if !strings.Contains(attic, `data-host-state="Down"`) {
 		t.Errorf("the Host that said nothing is drawn as %q", attic)
 	}
-	// Down dims and stamps. The stamp is when this Hub asked and got nothing, which
-	// is what it can say: it remembers nothing about a Host between reads, so there
-	// is no earlier content and no earlier time to put on one.
+	// Down dims and stamps. This Host has never answered, so there is no earlier
+	// content and no earlier time to put on one, and the stamp says the one thing
+	// this Hub knows: when it asked and got nothing.
 	if !strings.Contains(attic, "asked at ") {
 		t.Error("a Down Host carries no stamp, so the page claims to be current")
 	}
@@ -116,4 +116,66 @@ func section(t *testing.T, body, host string) string {
 	}
 	card, _, _ := strings.Cut(after, "</section>")
 	return card
+}
+
+// CONTEXT.md's Stale: a Host that stops answering keeps its last-known content and
+// says when it was true. A Session on a machine nobody can reach is still a
+// Session, and dropping it from the card would say it had ended.
+func TestAHostThatStopsAnsweringKeepsItsSessionsAndSaysWhenTheyWereTrue(t *testing.T) {
+	var answering atomic.Bool
+	answering.Store(true)
+	live, gone := railHost("s-1 Working"), silent()
+	h := hub.New([]hostset.Host{{ID: "desk"}}, pipeDialer{
+		handlers: map[hostset.HostID]http.Handler{
+			"desk": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if answering.Load() {
+					live.ServeHTTP(w, r)
+					return
+				}
+				gone.ServeHTTP(w, r)
+			}),
+		},
+	}).Handler()
+
+	body, _ := get(t, h, "/hosts")
+	if !strings.Contains(section(t, body, "desk"), "s-1") {
+		t.Fatal("the Host that answered does not carry its Session")
+	}
+	// Everything true from here on was true no later than this.
+	trueUntil := time.Now().UTC()
+
+	answering.Store(false)
+	body, _ = get(t, h, "/hosts")
+	desk := section(t, body, "desk")
+
+	if !strings.Contains(desk, `data-host-state="Down"`) {
+		t.Errorf("the Host that stopped answering is drawn as %q", desk)
+	}
+	if !strings.Contains(desk, "s-1") || !strings.Contains(desk, `data-session-state="Working"`) {
+		t.Errorf("the Session disappeared when its Host went Down: %s", desk)
+	}
+	// The stamp is the time the content was true, not the time this Hub failed to
+	// read it. A stamp made now would say the Session was Working a moment ago.
+	stamp := stampOn(t, desk, "last answered at ")
+	if stamp.After(trueUntil) {
+		t.Errorf("the stamp reads %s, which is after the last read that worked at %s", stamp, trueUntil)
+	}
+	if strings.Contains(desk, "asked at ") {
+		t.Error("the card carries the failed read's time as well, and one of the two is wrong")
+	}
+}
+
+// stampOn reads a card's stamp as the time it is.
+func stampOn(t *testing.T, card, says string) time.Time {
+	t.Helper()
+	_, after, found := strings.Cut(card, says)
+	if !found {
+		t.Fatalf("the card carries no %q, so it claims to be current: %s", says, card)
+	}
+	text, _, _ := strings.Cut(after, "<")
+	at, err := time.Parse(time.RFC3339, strings.TrimSpace(text))
+	if err != nil {
+		t.Fatalf("the stamp reads %q: %v", text, err)
+	}
+	return at
 }

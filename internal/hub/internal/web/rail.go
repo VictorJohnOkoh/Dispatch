@@ -46,6 +46,11 @@ type entry struct {
 	// On marks the Session the page is drawing in full.
 	On bool
 
+	// Since is when this Host last answered, set only on an entry drawn from
+	// memory. It is the time the entry was true, which is what the Hosts view
+	// stamps a card with.
+	Since time.Time
+
 	// At is where this Host's log stood when it answered. A page that opens the
 	// merged stream from here is sent what happens next rather than every Event
 	// this Host has ever written.
@@ -70,12 +75,12 @@ type sessionRow struct {
 // unreachable, and one that answers nothing is drawn as a Host with no Sessions
 // rather than as a Host that is not there.
 //
-// Two things this owes and does not yet have. A Host that stops answering loses
-// its Sessions from the rail, where CONTEXT.md's Stale says the Client keeps the
-// last-known content and stamps it with when it was true; the Hub has nowhere to
-// keep that until it tracks presence. And a Daemon answers this from its registry,
-// which is memory, so a Daemon that restarted lists none of the Sessions its log
-// still holds. Both wait on the Hub's four Host States.
+// A Host that stops answering keeps its Sessions, drawn as the last read left
+// them and stamped with when that read happened, which is CONTEXT.md's Stale.
+//
+// One thing this owes and does not yet have: a Daemon answers the Session list
+// from its registry, which is memory, so a Daemon that restarted lists none of the
+// Sessions its log still holds. That waits on the Hub's four Host States.
 func (c *client) rail(ctx context.Context, host, id string) []entry {
 	hosts := c.hosts.All()
 	found := make([][]entry, len(hosts))
@@ -173,14 +178,13 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 	ctx, done := context.WithTimeout(ctx, hostWait)
 	defer done()
 
-	quiet := []entry{{Host: host}}
 	resp, err := c.hosts.Get(ctx, host, sessionList)
 	if err != nil {
-		return quiet
+		return c.recall(host)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return quiet
+		return c.recall(host)
 	}
 
 	var body struct {
@@ -188,7 +192,7 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 		Cursor   protocol.Cursor `json:"cursor"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return quiet
+		return c.recall(host)
 	}
 
 	out := make([]entry, 0, len(body.Sessions))
@@ -205,9 +209,53 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 	// A Host that answered with nothing is a Host with no Sessions, and it keeps
 	// its row. A Host is never hidden, and neither is an empty one.
 	if len(out) == 0 {
-		return []entry{{Host: host, Answering: true, At: body.Cursor}}
+		out = []entry{{Host: host, Answering: true, At: body.Cursor}}
+	}
+	c.remember(host, out)
+	return out
+}
+
+// remember keeps one Host's answer, so the next read that fails has something to
+// draw. It is the whole of what the Hub holds about a Host between reads.
+func (c *client) remember(host string, said []entry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last == nil {
+		c.last = map[string]answer{}
+	}
+	c.last[host] = answer{sessions: said, at: time.Now().UTC()}
+}
+
+// recall is what a Host said the last time it answered, marked as not answering
+// and stamped with when it was true. A Session on a machine nobody can reach is
+// still a Session, and dropping it would tell the user it ended.
+//
+// A Host that has never answered has nothing to recall, and it gets the empty row
+// it got before, with no stamp of its own: the card says when it was asked
+// instead, because there is no earlier moment to point at.
+func (c *client) recall(host string) []entry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	was, known := c.last[host]
+	if !known {
+		return []entry{{Host: host}}
+	}
+	out := make([]entry, len(was.sessions))
+	for i, e := range was.sessions {
+		e.Answering = false
+		e.At = 0
+		e.Since = was.at
+		out[i] = e
 	}
 	return out
+}
+
+// answer is one Host's last read, and the moment it happened. Both halves are what
+// Stale asks for: the content, and the time it was true.
+type answer struct {
+	sessions []entry
+	at       time.Time
 }
 
 // hostWait is how long the rail waits for one Host. It is the only timer in the

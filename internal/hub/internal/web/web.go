@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
@@ -82,7 +83,15 @@ const (
 
 const indexHint = "Dispatch. Open /hosts/{host}/sessions/{session} to watch a Session.\n"
 
-type client struct{ hosts Hosts }
+type client struct {
+	hosts Hosts
+
+	// last is what each Host said the last time it answered, keyed by Host id. It
+	// is the only thing the Hub keeps about a Host between reads, and it is what
+	// lets a Host that stops answering keep its Sessions on screen.
+	mu   sync.Mutex
+	last map[string]answer
+}
 
 func New(hosts Hosts) http.Handler {
 	c := &client{hosts: hosts}

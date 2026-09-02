@@ -8,6 +8,11 @@
 
 const list = document.getElementById("transcript");
 const stateLine = document.getElementById("state");
+const hostStateLine = document.getElementById("host-state");
+const hostCauseLine = document.getElementById("host-cause");
+const hostMark = document.getElementById("host-mark");
+const staleStamp = document.getElementById("stale");
+const vendorList = document.getElementById("vendors");
 const host = list.dataset.host;
 const session = list.dataset.session;
 
@@ -25,6 +30,10 @@ const order = [];
 // started before a resync belongs to a page that no longer exists, so it stops
 // rather than putting discarded rows back.
 let generation = 0;
+
+// reload holds live Frames that arrive while a resync read is in flight. They
+// are replayed after the replacement commits, so the read cannot overtake them.
+let reload = null;
 
 // rows is every row on the page by Sequence Number, so a Delta finds its message
 // without searching, and a replayed Event replaces its row instead of doubling it.
@@ -74,6 +83,7 @@ stream.addEventListener("event", (frame) => {
     redrawRail();
     return;
   }
+  if (reload) reload.frames.push({ name: "event", frame: f });
   apply(f);
   refold();
   redrawRail();
@@ -286,7 +296,7 @@ function at(seq) {
 
 function refold() {
   const view = foldSession(order.map((seq) => events.get(seq)));
-  stateLine.dataset.state = view.state;
+  stateLine.dataset.sessionState = view.state;
   stateLine.textContent = view.reason ? `${view.state} ${view.reason}` : view.state;
 }
 
@@ -299,19 +309,49 @@ function refold() {
 // never a lost Event.
 async function load(mine) {
   const path = `/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/events`;
-  for (let after = 0; mine === generation; ) {
-    const resp = await fetch(`${path}?after=${after}`);
-    // A read that failed leaves the page holding what it had. Answering a resync
-    // with a blank transcript would read as a Session with no Events in it.
-    if (!resp.ok) return;
-    const body = await resp.json();
-    const page = body.events ?? [];
-    if (mine !== generation) return;
-    for (const e of page) apply(e);
-    refold();
-    if (page.length === 0) return;
-    after = page[page.length - 1].seq;
+  const fresh = [];
+  try {
+    for (let after = 0; mine === generation; ) {
+      const resp = await fetch(`${path}?after=${after}`);
+      // A read that failed leaves the page holding what it had. Answering a resync
+      // with a blank transcript would read as a Session with no Events in it.
+      if (!resp.ok) return;
+      const body = await resp.json();
+      const page = body.events ?? [];
+      if (mine !== generation) return;
+      fresh.push(...page);
+      if (page.length === 0) {
+        commitReload(mine, fresh);
+        return;
+      }
+      after = page[page.length - 1].seq;
+    }
+  } finally {
+    if (reload?.generation === mine) reload = null;
   }
+}
+
+function commitReload(mine, fresh) {
+  const frames = reload?.generation === mine ? reload.frames : [];
+  reload = null;
+  replaceTranscript(fresh);
+  for (const queued of frames) {
+    if (queued.name === "event") apply(queued.frame);
+    else applyDelta(queued.frame);
+  }
+  refold();
+}
+
+// replaceTranscript commits a completed resync. Until every page has arrived,
+// the person keeps the transcript they already had.
+function replaceTranscript(fresh) {
+  rows.clear();
+  held.clear();
+  events.clear();
+  order.length = 0;
+  list.replaceChildren();
+  for (const e of fresh) apply(e);
+  refold();
 }
 
 stream.addEventListener("delta", (frame) => {
@@ -321,13 +361,20 @@ stream.addEventListener("delta", (frame) => {
   // Sequence Number this page has no row for is another Session's message.
   const text = rows.get(f.seq)?.querySelector(".text");
   if (!text) return;
+  if (reload) reload.frames.push({ name: "delta", frame: f });
+  applyDelta(f, text);
+});
+
+function applyDelta(f, target) {
+  const text = target ?? rows.get(f.seq)?.querySelector(".text");
+  if (!text) return;
   const next = deltaText(text.textContent, held.get(f.seq), f);
   // Appending touches only the new text, which is what keeps a message arriving
   // in a thousand Deltas from being copied whole a thousand times.
   if (next.append !== undefined) text.append(next.append);
   else text.textContent = next.text;
   held.set(f.seq, next.held);
-});
+}
 
 // A resync says this page's Cursor is outside the log, or that the log it came
 // from has been replaced. The answer is to discard what this page holds for that
@@ -343,11 +390,7 @@ stream.addEventListener("resync", (frame) => {
   }
   if (f.host && f.host !== host) return;
   generation++;
-  rows.clear();
-  held.clear();
-  events.clear();
-  order.length = 0;
-  list.replaceChildren();
+  reload = { generation, frames: [] };
   load(generation);
 });
 
@@ -358,12 +401,35 @@ stream.addEventListener("host", (frame) => {
   if (f.host !== host) return;
   document.body.dataset.hostState = f.state;
   document.body.dataset.hostCause = f.cause ?? "";
+  hostStateLine.textContent = f.state;
+  hostCauseLine.textContent = f.cause ?? "";
+  hostMark.textContent = f.state === "Connecting" ? "reconnecting" : "";
+  if (f.state === "Down") {
+    const at = f.at ? new Date(f.at / 1000) : new Date();
+    staleStamp.textContent = `Stale since ${at.toLocaleString()}`;
+    staleStamp.dateTime = at.toISOString();
+  } else {
+    staleStamp.textContent = "";
+    staleStamp.dateTime = "";
+  }
 });
 
 // A vendors frame carries a Host's Vendor catalogue and its reachability. This
-// page is one Session and draws no Vendor row, so there is nothing here to do
-// with one. The Hosts view is what reads it.
-stream.addEventListener("vendors", () => {});
+// page shows the live list so a change does not wait for another page load.
+stream.addEventListener("vendors", (frame) => {
+  const f = JSON.parse(frame.data);
+  if (f.host !== host) return;
+  vendorList.replaceChildren(...(f.vendors ?? []).map(renderVendor));
+});
+
+function renderVendor(vendor) {
+  const el = document.createElement("li");
+  const reachability = vendor.reachable ? "reachable" : "unreachable";
+  const resident = (vendor.resident ?? []).map((model) => model.modelId).join(", ");
+  el.append(node("span", "title", vendor.kind));
+  el.append(node("span", "detail", ` — ${reachability}${resident ? ` — ${resident}` : ""}`));
+  return el;
+}
 
 // render builds one row, matching page.html's shape element for element.
 function render(seq, kind, r) {

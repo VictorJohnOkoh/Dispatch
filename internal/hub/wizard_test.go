@@ -1,8 +1,11 @@
 package hub_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +19,14 @@ import (
 // Starting a Session from the browser, in four deliberate steps, and the refusal
 // when the Host is busy. The Hosts here answer the four reads the wizard makes
 // and record the commands it sends.
+
+// deskVendor is the fixture Host's one Vendor, and deskVendorInLink is the same
+// address as html/template writes it into a query. Every step after the Model step
+// carries it, because a Model id is unique only inside one Vendor.
+const (
+	deskVendor       = "http://127.0.0.1:11434"
+	deskVendorInLink = "http%3a%2f%2f127.0.0.1%3a11434"
+)
 
 // startingHost is a Host with one Model, two Harnesses and whatever it says about
 // a start. Every command it took is kept, because what the wizard did is the
@@ -111,7 +122,7 @@ func TestTheWizardIsFourStepsAndEachOneHasAnAddress(t *testing.T) {
 		t.Error("the Model step does not list the Host's catalogue")
 	}
 
-	third, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b")
+	third, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&vendor="+deskVendor+"")
 	if !strings.Contains(third, `<li class="on">Harness</li>`) {
 		t.Error("the Harness step is not third")
 	}
@@ -121,7 +132,7 @@ func TestTheWizardIsFourStepsAndEachOneHasAnAddress(t *testing.T) {
 		}
 	}
 
-	fourth, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&harness=opencode")
+	fourth, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=opencode")
 	if !strings.Contains(fourth, `<li class="on">Approval policy</li>`) {
 		t.Error("the Approval Policy step is not fourth")
 	}
@@ -153,7 +164,7 @@ func TestTheModelStepDrawsUnknownAsAnAnswer(t *testing.T) {
 func TestTheApprovalPolicyStepFixesASlotWithNoGate(t *testing.T) {
 	h := wizardOn(t, newStartingHost(t, started))
 
-	body, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&harness=opencode")
+	body, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=opencode")
 	for _, kind := range []string{"read", "edit", "execute", "fetch", "other"} {
 		if !strings.Contains(body, `name="policy.`+kind+`"`) {
 			t.Errorf("the Approval Policy step has no %s slot", kind)
@@ -174,7 +185,7 @@ func TestTheApprovalPolicyStepFixesASlotWithNoGate(t *testing.T) {
 
 	// A Harness with no tools has no Approval Policy at all. That is ugly and it is
 	// true, which is the correct pairing.
-	none, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&harness=passthrough")
+	none, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=passthrough")
 	if strings.Contains(none, `name="policy.read"`) {
 		t.Error("a Harness that runs no tools was given an Approval Policy")
 	}
@@ -189,7 +200,7 @@ func TestABusyHostIsRefusedAndOneClickStopsTheSessionHoldingTheSlot(t *testing.T
 	host := newStartingHost(t, busy)
 	h := wizardOn(t, host)
 
-	refused := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&dir=work&policy.read=auto&policy.edit=wait&policy.execute=refuse&policy.fetch=auto&policy.other=auto")
+	refused := post(t, h, "/start", "host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=opencode&dir=work&policy.read=auto&policy.edit=wait&policy.execute=refuse&policy.fetch=auto&policy.other=auto")
 	if refused.Code != http.StatusSeeOther {
 		t.Fatalf("the refusal answered %d", refused.Code)
 	}
@@ -224,7 +235,7 @@ func TestABusyHostIsRefusedAndOneClickStopsTheSessionHoldingTheSlot(t *testing.T
 
 	// The one click: stop that Session, then start this one, in that order.
 	*host.took = nil
-	again := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&dir=work&stopFirst=s-busy&policy.read=auto&policy.edit=wait&policy.execute=refuse&policy.fetch=auto&policy.other=auto")
+	again := post(t, h, "/start", "host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=opencode&dir=work&stopFirst=s-busy&policy.read=auto&policy.edit=wait&policy.execute=refuse&policy.fetch=auto&policy.other=auto")
 	if again.Code != http.StatusSeeOther {
 		t.Fatalf("the second start answered %d", again.Code)
 	}
@@ -247,7 +258,7 @@ func TestAStartThatIsAcceptedLandsOnItsSession(t *testing.T) {
 	host := newStartingHost(t, started)
 	h := wizardOn(t, host)
 
-	w := post(t, h, "/start", "host=desk&model=qwen3.5-9b&harness=opencode&dir=work&policy.read=auto&policy.edit=wait&policy.execute=wait&policy.fetch=auto&policy.other=auto")
+	w := post(t, h, "/start", "host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=opencode&dir=work&policy.read=auto&policy.edit=wait&policy.execute=wait&policy.fetch=auto&policy.other=auto")
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("the start answered %d", w.Code)
 	}
@@ -329,11 +340,11 @@ func TestAStopThatIsRefusedIsSaidRatherThanRetried(t *testing.T) {
 func TestEachAnsweredStepLinksBackToItself(t *testing.T) {
 	h := wizardOn(t, newStartingHost(t, started))
 
-	body, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&harness=opencode")
+	body, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&vendor="+deskVendor+"&harness=opencode")
 	for _, want := range []string{
 		`<a class="pill" href="/new">desk</a>`,
 		`<a class="pill" href="/new?host=desk">qwen3.5-9b</a>`,
-		`<a class="pill" href="/new?host=desk&amp;model=qwen3.5-9b">opencode</a>`,
+		`<a class="pill" href="/new?host=desk&amp;model=qwen3.5-9b&amp;vendor=` + deskVendorInLink + `">opencode</a>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the wizard has no way back to %s", want)
@@ -380,5 +391,78 @@ func TestAModelIdWithAQueryCharacterStillLinksToItself(t *testing.T) {
 	// html/template escapes a value in a query itself, and lowercases the hex.
 	if !strings.Contains(body, "model=qwen%2bcoder%26x") {
 		t.Errorf("the Model link would split into another parameter: %s", body)
+	}
+}
+
+// A Model id is unique only inside one Vendor. The Model step names the Vendor
+// beside each id, and the start carries it, so the Host is never left to pick
+// among the Vendors that answer to that id.
+func TestTheStartNamesTheVendorAndNotOnlyTheModel(t *testing.T) {
+	const other = "http://127.0.0.1:1234"
+	took := &[]string{}
+	mux := http.NewServeMux()
+	mux.HandleFunc(protocol.ListSessions, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"sessions": []any{}, "cursor": 0})
+	})
+	mux.HandleFunc(protocol.ListModels, func(w http.ResponseWriter, _ *http.Request) {
+		one := []any{map[string]any{"id": "qwen3.5-9b", "caps": map[string]any{}}}
+		json.NewEncoder(w).Encode(map[string]any{"vendors": []any{
+			map[string]any{"kind": "ollama", "base": deskVendor, "models": one},
+			map[string]any{"kind": "lmstudio", "base": other, "models": one},
+		}})
+	})
+	mux.HandleFunc(protocol.ListHarnesses, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"harnesses": []any{
+			map[string]any{"name": "opencode", "tools": false},
+		}})
+	})
+	mux.HandleFunc(protocol.StartSession, func(w http.ResponseWriter, r *http.Request) {
+		*took = append(*took, said(r))
+		started(w)
+	})
+	h := wizardOn(t, startingHost{Handler: mux, took: took})
+
+	body, _ := get(t, h, "/new?host=desk")
+	for _, want := range []string{deskVendorInLink, "http%3a%2f%2f127.0.0.1%3a1234"} {
+		if !strings.Contains(body, "vendor="+want) {
+			t.Errorf("the Model step gives no way to choose the Vendor at %s", want)
+		}
+	}
+
+	w := post(t, h, "/start", "host=desk&model=qwen3.5-9b&vendor="+other+"&harness=opencode&dir=work")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("the start answered %d", w.Code)
+	}
+	if len(*took) != 1 || !strings.Contains((*took)[0], `"vendor":"`+other+`"`) {
+		t.Fatalf("the Host was asked for %v, and it names no Vendor", *took)
+	}
+}
+
+// A Model chosen without its Vendor is not a Model chosen. The wizard draws the
+// Model step again rather than starting on whichever Vendor the Host picks.
+func TestAModelWithoutItsVendorGoesBackToTheModelStep(t *testing.T) {
+	h := wizardOn(t, newStartingHost(t, started))
+
+	body, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&harness=opencode")
+	if !strings.Contains(body, `<li class="on">Model</li>`) {
+		t.Error("a Model with no Vendor was taken as an answer")
+	}
+}
+
+// A Host the Hub could not reach at all refuses in plain text, because it never
+// got as far as the Daemon that would have refused in JSON. A wizard that read
+// only JSON showed the user a start that vanished.
+func TestAStartThatNeverReachedTheHostIsDrawnAsARefusal(t *testing.T) {
+	h := hub.New([]hostset.Host{{ID: "desk"}}, dialFunc(func(context.Context, hostset.HostID) (net.Conn, error) {
+		return nil, errors.New("the SSH tunnel to desk is down")
+	})).Handler()
+
+	w := post(t, h, "/start", "host=desk&model=m&vendor="+deskVendor+"&harness=opencode&dir=work")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("the start answered %d", w.Code)
+	}
+	body, _ := get(t, h, w.Header().Get("Location"))
+	if !strings.Contains(body, "the SSH tunnel to desk is down") {
+		t.Errorf("the wizard does not say why the start did not happen: %s", body)
 	}
 }
