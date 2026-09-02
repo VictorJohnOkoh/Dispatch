@@ -70,6 +70,7 @@ stream.addEventListener("event", (frame) => {
   // from them; every other Session on every other Host is a rail row, and what it
   // gets from an Event is that it has changed.
   if (f.host !== host || f.session !== session) {
+    ask(f);
     redrawRail();
     return;
   }
@@ -77,6 +78,76 @@ stream.addEventListener("event", (frame) => {
   refold();
   redrawRail();
 });
+
+// The toast, and it is load-bearing. This layout hides every Session but the one
+// on screen, so a question from any other Session has no other way to reach the
+// user. Whatever ever replaces it has to keep that job.
+const toasts = document.getElementById("toasts");
+const asking = new Map();
+
+// ask raises a toast for a question from a Session that is not on screen, and
+// takes one down when its question is answered. Two questions from two Hosts are
+// two toasts: one that replaced the other would lose the first silently, which is
+// the whole failure this exists to prevent.
+function ask(f) {
+  if (f.kind === "ApprovalDecided") {
+    answered(f.payload?.toolCallId);
+    return;
+  }
+  if (f.kind !== "ApprovalRequested") return;
+
+  const id = f.payload?.toolCallId;
+  if (!id || asking.has(id)) return;
+  const at = `/hosts/${encodeURIComponent(f.host)}/sessions/${encodeURIComponent(f.session)}`;
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.dataset.toolCall = id;
+  toast.dataset.host = f.host;
+  toast.dataset.session = f.session;
+
+  // The Host and the Session, because a question with no machine on it is a
+  // question the user cannot place.
+  const where = document.createElement("a");
+  where.className = "where";
+  where.href = at;
+  where.textContent = `${f.session} on ${f.host}`;
+  toast.append(where, node("p", "title", f.payload?.title ?? "a Tool Call is waiting"));
+
+  toast.append(
+    decide(f, id, "allowed", "Allow"),
+    decide(f, id, "refused", "Refuse"),
+  );
+  asking.set(id, toast);
+  toasts.append(toast);
+}
+
+// decide is one answer, sent to the Host that asked. The toast stays up until the
+// Daemon's own ApprovalDecided comes back on the stream: a command is an
+// intention, and what it changed arrives as an Event.
+function decide(f, id, decision, label) {
+  const button = document.createElement("button");
+  button.dataset.decision = decision;
+  button.textContent = label;
+  button.onclick = () => {
+    button.disabled = true;
+    fetch(`/v1/hosts/${encodeURIComponent(f.host)}/sessions/${encodeURIComponent(f.session)}/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toolCallId: id, decision }),
+    }).catch(() => {
+      button.disabled = false;
+    });
+  };
+  return button;
+}
+
+function answered(id) {
+  const toast = asking.get(id);
+  if (!toast) return;
+  asking.delete(id);
+  toast.remove();
+}
 
 // rail is the nav the server drew. The browser redraws it when the merged stream
 // says something changed, and it asks the Hub for the answer rather than folding

@@ -319,3 +319,91 @@ console.log(JSON.stringify(seen));
 		}
 	}
 }
+
+// The toast is the only path a question from a Session that is not on screen has
+// to the user, because this layout hides every Session but one.
+func TestAQuestionFromAnotherSessionRaisesAToast(t *testing.T) {
+	var got struct {
+		Toasts []string `json:"toasts"`
+		Where  []string `json:"where"`
+		Posted []string `json:"posted"`
+		After  int      `json:"after"`
+	}
+	pageUnder(t, `
+// Two questions, from two Sessions on two Hosts, at once.
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+opened.send("event", {host: "shed", session: "s-3", seq: 9, kind: "ApprovalRequested",
+  payload: {toolCallId: "c2", title: "write out.txt"}});
+
+const toasts = dom.toasts.children.map((t) => t.textContent);
+const where = dom.toasts.children.map((t) => t.querySelector(".where").href);
+
+// The user answers the first. The command goes to the Host that asked.
+dom.toasts.children[0].children.find((c) => c.dataset.decision === "allowed").onclick();
+
+// The Daemon's own decision comes back on the stream, and takes the toast down.
+opened.send("event", {host: "attic", session: "s-9", seq: 5, kind: "ApprovalDecided",
+  payload: {toolCallId: "c1", decision: "allowed", by: "user"}});
+
+setTimeout(() => {
+  console.log(JSON.stringify({
+    toasts,
+    where,
+    posted: posted.map((p) => p.url + " " + p.body),
+    after: dom.toasts.children.length,
+  }));
+}, 0);
+`, &got)
+
+	if len(got.Toasts) != 2 {
+		t.Fatalf("two questions raised %d toasts: %v", len(got.Toasts), got.Toasts)
+	}
+	// Each names the Host and the Session it came from, because a question with no
+	// machine on it is one the user cannot place.
+	if !strings.Contains(got.Toasts[0], "s-9 on attic") || !strings.Contains(got.Toasts[0], "rm -rf build/") {
+		t.Errorf("the first toast reads %q", got.Toasts[0])
+	}
+	if !strings.Contains(got.Toasts[1], "s-3 on shed") {
+		t.Errorf("the second toast reads %q, and neither replaced the other", got.Toasts[1])
+	}
+	// Acting on it makes that Session the primary.
+	if got.Where[0] != "/hosts/attic/sessions/s-9" {
+		t.Errorf("the toast leads to %q", got.Where[0])
+	}
+	// The decision reaches the Host that asked, naming the call it answers.
+	if len(got.Posted) != 1 || !strings.Contains(got.Posted[0], "/v1/hosts/attic/sessions/s-9/approvals") {
+		t.Fatalf("the decision went to %v", got.Posted)
+	}
+	if !strings.Contains(got.Posted[0], `"decision":"allowed"`) || !strings.Contains(got.Posted[0], `"toolCallId":"c1"`) {
+		t.Errorf("the decision said %q", got.Posted[0])
+	}
+	// The answered question's toast goes when the Daemon says it was decided, and
+	// the other one stays: a command is an intention, and the Event is the fact.
+	if got.After != 1 {
+		t.Errorf("%d toasts are left, and one of two questions was answered", got.After)
+	}
+}
+
+// A question from the Session on screen is drawn in the transcript, where it
+// belongs. A toast for it would say the same thing twice.
+func TestAQuestionFromTheSessionOnScreenRaisesNoToast(t *testing.T) {
+	var got struct {
+		Toasts int `json:"toasts"`
+		Rows   int `json:"rows"`
+	}
+	pageUnder(t, `
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+setTimeout(() => {
+  console.log(JSON.stringify({toasts: dom.toasts.children.length, rows: dom.transcript.children.length}));
+}, 0);
+`, &got)
+
+	if got.Toasts != 0 {
+		t.Errorf("the Session on screen raised %d toasts, and its question is already drawn", got.Toasts)
+	}
+	if got.Rows < 2 {
+		t.Errorf("the question was not drawn in the transcript either: %d rows", got.Rows)
+	}
+}

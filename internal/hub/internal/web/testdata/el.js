@@ -44,6 +44,12 @@ class El {
     this.append(...parts);
   }
 
+  remove() {
+    if (!this.parent) return;
+    this.parent.children.splice(this.parent.children.indexOf(this), 1);
+    this.parent = null;
+  }
+
   replaceWith(el) {
     el.parent = this.parent;
     this.parent.children[this.parent.children.indexOf(this)] = el;

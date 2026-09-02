@@ -147,3 +147,43 @@ body { max-width: none; }
 .row[data-tone="bad"] { border-left-color: #c05050; }
 .row[data-tone="unknown"] { border-left-color: rgba(128, 128, 128, 0.6); }
 .row[data-tone="asking"] { border-left-color: #b8860b; }
+
+/* The toast, and it is load-bearing. This layout hides every Session but one, so
+   a question from any other Session has no other way to reach the user. Two
+   questions stack: one that covered the other would lose it silently. */
+.toasts {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(26rem, calc(100vw - 2rem));
+  z-index: 10;
+}
+
+.toast {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #b8860b;
+  border-radius: 7px;
+  background: Canvas;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.toast .where { flex-basis: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+.toast .title { flex: 1; margin: 0; min-width: 8rem; }
+.toast button { padding: 0.4rem 0.8rem; }
+
+/* Behaviour 3 asks for this from a phone over the tunnel, so the rail folds away
+   and the toast takes the width it needs. A question the user cannot read on the
+   screen they have is a question that did not reach them. */
+@media (max-width: 40rem) {
+  .rail { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
+  .desk { margin-left: 0; }
+  .toasts { left: 1rem; right: 1rem; max-width: none; }
+  .toast button { flex: 1; padding: 0.6rem; }
+}

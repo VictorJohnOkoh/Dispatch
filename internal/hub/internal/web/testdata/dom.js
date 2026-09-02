@@ -46,10 +46,13 @@ stateElement.textContent = "Starting";
 // The rail's rows, which page.js redraws whole.
 const railNav = new El("div");
 
+// The toast rack, empty until a question from another Session raises one.
+const toastRack = new El("div");
+
 const body = new El("body");
 
 globalThis.document = {
-  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, rail: railNav })[id] ?? null,
+  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, rail: railNav, toasts: toastRack })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
 };
@@ -76,7 +79,12 @@ globalThis.EventSource = EventSource;
 // the Hub answers a Session it cannot read.
 globalThis.served = new Map();
 globalThis.fetched = [];
-globalThis.fetch = async (url) => {
+globalThis.posted = [];
+globalThis.fetch = async (url, options) => {
+  if (options?.method === "POST") {
+    posted.push({ url, body: options.body });
+    return { ok: true, json: async () => ({}) };
+  }
   fetched.push(url);
   if (url.startsWith("/rail/")) {
     return { ok: true, json: async () => ({ rail: globalThis.railAnswer ?? [] }) };
@@ -88,4 +96,4 @@ globalThis.fetch = async (url) => {
   return { ok: true, json: async () => ({ events: page }) };
 };
 
-globalThis.dom = { transcript, stateElement, embedded, rail: railNav, body, row };
+globalThis.dom = { transcript, stateElement, embedded, rail: railNav, toasts: toastRack, body, row };
