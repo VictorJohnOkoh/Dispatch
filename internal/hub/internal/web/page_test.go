@@ -319,3 +319,36 @@ console.log(JSON.stringify(seen));
 		}
 	}
 }
+
+// Down dims and stamps, live as well as on the server. A Host that goes Down while
+// this page is open would otherwise keep content that claims to be current.
+func TestALiveHostGoingDownStampsItsCard(t *testing.T) {
+	var got struct {
+		Down string `json:"down"`
+		Back string `json:"back"`
+		Told string `json:"told"`
+	}
+	hostsUnder(t, `
+opened.send("host", {host: "desk", state: "Down", cause: "unreachable"});
+const down = page.get("desk").who.textContent;
+
+// Ready again, and the card is current: nothing on it says how old it is.
+opened.send("host", {host: "desk", state: "Ready"});
+const back = page.get("desk").who.textContent;
+
+// A frame that carries the Hub's own time is stamped with that rather than with
+// when this page was drawn.
+opened.send("host", {host: "attic", state: "Down", since: "2026-09-02T08:30:00Z"});
+console.log(JSON.stringify({down, back, told: page.get("attic").who.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Down, "last answered at 2026-09-02T09:00:00Z") {
+		t.Errorf("the card that went Down reads %q, and it has to say how old it is", got.Down)
+	}
+	if strings.Contains(got.Back, "last answered at") {
+		t.Errorf("the card is current again and still reads %q", got.Back)
+	}
+	if !strings.Contains(got.Told, "last answered at 2026-09-02T08:30:00Z") {
+		t.Errorf("the card reads %q, and the Hub told it when it last heard from that Host", got.Told)
+	}
+}

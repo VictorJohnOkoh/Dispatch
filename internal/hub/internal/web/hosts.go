@@ -31,14 +31,14 @@ type card struct {
 	// rather than guessing.
 	Cause string
 
-	// Asked is when this Hub last put the question to this Host, stamped on a card
-	// whose Host did not answer it.
-	//
-	// It is deliberately not the time the content was true, which is what Stale
-	// asks for. The Hub remembers nothing about a Host between reads, so a Down
-	// Host has no last-known content to keep and no earlier time to stamp on it.
-	// What this card can say honestly is when it asked and got nothing, and the
-	// Hub's own presence tracking is what will let it say the other.
+	// Since is when this card's content was last true, which is when this Host last
+	// answered. It is what Stale asks for, and it is stamped on a card whose Host is
+	// not answering now.
+	Since string
+
+	// Asked is when this Hub put the question, stamped instead on a card for a Host
+	// that has never answered. There is no earlier moment to point at, so the card
+	// says the one thing it knows.
 	Asked string
 
 	// Sessions is this Host's, last known. They keep their state beside a Host that
@@ -57,10 +57,13 @@ const (
 )
 
 // hostsView is the page. Cursor is where every answering Host's log stood when
-// this page was drawn, so the stream it opens is sent what happens next.
+// this page was drawn, so the stream it opens is sent what happens next, and Drawn
+// is when that was, so a Host that goes Down while the page is open can be stamped
+// with a time the page knows is true.
 type hostsView struct {
 	Cards  []card
 	Cursor string
+	Drawn  string
 }
 
 // machinesPage draws every configured Host, in the order the config named them,
@@ -83,20 +86,27 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 		if e.Answering {
 			view.Cards[i].State = stateReady
 			drawn[e.Host] = e.At
+		} else if !e.Since.IsZero() {
+			view.Cards[i].Since = e.Since.Format(time.RFC3339)
 		}
 		if e.Session != "" {
 			view.Cards[i].Sessions = append(view.Cards[i].Sessions, e)
 		}
 	}
 	// A Host that answered needs no stamp: what is on its card is current. One that
-	// did not carries the time it was asked.
+	// did not carries the time its content was true, or the time it was asked when
+	// it has never given this Hub any.
 	asked := time.Now().UTC().Format(time.RFC3339)
 	for i := range view.Cards {
-		if view.Cards[i].State != stateReady {
+		if view.Cards[i].State == stateReady {
+			continue
+		}
+		if view.Cards[i].Since == "" {
 			view.Cards[i].Asked = asked
 		}
 	}
 	view.Cursor = drawn.String()
+	view.Drawn = asked
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	machines.Execute(w, view)
