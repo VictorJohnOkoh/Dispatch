@@ -33,9 +33,9 @@ func TestTheSevenFrameTypes(t *testing.T) {
 	}
 }
 
-// Ten endpoints on the Daemon's leg. The Client's are the same under one more path
+// The endpoints on the Daemon's leg. The Client's are the same under one more path
 // segment, and that segment is the whole difference between the two legs.
-func TestTheTenRoutes(t *testing.T) {
+func TestEveryRouteIsOneCommandUnderV1(t *testing.T) {
 	seen := make(map[string]bool, len(Routes))
 	for _, route := range Routes {
 		method, path, ok := strings.Cut(route, " ")
@@ -54,11 +54,11 @@ func TestTheTenRoutes(t *testing.T) {
 		seen[route] = true
 	}
 
-	if len(seen) != 10 {
-		t.Errorf("Routes holds %d endpoints, want 10", len(seen))
+	if len(seen) != len(Routes) {
+		t.Errorf("Routes holds %d endpoints and %d distinct ones", len(Routes), len(seen))
 	}
 	if seen[ListHosts] {
-		t.Error("GET /v1/hosts is the eleventh, and only the Hub answers it")
+		t.Error("GET /v1/hosts is the Hub's own, and no Daemon answers it")
 	}
 }
 
@@ -85,7 +85,7 @@ func TestOnHostNamesAHost(t *testing.T) {
 		}
 	}
 
-	// Every one of the ten maps to a Client route, and no two collide.
+	// Every one maps to a Client route, and no two collide.
 	seen := make(map[string]bool, len(Routes))
 	for _, route := range Routes {
 		client := OnHost(route)

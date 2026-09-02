@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,8 +34,11 @@ func (h *Hub) Handler() http.Handler {
 		mux.HandleFunc(protocol.OnHost(route), h.forward)
 	}
 	// The Client is everything the protocol does not claim. It is last because a
-	// pattern of "GET /" matches whatever the ten above did not.
+	// pattern of "GET /" matches whatever the routes above did not. Its one command
+	// is named rather than taken from a pattern that would answer every method on
+	// every path this Hub does not otherwise serve.
 	mux.Handle("GET /", h.page)
+	mux.Handle("POST /start", h.page)
 	return mux
 }
 
@@ -55,6 +59,23 @@ func (h *Hub) listHosts(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(struct {
 		Hosts []hostset.Host `json:"hosts"`
 	}{Hosts: h.hosts.All()})
+}
+
+// Post runs one command against a named Host's Daemon and answers as that Daemon
+// answered. The Client uses it to start and to stop a Session, and a refusal is an
+// answer like any other: the wizard draws the 409 rather than the Hub deciding
+// what it means.
+func (h *Hub) Post(ctx context.Context, host, path string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon"+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.roundTrip(ctx, hostset.HostID(host), req)
+	if err != nil {
+		return refused(statusOf(err), err.Error()), nil
+	}
+	return resp, nil
 }
 
 // Get runs one GET against a named Host's Daemon and answers as that Daemon

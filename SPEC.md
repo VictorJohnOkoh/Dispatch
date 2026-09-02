@@ -45,7 +45,7 @@ ADRs that contradict or under-specify something. Everything original to this doc
 - SQLite via `modernc.org/sqlite`, one `events` table, write-ahead logging, committed before sent,
   nothing ever deleted from the log.
 - A per-Session transcript of the Harness's raw bytes, capped at 64 MB with a truncation marker.
-- Ten endpoints on the Daemon, the same ten under a `/v1/hosts/{host}` prefix on the Hub, plus
+- Eleven endpoints on the Daemon, the same eleven under a `/v1/hosts/{host}` prefix on the Hub, plus
   `GET /v1/hosts`.
 - One merged SSE stream to the Client, one stream per Host to the Hub, six frame types the last of
   which is a keepalive comment, a seventh `host` frame the Hub originates, and a `host` field the Hub
@@ -233,7 +233,7 @@ passes into `SessionSpec`, which is what keeps process ownership out of the Adap
 
 ## The protocol and the log
 
-[ADR 0009](docs/adr/0009-wire-protocol-and-event-log.md) owns this. Ten endpoints on the Daemon:
+[ADR 0009](docs/adr/0009-wire-protocol-and-event-log.md) owns this. Eleven endpoints on the Daemon:
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -247,9 +247,16 @@ passes into `SessionSpec`, which is what keeps process ownership out of the Adap
 | `GET` | `/v1/sessions` | this Host's Sessions |
 | `GET` | `/v1/sessions/{id}/events` | one Session's Events, paged |
 | `GET` | `/v1/models` | the Vendor catalogue |
+| `GET` | `/v1/harnesses` | what a start may name, and the Gates each one declares |
 
-The Client's ten are the same under `/v1/hosts/{host}`, plus `GET /v1/hosts`. The Hub's command
-handler is one function serving all of them, and it would serve an eleventh unchanged.
+`GET /v1/harnesses` is the one ADR 0009 did not list, added when the start wizard needed a fact no
+other endpoint carried. It is separate from the catalogue rather than folded into it, because a
+Catalogue is large, changes when a human pulls a Model and may be shown Stale, and this list is
+fixed for the life of the Daemon. It carries the Host config's `policyDefault` beside the list, so
+the wizard's fourth step starts from the Host's own default rather than from a copy of ADR 0008's.
+
+The Client's eleven are the same under `/v1/hosts/{host}`, plus `GET /v1/hosts`. The Hub's command
+handler is one function serving all of them, and it would serve one more unchanged.
 
 Frames on the stream: `hello`, `event`, `delta`, `vendors`, `resync`, and a keepalive comment every
 10 seconds. The Hub adds a `host` field to each and sends its own keepalive on the same beat.
@@ -402,7 +409,7 @@ M4. ADR 0010 rejected an in-memory `eventlog` implementation, and this is not on
 still there.
 
 **M3. The vertical slice, and the first thing that runs.** `daemon` with the passthrough Harness and
-the Ollama adapter, driven by `curl` on localhost. Admission, the Session registry, the ten
+the Ollama adapter, driven by `curl` on localhost. Admission, the Session registry, the
 endpoints, the SSE stream, the Vendor poll. No Hub, no browser and no process supervision, because
 passthrough spawns nothing.
 

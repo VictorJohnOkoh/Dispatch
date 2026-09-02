@@ -479,9 +479,9 @@ func TestACommandOnAnUnknownSessionIsRefused(t *testing.T) {
 	}
 }
 
-// The mux serves all ten endpoints, spelled as protocol spells them, so the two
+// The mux serves every endpoint, spelled as protocol spells them, so the two
 // cannot drift.
-func TestTheMuxServesTheTenEndpoints(t *testing.T) {
+func TestTheMuxServesEveryEndpoint(t *testing.T) {
 	h := newHost(t)
 	mux, ok := h.handler().(*http.ServeMux)
 	if !ok {

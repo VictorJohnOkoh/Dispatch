@@ -357,7 +357,7 @@ func TestAClientCommandAndFrameCrossTheHubAndDaemon(t *testing.T) {
 	}
 }
 
-func TestAllTenDaemonEndpointsUseTheOneHostHandler(t *testing.T) {
+func TestEveryDaemonEndpointUsesTheOneHostHandler(t *testing.T) {
 	cases := []struct {
 		method, client, daemon string
 	}{

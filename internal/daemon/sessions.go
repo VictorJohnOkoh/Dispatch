@@ -28,6 +28,13 @@ type startRequest struct {
 	Model   string `json:"model"`
 	Dir     string `json:"dir"`
 
+	// Vendor is the Base of the Vendor that serves the Model, as GET /v1/models
+	// gave it. A Model id is unique only inside one Vendor, so a start that names
+	// only the Model lets this Host pick among Vendors that all answer to that id.
+	// It is optional, and a start without it takes the first Vendor that lists the
+	// Model.
+	Vendor string `json:"vendor"`
+
 	// Policy is the user choosing the Approval Policy at the start. Without it the
 	// Session gets the Host config's default, clipped by the Harness's Gates. With
 	// it, a slot the Harness cannot gate fails the start rather than being quietly
@@ -85,11 +92,11 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	vendor := d.vendors.serving(req.Model)
+	vendor := d.vendors.serving(req.Vendor, req.Model)
 	if vendor == nil {
 		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
 			Reason: protocol.ReasonUnknownModel,
-			Detail: fmt.Sprintf("no Vendor on this Host serves the Model %q", req.Model),
+			Detail: unknownModel(req.Vendor, req.Model),
 		})
 		return
 	}
@@ -672,4 +679,13 @@ func (r *sessions) lookup(id event.SessionID) *Session {
 		}
 	}
 	return nil
+}
+
+// unknownModel says which of the two the Host could not match, because a start
+// that named a Vendor and a start that named none fail for different reasons.
+func unknownModel(vendor, model string) string {
+	if vendor == "" {
+		return fmt.Sprintf("no Vendor on this Host serves the Model %q", model)
+	}
+	return fmt.Sprintf("the Vendor at %s does not serve the Model %q", vendor, model)
 }

@@ -5,13 +5,15 @@ import (
 	"net/http"
 	"net/http/pprof"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// handler is the Daemon's mux, and it serves all ten of ADR 0009's endpoints.
+// handler is the Daemon's mux, and it serves every endpoint on the Daemon's leg.
 func (d *Daemon) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(protocol.ListModels, d.listModels)
+	mux.HandleFunc(protocol.ListHarnesses, d.listHarnesses)
 	mux.HandleFunc(protocol.StartSession, d.startSession)
 	mux.HandleFunc(protocol.ListSessions, d.listSessions)
 	mux.HandleFunc(protocol.StreamEvents, d.streamEvents)
@@ -36,6 +38,44 @@ func (d *Daemon) handler() http.Handler {
 // Handler is the Daemon's Control Plane without a listener. The Hub's tier-three
 // test serves it over net.Pipe, so both roles run in one process without SSH.
 func (d *Daemon) Handler() http.Handler { return d.handler() }
+
+// listHarnesses answers what a start may name on this Host, with the Gates each
+// Adapter declares. The Client needs them to draw an Approval Policy that cannot
+// be set to something the Harness will not honour, and they never change while
+// the Daemon runs.
+func (d *Daemon) listHarnesses(w http.ResponseWriter, _ *http.Request) {
+	out := make([]HarnessView, len(d.harnesses))
+	for i, h := range d.harnesses {
+		caps := h.Adapter.Capabilities()
+		out[i] = HarnessView{Name: h.Name, Tools: caps.Tools}
+		for kind, gated := range caps.Gates {
+			if gated {
+				out[i].Gates = append(out[i].Gates, event.ToolKind(kind).String())
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Harnesses []HarnessView `json:"harnesses"`
+
+		// PolicyDefault is the Host config's, unclipped. It is here because the
+		// Client's start step needs it and this is the read that step makes: a
+		// Client that guessed it would quietly override what the Host was set up
+		// with, which CONTEXT.md gives the user the right to override and nobody
+		// else.
+		PolicyDefault event.Policy `json:"policyDefault"`
+	}{out, d.policyDefault})
+}
+
+// HarnessView is one Harness this Host serves. Gates is the ToolKinds this
+// Adapter can hold a Tool Call for, and a slot that is not among them may only be
+// auto. A Harness with no tools has no Approval Policy at all, which is why Tools
+// is a field of its own rather than an empty Gates list.
+type HarnessView struct {
+	Name  string   `json:"name"`
+	Tools bool     `json:"tools"`
+	Gates []string `json:"gates"`
+}
 
 // listModels answers from the cache the poll fills. It calls no Vendor, so a
 // Vendor that is slow or gone cannot make this request slow or gone.
