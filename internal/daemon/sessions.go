@@ -144,14 +144,13 @@ func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vend
 		return
 	}
 
-	// Files is not filled: the contained file access it names has not landed.
-	// Passthrough calls neither it nor Spawn.
 	run, err := h.Adapter.Start(ctx, harness.SessionSpec{
 		Session: s.id,
 		Model:   s.model,
 		Vendor:  vendor.Endpoint(),
 		Dir:     s.dir,
 		Spawn:   d.spawner(s, h),
+		Files:   files{root: d.root, dir: s.dir},
 	}, &sink{d: d, s: s})
 	if err != nil {
 		d.endFailed(s, event.ErrHarnessFailed, err.Error())

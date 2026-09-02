@@ -113,11 +113,12 @@ func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	if code := run(done(t), []string{"daemon", "-config", path}, &log); code != 0 {
 		t.Fatalf("exit %d: %s", code, log.String())
 	}
-	if !strings.Contains(log.String(), "harness=opencode") {
+	if !strings.Contains(log.String(), "harness=pi") {
 		t.Errorf("log = %q", log.String())
 	}
 
 	only := strings.Replace(daemonConfig(t, dir), `{"name": "passthrough"},`, "", 1)
+	only = strings.Replace(only, `{"name": "opencode", "exe": "/usr/local/bin/opencode"},`, "", 1)
 	path = writeConfig(t, dir, "none.json", only)
 	var errOut strings.Builder
 	if code := run(done(t), []string{"daemon", "-config", path}, &errOut); code != 1 {
