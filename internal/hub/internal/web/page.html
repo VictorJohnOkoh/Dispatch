@@ -6,11 +6,20 @@
 <title>{{.Session}} on {{.Host}}</title>
 <link rel="stylesheet" href="/page.css">
 </head>
-<body>
+<body data-host-state="Connecting">
 <header>
   <h1>{{.Session}}</h1>
-  <p class="host">on {{.Host}}</p>
+  <p class="host">
+    on {{.Host}} · <span id="host-state">Connecting</span>
+    <span id="host-cause"></span>
+    <span class="mark" id="host-mark">connecting</span>
+    <time id="stale"></time>
+  </p>
   <p class="state" id="state" data-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</p>
+  <section class="vendors" aria-labelledby="vendors-title">
+    <h2 id="vendors-title">Vendors</h2>
+    <ul id="vendors"></ul>
+  </section>
 </header>
 <ol id="transcript" data-host="{{.Host}}" data-session="{{.Session}}" data-cursor="{{.Cursor}}">
 {{- range .Rows}}

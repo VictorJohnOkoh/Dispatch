@@ -106,10 +106,25 @@ const stateElement = new El("p");
 stateElement.dataset.state = "Starting";
 stateElement.textContent = "Starting";
 
+const hostStateElement = new El("span");
+const hostCauseElement = new El("span");
+const hostMarkElement = new El("span");
+const staleElement = new El("span");
+const vendorsElement = new El("ul");
+
 const body = new El("body");
 
 globalThis.document = {
-  getElementById: (id) => ({ transcript, state: stateElement, events: embedded })[id] ?? null,
+  getElementById: (id) => ({
+    transcript,
+    state: stateElement,
+    events: embedded,
+    "host-state": hostStateElement,
+    "host-cause": hostCauseElement,
+    "host-mark": hostMarkElement,
+    stale: staleElement,
+    vendors: vendorsElement,
+  })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
 };
@@ -145,4 +160,15 @@ globalThis.fetch = async (url) => {
   return { ok: true, json: async () => ({ events: page }) };
 };
 
-globalThis.dom = { transcript, stateElement, embedded, body, row };
+globalThis.dom = {
+  transcript,
+  stateElement,
+  hostStateElement,
+  hostCauseElement,
+  hostMarkElement,
+  staleElement,
+  vendorsElement,
+  embedded,
+  body,
+  row,
+};

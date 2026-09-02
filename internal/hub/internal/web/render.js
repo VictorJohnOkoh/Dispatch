@@ -24,7 +24,10 @@ function draw(kind, p) {
     case "ToolCallRequested":
       // A call with no arguments carries none, the way render.go's does. Spelling
       // them "null" would read as an argument whose value is null.
-      return { title: `Tool call: ${p.name}`, detail: `${p.title} ${p.args ? JSON.stringify(p.args) : ""}`.trim() };
+      return {
+        title: `Tool call: ${p.name}`,
+        detail: `${p.title} ${p.args == null ? "" : JSON.stringify(p.args)}`.trim(),
+      };
     case "ApprovalRequested":
       return { title: `Approval requested: ${p.title}`, detail: p.detail };
     case "ApprovalDecided":

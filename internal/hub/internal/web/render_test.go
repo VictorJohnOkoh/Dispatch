@@ -2,78 +2,84 @@ package web
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// render.js draws the same row from a live Frame, so what is asserted here is what
-// that file must draw as well. Until the shared fixture lands the two are held
-// together by this test and by reading, and the rows below are the ones where
-// they disagreed.
-func TestDrawSpellsPayloadsAsPageJSSpellsThem(t *testing.T) {
-	tests := []struct {
-		name    string
-		kind    event.Kind
-		payload string
-		title   string
-		detail  string
-	}{
-		{
-			// JSON.stringify(null) is not what render.js draws here: it draws nothing,
-			// because a call with no arguments carries none.
-			name:    "a Tool Call whose arguments are the literal null",
-			kind:    event.KindToolCallRequested,
-			payload: `{"toolCallId":"c1","name":"bash","toolKind":"execute","title":"run it","args":null}`,
-			title:   "Tool call: bash",
-			detail:  "run it",
-		},
-		{
-			name:    "a Tool Call with no args key at all",
-			kind:    event.KindToolCallRequested,
-			payload: `{"toolCallId":"c1","name":"bash","toolKind":"execute","title":"run it"}`,
-			title:   "Tool call: bash",
-			detail:  "run it",
-		},
-		{
-			// The Harness's own spacing does not reach the row. JSON.stringify writes
-			// none, and the two must spell the same bytes.
-			name:    "a Tool Call whose arguments arrived with spacing",
-			kind:    event.KindToolCallRequested,
-			payload: `{"toolCallId":"c1","name":"bash","toolKind":"execute","title":"run it","args":{"cmd": "ls",  "dir": "/tmp"}}`,
-			title:   "Tool call: bash",
-			detail:  `run it {"cmd":"ls","dir":"/tmp"}`,
-		},
-		{
-			// A Kind this build never heard of keeps its payload, compacted the same
-			// way, and is titled with the Kind.
-			name:    "a Kind this build has never heard of",
-			kind:    event.Kind("Telemetry"),
-			payload: `{"beat": 3}`,
-			title:   "Telemetry",
-			detail:  `{"beat":3}`,
-		},
+type renderFixture struct {
+	Cases []struct {
+		Name    string          `json:"name"`
+		Kind    event.Kind      `json:"kind"`
+		Payload json.RawMessage `json:"payload"`
+		Row     renderedRow     `json:"row"`
+	} `json:"cases"`
+}
+
+type renderedRow struct {
+	Title      string `json:"title"`
+	Text       string `json:"text"`
+	Detail     string `json:"detail"`
+	Appendable bool   `json:"appendable"`
+}
+
+func TestGoAndJavaScriptRenderTheSharedFixture(t *testing.T) {
+	raw, err := os.ReadFile("testdata/render.json")
+	if err != nil {
+		t.Fatalf("the shared renderer fixture: %v", err)
+	}
+	var fixture renderFixture
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatalf("the shared renderer fixture: %v", err)
+	}
+	if len(fixture.Cases) == 0 {
+		t.Fatal("the shared renderer fixture holds no cases")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			drawn := rows([]protocol.Event{{
-				Seq: 1, Session: "s-1", At: time.Now().UnixMicro(),
-				Kind: string(tt.kind), Payload: json.RawMessage(tt.payload),
-			}})
-			if len(drawn) != 1 {
-				t.Fatalf("%d rows, want 1", len(drawn))
-			}
-			if drawn[0].Title != tt.title {
-				t.Errorf("title %q, want %q", drawn[0].Title, tt.title)
-			}
-			if drawn[0].Detail != tt.detail {
-				t.Errorf("detail %q, want %q", drawn[0].Detail, tt.detail)
-			}
-		})
+	for _, c := range fixture.Cases {
+		e, err := event.Decode(1, "s-1", 0, c.Kind, c.Payload)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		got := draw(e)
+		goRow := renderedRow{got.Title, got.Text, got.Detail, got.Appendable}
+		if !reflect.DeepEqual(goRow, c.Row) {
+			t.Errorf("Go %s drew %+v, want %+v", c.Name, goRow, c.Row)
+		}
+	}
+
+	node := findNode(t)
+	source, err := os.ReadFile("render.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := `const fs = require("fs");
+` + string(source) + `
+const fixture = JSON.parse(fs.readFileSync(process.env.FIXTURE, "utf8"));
+const rows = fixture.cases.map((c) => {
+  const r = draw(c.kind, c.payload);
+  return {title: r.title ?? "", text: r.text ?? "", detail: r.detail ?? "", appendable: r.appendable ?? false};
+});
+console.log(JSON.stringify(rows));`
+	cmd := exec.Command(node, "-e", program)
+	cmd.Env = append(os.Environ(), "FIXTURE=testdata/render.json")
+	said, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, said)
+	}
+	var jsRows []renderedRow
+	if err := json.Unmarshal(said, &jsRows); err != nil {
+		t.Fatalf("node said %q: %v", said, err)
+	}
+	for i, c := range fixture.Cases {
+		if !reflect.DeepEqual(jsRows[i], c.Row) {
+			t.Errorf("JavaScript %s drew %+v, want %+v", c.Name, jsRows[i], c.Row)
+		}
 	}
 }
 
