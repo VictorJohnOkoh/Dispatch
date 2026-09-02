@@ -115,7 +115,7 @@ func startDaemon(ctx context.Context, path string, log *slog.Logger) error {
 
 	log.Info("dispatch starting", "role", "daemon", "vendors", len(adapters),
 		"harnesses", len(harnesses), "workspaceRoot", root, "logPath", cfg.LogPath)
-	return daemon.New(log, events, filepath.Dir(cfg.LogPath), root, adapters, harnesses).Serve(ctx, cfg.Listen)
+	return daemon.New(log, events, filepath.Dir(cfg.LogPath), root, adapters, harnesses, cfg.PolicyDefault).Serve(ctx, cfg.Listen)
 }
 
 // newHarnesses builds one Adapter per named Harness this build knows. A Harness
@@ -129,6 +129,10 @@ func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.
 		case "passthrough":
 			out = append(out, daemon.Harness{
 				Name: profile.Name, Exe: profile.Exe, Adapter: harness.NewPassthrough(nil),
+			})
+		case "opencode":
+			out = append(out, daemon.Harness{
+				Name: profile.Name, Exe: profile.Exe, Adapter: harness.NewOpenCode(),
 			})
 		default:
 			log.Warn("this Harness has no Adapter yet, and no Session may name it", "harness", profile.Name)

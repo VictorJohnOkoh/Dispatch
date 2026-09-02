@@ -76,9 +76,17 @@ func (d *Daemon) boundFailed(s *Session, err error) {
 // interrupt abandons the Prompt in flight and keeps the Session. It returns once
 // the Adapter has stopped reading, and the Adapter is what writes PromptCompleted,
 // so the Session is Idle again by the time this answers.
+//
+// A question the Prompt left open is refused first, the same way the ladder does
+// it. The Adapter that is holding one is blocked inside Approve and cannot read
+// the interrupt until it has an answer, so an interrupt that skipped this would
+// answer the user while nothing had actually been abandoned.
 func (d *Daemon) interrupt(w http.ResponseWriter, r *http.Request) {
 	d.commanding.Lock()
 	s, run, ok := d.allow(w, r, session.Working, session.Asking)
+	if ok {
+		d.refuseHeld(s, event.ByUser)
+	}
 	d.commanding.Unlock()
 	if !ok {
 		return
@@ -184,11 +192,16 @@ func ungated(caps harness.Capabilities, p event.Policy) *protocol.Refusal {
 type approvalRequest struct {
 	ToolCallID string         `json:"toolCallId"`
 	Decision   event.Decision `json:"decision"`
+
+	// Always is the user answering this question and the next one of its class at
+	// the same time, which is what "always allow" is. It flips one slot to auto and
+	// writes the whole policy it produced.
+	Always bool `json:"always"`
 }
 
-// decideApproval answers one held Tool Call. Nothing on this Host asks yet.
-// Passthrough is the only Harness and it runs no tools, so every decision here
-// meets a question that is not open.
+// decideApproval answers one held Tool Call. The decision is the record, the
+// Adapter is released with it, and a refusal ends the Tool Call here, because a
+// Tool Call the Daemon refused is over whatever the Harness says next.
 func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 	var req approvalRequest
 	if !decode(w, r, &req) {
@@ -217,13 +230,45 @@ func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
+	if req.Decision == event.DecisionRefused {
+		d.refuse(s, req.ToolCallID, event.ByUser)
+	} else if _, err := d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 		ToolCallID: req.ToolCallID, Decision: req.Decision, By: event.ByUser,
 	}); err != nil {
 		logRefused(w)
 		return
 	}
+	// The decision stays the user's, but the new policy is durable before the
+	// Adapter is released and can request the next Tool Call of this class.
+	if req.Always && req.Decision == event.DecisionAllowed {
+		if err := d.flip(s, req.ToolCallID); err != nil {
+			logRefused(w)
+			return
+		}
+	}
+	d.sessions.tell(s, req.ToolCallID, req.Decision)
 	w.WriteHeader(protocol.StatusAccepted)
+}
+
+// flip is "always allow": the slot this Tool Call belongs to becomes auto, and the
+// whole policy that produced goes in the log, because every value the Approval
+// Policy ever holds is an ApprovalPolicySet.
+func (d *Daemon) flip(s *Session, id string) error {
+	kind, ok := d.sessions.kindOf(s, id)
+	if !ok {
+		return fmt.Errorf("daemon: no Tool Call %q to change the Approval Policy for", id)
+	}
+	policy := d.sessions.policy(s)
+	// A slot that is already auto has nothing to flip, and the policy has not
+	// changed, so writing it again would put a value in the log that nothing set.
+	if policy[kind] == event.RuleAuto {
+		return nil
+	}
+	policy[kind] = event.RuleAuto
+	_, err := d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
+		Policy: policy, SetBy: event.SetByUser,
+	})
+	return err
 }
 
 // allow finds the Session the path names and folds it. It answers the request

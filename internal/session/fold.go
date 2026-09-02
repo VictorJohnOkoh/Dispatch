@@ -34,11 +34,20 @@ func OpenCalls(events []event.Event) []string {
 	return inspect(events).calls
 }
 
+// Policy is the Approval Policy this Session holds now, which is the last
+// ApprovalPolicySet and nothing else. A Session whose Harness runs no tools has
+// none, and the zero value is five empty slots rather than five Rules, so a caller
+// that forgets to check reads something that is obviously not a policy.
+func Policy(events []event.Event) event.Policy {
+	return inspect(events).policy
+}
+
 type inspection struct {
 	state  State
 	reason event.EndReason
 	held   []string
 	calls  []string
+	policy event.Policy
 }
 
 func inspect(events []event.Event) inspection {
@@ -63,6 +72,11 @@ func inspect(events []event.Event) inspection {
 
 		case event.KindPromptCompleted:
 			prompting = false
+
+		case event.KindApprovalPolicySet:
+			if p, ok := e.Payload.(*event.ApprovalPolicySet); ok {
+				view.policy = p.Policy
+			}
 
 		case event.KindApprovalRequested:
 			if p, ok := e.Payload.(*event.ApprovalRequested); ok {

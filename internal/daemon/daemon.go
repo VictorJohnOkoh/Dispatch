@@ -56,6 +56,11 @@ type Daemon struct {
 	// which is the one the Event log lives in.
 	transcripts string
 
+	// policyDefault is the Host config's default per slot, and never a Session's
+	// Approval Policy. A Session's is this clipped by its Harness's Gates, and the
+	// user may always override it.
+	policyDefault event.Policy
+
 	// admit is the seam ADR 0008 named, and SingleSession is the only policy v1
 	// ships. It is built here rather than passed in, because no configuration
 	// chooses it.
@@ -78,6 +83,11 @@ type Daemon struct {
 	// two Prompts arriving together cannot both read an Idle Session.
 	commanding sync.Mutex
 
+	// closing is the ledger's lock, and it makes the fold of what is still open and
+	// the ends it decided on one step. The Daemon's own refusals meet the two
+	// triggers here, because a refusal is written by whoever decided it.
+	closing sync.Mutex
+
 	// writing keeps a Session's recorded Events in the order the log gave them
 	// Sequence Numbers, which is the order the fold reads them in.
 	writing sync.Mutex
@@ -89,18 +99,19 @@ type Daemon struct {
 
 // New builds the Daemon from the values main.go resolved. The Vendor adapters and
 // the Harnesses are each one per entry the config named, in that order.
-func New(log *slog.Logger, events *eventlog.Log, transcripts string, root workspace.Root, adapters []vendors.Adapter, harnesses []Harness) *Daemon {
+func New(log *slog.Logger, events *eventlog.Log, transcripts string, root workspace.Root, adapters []vendors.Adapter, harnesses []Harness, policyDefault event.Policy) *Daemon {
 	return &Daemon{
-		log:         log,
-		events:      events,
-		transcripts: transcripts,
-		root:        root,
-		vendors:     newVendors(adapters, log),
-		harnesses:   harnesses,
-		admit:       admission.SingleSession{},
-		keepalive:   protocol.KeepaliveInterval,
-		stopWait:    stopWait,
-		base:        context.Background(),
+		log:           log,
+		events:        events,
+		transcripts:   transcripts,
+		root:          root,
+		vendors:       newVendors(adapters, log),
+		harnesses:     harnesses,
+		policyDefault: policyDefault,
+		admit:         admission.SingleSession{},
+		keepalive:     protocol.KeepaliveInterval,
+		stopWait:      stopWait,
+		base:          context.Background(),
 	}
 }
 

@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
@@ -40,7 +39,7 @@ type sink struct {
 // The open message is left open and torn, which is what a stopped Prompt is. The
 // log tears it when SessionEnded lands, and text arriving after that would find no
 // open message and cancel a Session that has already ended.
-func (k *sink) end(refused []string) {
+func (k *sink) end() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
@@ -48,7 +47,7 @@ func (k *sink) end(refused []string) {
 		return
 	}
 	k.closed, k.open = true, 0
-	k.d.closeCalls(k.s, refused)
+	k.d.closeCalls(k.s)
 }
 
 // report runs one Sink call under the fence. Everything after the Session's end is
@@ -126,13 +125,11 @@ func (k *sink) ToolCallRequested(id, name string, kind event.ToolKind, title str
 
 // ToolCallEnded is the Harness reporting a result, which is the one end the ledger
 // never has to invent. It goes through the fence so that it and the ledger cannot
-// both end the same call.
+// both end the same call, and the ledger drops it for a Tool Call the Daemon
+// already refused, because a refusal it decided is not overwritten by what the
+// Harness says afterwards.
 func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
-	k.report(func() {
-		k.d.write(k.s, event.KindToolCallEnded, &event.ToolCallEnded{
-			ToolCallID: id, Outcome: o, Content: content,
-		})
-	})
+	k.report(func() { k.d.endCall(k.s, id, o, content) })
 }
 
 // Completed ends the Prompt, and is the first of the ledger's two triggers. A
@@ -140,7 +137,7 @@ func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
 // here, before the boundary the Client reads as the end of the work.
 func (k *sink) Completed(stop event.StopReason, u event.Usage) {
 	k.report(func() {
-		k.d.closeCalls(k.s, nil)
+		k.d.closeCalls(k.s)
 		k.d.write(k.s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: stop, Usage: u})
 	})
 }
@@ -149,9 +146,8 @@ func (k *sink) Failed(code event.ErrorCode, msg string) {
 	k.report(func() { k.d.write(k.s, event.KindError, &event.Error{Code: code, Message: msg}) })
 }
 
-// Approve is the one call that blocks until the Daemon decides. There is nothing
-// here that can decide yet, and the only Harness this build runs declares no
-// Gates, so it refuses rather than waiting on an answer that cannot arrive.
-func (k *sink) Approve(context.Context, string, string, string) (event.Decision, error) {
-	return event.DecisionRefused, errors.New("daemon: this Daemon has no Approval Policy yet")
+// Approve is the one call that blocks until the Daemon decides. The Approval
+// Policy is what decides it, and a wait slot means the user does.
+func (k *sink) Approve(ctx context.Context, id, title, detail string) (event.Decision, error) {
+	return k.d.approve(ctx, k.s, id, title, detail)
 }

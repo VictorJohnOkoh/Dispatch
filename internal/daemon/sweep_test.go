@@ -23,7 +23,7 @@ func killed(t *testing.T, h *host) *Daemon {
 	}
 	t.Cleanup(func() { events.Close() })
 
-	d := New(slog.New(slog.NewTextHandler(h.lines, nil)), events, h.root, h.Daemon.root, nil, nil)
+	d := New(slog.New(slog.NewTextHandler(h.lines, nil)), events, h.root, h.Daemon.root, nil, nil, event.Policy{})
 	if err := d.sweep(); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestASecondSweepOverTheSameLogWritesNothing(t *testing.T) {
 	first := killed(t, h)
 	latest := first.events.Latest()
 
-	second := New(slog.New(slog.NewTextHandler(h.lines, nil)), first.events, first.transcripts, first.root, nil, nil)
+	second := New(slog.New(slog.NewTextHandler(h.lines, nil)), first.events, first.transcripts, first.root, nil, nil, event.Policy{})
 	if err := second.sweep(); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
