@@ -44,6 +44,7 @@ makeCard("attic");
 const sheet = new El("body");
 sheet.dataset.cursor = "desk=7";
 sheet.dataset.drawn = "2026-09-02T09:00:00Z";
+sheet.dataset.protocol = "1";
 
 globalThis.document = {
   querySelectorAll: (selector) => {

@@ -25,10 +25,12 @@ function byHost(selector, id) {
 // rather than every Event every Host has ever written.
 const drawnPage = document.querySelectorAll("[data-cursor]")[0];
 
-const stream = new EventSource("/v1/events?from=" + encodeURIComponent(at()));
+const stream = new EventSource("/v1/events?from=" + encodeURIComponent(stamped("cursor")));
 
-function at() {
-  return drawnPage ? drawnPage.dataset.cursor : "";
+// stamped is one of the things the Hub wrote on the page: the Cursor it was drawn
+// at, when that was, and the protocol version it requires.
+function stamped(name) {
+  return drawnPage ? drawnPage.dataset[name] : "";
 }
 
 // trueAt is when each card's content was last true, which is what a Stale stamp
@@ -38,7 +40,7 @@ function at() {
 // page were made on.
 const trueAt = new Map();
 for (const [host, card] of cards) {
-  if (card.dataset.hostState === "Ready" && drawnPage) trueAt.set(host, drawnPage.dataset.drawn);
+  if (card.dataset.hostState === "Ready" && drawnPage) trueAt.set(host, stamped("drawn"));
 }
 
 stream.addEventListener("vendors", (frame) => {
@@ -73,9 +75,8 @@ stream.addEventListener("vendors", (frame) => {
   row.replaceChildren(...drawn);
 });
 
-// A host frame is the Hub's own, and the only Frame it originates. Nothing sends
-// one yet: the Hub starts reporting Host State when it tracks presence, and what
-// each of the four looks like is this view's to decide before then.
+// A host frame is the Hub's own, and the only Frame it originates. What each of
+// the four states looks like is this view's to decide.
 //
 // Connecting keeps its content at full strength with a mark, because the blink is
 // usually over before it becomes Down. Only Down dims and stamps.
@@ -87,7 +88,7 @@ stream.addEventListener("host", (frame) => {
   const pill = card.querySelector(".pill");
   if (pill) {
     pill.dataset.hostState = f.state;
-    pill.textContent = f.cause ? `${f.state} ${f.cause}` : f.state;
+    pill.textContent = says(f);
   }
   // A Host that has gone says one thing about itself, not two. Whatever its
   // Vendors were last reported as is what a machine nobody can reach knows about
@@ -120,6 +121,16 @@ function stamp(card, since) {
 function unstamp(card) {
   const had = card.querySelector(".stamp");
   if (had) had.remove();
+}
+
+// says is what the pill reads. An Incompatible Host names both versions, because
+// the user fixes it by updating one of the two machines and has to know which. A
+// Host that named none still leaves the Hub's half, which is the half that says
+// what to update to.
+function says(f) {
+  if (f.state !== "Incompatible") return f.cause ? `${f.state} ${f.cause}` : f.state;
+  const host = f.speaks ? `this Host speaks ${f.speaks.join(", ")}` : "this Host speaks another";
+  return `Incompatible: this Hub speaks ${stamped("protocol")}, ${host}`;
 }
 
 function down(host) {

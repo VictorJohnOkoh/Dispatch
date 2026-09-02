@@ -85,6 +85,11 @@ type HostStateFrame struct {
 	Host  string    `json:"host,omitempty"`
 	State HostState `json:"state"`
 	Cause Cause     `json:"cause,omitempty"`
+
+	// Speaks is what an Incompatible Host answered the Handshake with. The Client
+	// shows it beside the version this build requires, so the user knows which of
+	// the two machines to update.
+	Speaks []int `json:"speaks,omitempty"`
 }
 
 // StaleAfter is how long a live connection may say nothing before the Hub stops

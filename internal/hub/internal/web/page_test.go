@@ -344,7 +344,10 @@ for (const f of [
 console.log(JSON.stringify(seen));
 `, &got)
 
-	want := []string{"Connecting Connecting", "Down Down unreachable", "Incompatible Incompatible", "Ready Ready"}
+	// An Incompatible pill names the versions rather than the state alone, because
+	// the user fixes it by updating a machine. TestAnIncompatibleCardNamesBothVersions
+	// is where that sentence is read.
+	want := []string{"Connecting Connecting", "Down Down unreachable", "Incompatible Incompatible: this Hub speaks 1, this Host speaks another", "Ready Ready"}
 	if len(got) != len(want) {
 		t.Fatalf("the card said %v", got)
 	}
@@ -352,6 +355,34 @@ console.log(JSON.stringify(seen));
 		if got[i] != state {
 			t.Errorf("frame %d left the card %q, want %q", i+1, got[i], state)
 		}
+	}
+}
+
+// A Host that failed the Handshake is one the user fixes by updating a machine, so
+// the card names both versions: the one this Hub requires and the one that Host
+// answered with.
+func TestAnIncompatibleCardNamesBothVersions(t *testing.T) {
+	var got []string
+	hostsUnder(t, `
+const seen = [];
+opened.send("host", {host: "desk", state: "Incompatible", speaks: [2]});
+seen.push(page.get("desk").pill.textContent);
+opened.send("host", {host: "desk", state: "Down", cause: "unreachable"});
+seen.push(page.get("desk").pill.textContent);
+console.log(JSON.stringify(seen));
+`, &got)
+
+	if len(got) != 2 {
+		t.Fatalf("the card said %v", got)
+	}
+	for _, want := range []string{"Incompatible", "1", "2"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("the card reads %q, and it has to name %q", got[0], want)
+		}
+	}
+	// A Down Host is not told about a version, because that is not why it is down.
+	if strings.Contains(got[1], "speaks") {
+		t.Errorf("a Down card reads %q", got[1])
 	}
 }
 

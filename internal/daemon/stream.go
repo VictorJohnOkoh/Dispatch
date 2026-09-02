@@ -153,6 +153,9 @@ func (d *Daemon) speaks(w http.ResponseWriter, r *http.Request) bool {
 	if n, err := strconv.Atoi(asked); err == nil && slices.Contains(protocol.ServedVersions[:], n) {
 		return true
 	}
+	// The Hub marks this Host Incompatible and never dials it again, so this line
+	// is the only evidence the check ran.
+	d.log.Info("the Handshake was refused", "asked", asked, "speaks", protocol.ServedVersions)
 	refuse(w, protocol.StatusUpgradeRequired, protocol.Refusal{
 		Reason: protocol.ReasonProtocol,
 		Detail: fmt.Sprintf("this Daemon does not speak protocol %q", asked),

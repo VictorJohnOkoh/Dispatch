@@ -64,6 +64,11 @@ type hostsView struct {
 	Cards  []card
 	Cursor string
 	Drawn  string
+
+	// Protocol is the version this Hub requires. A Host that failed the Handshake
+	// answers with the set it serves, and the card names both, so the page carries
+	// the Hub's half rather than letting the browser name a version of its own.
+	Protocol int
 }
 
 // machinesPage draws every configured Host, in the order the config named them,
@@ -107,6 +112,7 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 	}
 	view.Cursor = drawn.String()
 	view.Drawn = asked
+	view.Protocol = protocol.Version
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	machines.Execute(w, view)
