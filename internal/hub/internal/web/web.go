@@ -1,5 +1,5 @@
 // Package web is the Client: one server-rendered page showing one Session's
-// transcript. The template, the CSS and the JS are embedded, so the binary is the
+// transcript. The template, the CSS and the three JS files are embedded, so the binary is the
 // whole deployment and nothing is read from disk at runtime.
 //
 // The first paint is drawn here rather than in JS. SPEC.md decides it, and it is
@@ -30,7 +30,7 @@ type Hosts interface {
 	Get(ctx context.Context, host, path string) (*http.Response, error)
 }
 
-//go:embed page.html page.css page.js
+//go:embed page.html page.css page.js fold.js render.js
 var files embed.FS
 
 var page = template.Must(template.ParseFS(files, "page.html"))
@@ -53,6 +53,8 @@ func New(hosts Hosts) http.Handler {
 	mux.HandleFunc(sessionPage, c.session)
 	mux.HandleFunc("GET /page.css", asset("page.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /page.js", asset("page.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, indexHint)
@@ -77,10 +79,13 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	state, reason := fold(events)
 	if err := page.Execute(w, view{
 		Host:    host,
 		Session: id,
 		Cursor:  protocol.MergedCursor{host: at}.String(),
+		State:   state.String(),
+		Reason:  string(reason),
 		Rows:    rows(events),
 	}); err != nil {
 		// The header has gone and half a page with it, so there is nothing left to
@@ -95,7 +100,14 @@ type view struct {
 	Host    string
 	Session string
 	Cursor  string
-	Rows    []row
+
+	// State is the Session's, folded here for the first paint. The browser folds it
+	// again from the same Events and keeps folding as they arrive, which is why
+	// fold.js exists.
+	State  string
+	Reason string
+
+	Rows []row
 }
 
 // transcript reads one Session whole, oldest first, and the Cursor the last read

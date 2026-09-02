@@ -10,6 +10,7 @@
 <header>
   <h1>{{.Session}}</h1>
   <p class="host">on {{.Host}}</p>
+  <p class="state" id="state" data-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</p>
 </header>
 <ol id="transcript" data-host="{{.Host}}" data-session="{{.Session}}" data-cursor="{{.Cursor}}">
 {{- range .Rows}}
@@ -24,6 +25,8 @@
   </li>
 {{- end}}
 </ol>
+<script src="/fold.js"></script>
+<script src="/render.js"></script>
 <script src="/page.js"></script>
 </body>
 </html>

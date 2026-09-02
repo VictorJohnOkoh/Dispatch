@@ -9,7 +9,7 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// page.js draws the same row from a live Frame, so what is asserted here is what
+// render.js draws the same row from a live Frame, so what is asserted here is what
 // that file must draw as well. Until the shared fixture lands the two are held
 // together by this test and by reading, and the rows below are the ones where
 // they disagreed.
@@ -22,7 +22,7 @@ func TestDrawSpellsPayloadsAsPageJSSpellsThem(t *testing.T) {
 		detail  string
 	}{
 		{
-			// JSON.stringify(null) is not what page.js draws here: it draws nothing,
+			// JSON.stringify(null) is not what render.js draws here: it draws nothing,
 			// because a call with no arguments carries none.
 			name:    "a Tool Call whose arguments are the literal null",
 			kind:    event.KindToolCallRequested,
