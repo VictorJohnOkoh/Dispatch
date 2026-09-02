@@ -222,3 +222,104 @@ setTimeout(() => {
 		t.Errorf("the Host that is not answering reads %q", got.Rows[2])
 	}
 }
+
+// hostsUnder drives hosts.js over a page of cards. dom.js supplies the element,
+// and machines.js the cards, so what runs is the file the browser is served.
+func hostsUnder(t *testing.T, script string, into any) {
+	t.Helper()
+	node := findNode(t)
+
+	var program strings.Builder
+	for _, name := range []string{"testdata/dom.js", "testdata/machines.js", "hosts.js"} {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		// dom.js is the element and the pipes; its own page is not wanted here.
+		if name == "testdata/dom.js" {
+			source = []byte(strings.SplitN(string(source), "// row is one row", 2)[0])
+		}
+		program.WriteString(string(source))
+		program.WriteString("\n")
+	}
+	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
+
+	cmd := exec.Command(node, "-e", program.String())
+	said, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, said)
+	}
+	if err := json.Unmarshal(said, into); err != nil {
+		t.Fatalf("node said %q: %v", said, err)
+	}
+}
+
+// The Vendor row comes from the vendors frame, and an unreachable Vendor empties
+// it. A remembered list that outlived the Vendor that served it is the one thing
+// the push exists to prevent.
+func TestAnUnreachableVendorEmptiesItsRow(t *testing.T) {
+	var got struct {
+		Filled  string `json:"filled"`
+		Emptied string `json:"emptied"`
+		Other   string `json:"other"`
+	}
+	hostsUnder(t, `
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3.5-9b"}]},
+]});
+const filled = cards.get("desk").row.textContent;
+
+// The same Vendor, now not answering. What it was holding goes with it.
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: []},
+]});
+console.log(JSON.stringify({
+  filled,
+  emptied: cards.get("desk").row.textContent,
+  other: cards.get("attic").row.textContent,
+}));
+`, &got)
+
+	if !strings.Contains(got.Filled, "qwen3.5-9b") {
+		t.Errorf("the row read %q after the frame that filled it", got.Filled)
+	}
+	if strings.Contains(got.Emptied, "qwen3.5-9b") {
+		t.Errorf("the row still holds %q after the Vendor stopped answering", got.Emptied)
+	}
+	if !strings.Contains(got.Emptied, "not answering") {
+		t.Errorf("the row reads %q, and it has to say why it is empty", got.Emptied)
+	}
+	// A frame for one Host touches one Host.
+	if !strings.Contains(got.Other, "waiting") {
+		t.Errorf("another Host's row was rewritten: %q", got.Other)
+	}
+}
+
+// Connecting keeps its content at full strength and marks its edge; only Down
+// dims and stamps. That is the difference between reconnecting and gone.
+func TestAHostStateFrameMovesTheCard(t *testing.T) {
+	var got []string
+	hostsUnder(t, `
+const seen = [];
+for (const f of [
+  {host: "desk", state: "Connecting"},
+  {host: "desk", state: "Down", cause: "unreachable"},
+  {host: "desk", state: "Incompatible"},
+  {host: "desk", state: "Ready"},
+]) {
+  opened.send("host", f);
+  seen.push(cards.get("desk").section.dataset.hostState + " " + cards.get("desk").pill.textContent);
+}
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := []string{"Connecting Connecting", "Down Down unreachable", "Incompatible Incompatible", "Ready Ready"}
+	if len(got) != len(want) {
+		t.Fatalf("the card said %v", got)
+	}
+	for i, state := range want {
+		if got[i] != state {
+			t.Errorf("frame %d left the card %q, want %q", i+1, got[i], state)
+		}
+	}
+}
