@@ -284,3 +284,59 @@ func TestAHostThatIsNotAnsweringCannotBeStartedOn(t *testing.T) {
 		t.Error("the Host that is not answering was hidden rather than disabled")
 	}
 }
+
+// A stop that is itself refused ends there. Carrying on would meet the same
+// refusal again and tell the user nothing about why the click did nothing.
+func TestAStopThatIsRefusedIsSaidRatherThanRetried(t *testing.T) {
+	took := &[]string{}
+	mux := http.NewServeMux()
+	mux.HandleFunc(protocol.ListSessions, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"sessions": []any{}, "cursor": 0})
+	})
+	mux.HandleFunc(protocol.ListHarnesses, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"harnesses": []any{
+			map[string]any{"name": "opencode", "tools": true, "gates": []string{"edit"}},
+		}})
+	})
+	mux.HandleFunc(protocol.StopSession, func(w http.ResponseWriter, r *http.Request) {
+		*took = append(*took, "stop "+r.PathValue("session"))
+		w.WriteHeader(protocol.StatusNoSession)
+		json.NewEncoder(w).Encode(protocol.Refusal{
+			Reason: protocol.ReasonUnknownSession, Detail: "this Host has no Session \"s-gone\"",
+		})
+	})
+	mux.HandleFunc(protocol.StartSession, func(w http.ResponseWriter, _ *http.Request) {
+		*took = append(*took, "start")
+		started(w)
+	})
+	h := wizardOn(t, startingHost{Handler: mux, took: took})
+
+	w := post(t, h, "/start", "host=desk&model=m&harness=opencode&stopFirst=s-gone")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("the click answered %d", w.Code)
+	}
+	if len(*took) != 1 || (*took)[0] != "stop s-gone" {
+		t.Fatalf("the Host was told %v, and the stop was refused", *took)
+	}
+	body, _ := get(t, h, w.Header().Get("Location"))
+	if !strings.Contains(body, "was not stopped") {
+		t.Error("the wizard does not say the stop was refused")
+	}
+}
+
+// A step can be gone back to from the page itself, with the answers before it
+// kept and the ones after it dropped.
+func TestEachAnsweredStepLinksBackToItself(t *testing.T) {
+	h := wizardOn(t, newStartingHost(t, started))
+
+	body, _ := get(t, h, "/new?host=desk&model=qwen3.5-9b&harness=opencode")
+	for _, want := range []string{
+		`<a class="pill" href="/new">desk</a>`,
+		`<a class="pill" href="/new?host=desk">qwen3.5-9b</a>`,
+		`<a class="pill" href="/new?host=desk&amp;model=qwen3.5-9b">opencode</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the wizard has no way back to %s", want)
+		}
+	}
+}

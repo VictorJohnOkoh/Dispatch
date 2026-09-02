@@ -278,10 +278,13 @@ func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
 
 	// Stopping first is the refusal's one click. The stop is a command like any
 	// other, and the start that follows it is the one the user already filled in.
+	//
+	// A stop that was itself refused ends here. Carrying on would meet the same
+	// refusal again and tell the user nothing about why their click did nothing.
 	if blocking := r.FormValue("stopFirst"); blocking != "" {
-		resp, err := c.hosts.Post(r.Context(), host, stopPath(blocking), nil)
-		if err == nil {
-			resp.Body.Close()
+		if why := c.stop(r.Context(), host, blocking); why != "" {
+			http.Redirect(w, r, backTo(r.Form, protocol.Refusal{Detail: why}), http.StatusSeeOther)
+			return
 		}
 	}
 
@@ -319,6 +322,26 @@ func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
 	var refusal protocol.Refusal
 	json.NewDecoder(resp.Body).Decode(&refusal)
 	http.Redirect(w, r, backTo(r.Form, refusal), http.StatusSeeOther)
+}
+
+// stop ends one Session and answers why it could not, or "" when it did. The
+// ladder runs before the Daemon answers, so a stop that answered has finished.
+func (c *client) stop(ctx context.Context, host, id string) string {
+	resp, err := c.hosts.Post(ctx, host, stopPath(id), nil)
+	if err != nil {
+		return "this Host could not be reached to stop " + id
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == protocol.StatusAccepted {
+		return ""
+	}
+
+	var refusal protocol.Refusal
+	json.NewDecoder(resp.Body).Decode(&refusal)
+	if refusal.Detail != "" {
+		return id + " was not stopped: " + refusal.Detail
+	}
+	return fmt.Sprintf("%s was not stopped, and this Host answered %d", id, resp.StatusCode)
 }
 
 // chosenPolicy is the five slots the form carried. A Session whose Harness runs no

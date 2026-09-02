@@ -17,9 +17,12 @@
     <li{{if eq .Step "policy"}} class="on"{{end}}>Approval policy</li>
   </ol>
   <p class="chosen">
-    {{- if .Host}}<span class="pill">{{.Host}}</span>{{end}}
-    {{- if .Model}}<span class="pill">{{.Model}}</span>{{end}}
-    {{- if .Harness}}<span class="pill">{{.Harness}}</span>{{end}}
+    {{- /* Each answer links back to the step that set it, dropping the answers
+           after it, so a step can be gone back to without the browser's own
+           button and without losing the way forward. */ -}}
+    {{- if .Host}}<a class="pill" href="/new">{{.Host}}</a>{{end}}
+    {{- if .Model}}<a class="pill" href="/new?host={{.Host | pathEscape}}">{{.Model}}</a>{{end}}
+    {{- if .Harness}}<a class="pill" href="/new?host={{.Host | pathEscape}}&amp;model={{.Model | pathEscape}}">{{.Harness}}</a>{{end}}
   </p>
 </header>
 
