@@ -138,7 +138,6 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 		Cursor:    protocol.MergedCursor{host: at}.String(),
 		State:     state.String(),
 		Reason:    string(reason),
-		Answering: answering(rail, host),
 		Rail:      rail,
 		Rows:      rows(events),
 		Events:    payloads(events),
@@ -175,9 +174,6 @@ type view struct {
 	State  string
 	Reason string
 
-	// Answering is the Host half of the pair for the Session on screen. See entry.
-	Answering bool
-
 	// Rail is every Session on every Host, which is the only place this page says
 	// that a second Host exists.
 	Rail []entry
@@ -192,17 +188,6 @@ type view struct {
 
 	// Approvals is every open question from a Session that is not on screen.
 	Approvals template.JS
-}
-
-// answering is the rail's view of one Host, so the header and the rail rows agree
-// rather than each asking separately and disagreeing by a moment.
-func answering(rail []entry, host string) bool {
-	for _, e := range rail {
-		if e.Host == host {
-			return e.Answering
-		}
-	}
-	return false
 }
 
 // payloads is the Events as the page carries them, in the shape the stream sends and

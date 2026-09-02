@@ -45,6 +45,11 @@ stream.addEventListener("vendors", (frame) => {
   const f = JSON.parse(frame.data);
   const row = rows.get(f.host);
   if (!row) return;
+  // Precedence: Host State, then the HTTP status, then an Event, then the
+  // operational log. A user looking at a Down Host is not also told that its
+  // Vendor stopped answering, because the Vendor not answering is what a Host
+  // that is not there looks like from here.
+  if (down(f.host)) return;
 
   const drawn = [];
   for (const v of f.vendors ?? []) {
@@ -84,6 +89,13 @@ stream.addEventListener("host", (frame) => {
     pill.dataset.hostState = f.state;
     pill.textContent = f.cause ? `${f.state} ${f.cause}` : f.state;
   }
+  // A Host that has gone says one thing about itself, not two. Whatever its
+  // Vendors were last reported as is what a machine nobody can reach knows about
+  // them, which is nothing.
+  const row = rows.get(f.host);
+  if (row && down(f.host)) {
+    row.replaceChildren(node("li", "meta", "this Host is not answering, so what it serves is not known"));
+  }
   if (f.since) trueAt.set(f.host, f.since);
   if (f.state !== "Down") unstamp(card);
   else if (trueAt.has(f.host)) stamp(card, trueAt.get(f.host));
@@ -108,6 +120,10 @@ function stamp(card, since) {
 function unstamp(card) {
   const had = card.querySelector(".stamp");
   if (had) had.remove();
+}
+
+function down(host) {
+  return cards.get(host)?.dataset.hostState === "Down";
 }
 
 function node(tag, className, text) {

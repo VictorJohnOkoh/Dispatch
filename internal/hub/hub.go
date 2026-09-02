@@ -30,13 +30,26 @@ type Hub struct {
 	dialer    hostset.HostDialer
 	keepalive time.Duration
 
+	// The reconnection curve and the wait that calls a live connection dead. They
+	// are fields only so a test may shorten them: no configuration names any of
+	// them, and ADR 0004 owns what they are.
+	backoff time.Duration
+	steady  time.Duration
+	stale   time.Duration
+
 	// page is the Client. It reads a Host through the Hub rather than dialling one
 	// itself, which is why it is built here and not in main.
 	page http.Handler
 }
 
 func New(hosts []Host, dialer HostDialer) *Hub {
-	h := &Hub{hosts: hostset.New(hosts), dialer: dialer, keepalive: protocol.KeepaliveInterval}
+	h := &Hub{
+		hosts: hostset.New(hosts), dialer: dialer,
+		keepalive: protocol.KeepaliveInterval,
+		backoff:   firstDelay,
+		steady:    steadyFor,
+		stale:     protocol.StaleAfter,
+	}
 	h.page = web.New(h)
 	return h
 }

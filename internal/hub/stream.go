@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -24,9 +25,9 @@ const (
 	firstDelay = time.Second
 	maxDelay   = time.Minute
 
-	// steadyFor is how long one connection must last before the curve starts over.
-	// A shorter one is a flap, and a flap that reset the curve would let a
-	// flapping Host redial at full speed forever.
+	// steadyFor is how long one connection must have been Ready before the curve
+	// starts over. A shorter one is a flap, and a flap that reset the curve would
+	// let a flapping Host redial at full speed forever.
 	steadyFor = time.Minute
 )
 
@@ -133,17 +134,39 @@ type hostReader struct {
 	// could not name the log it came from. The Client learns that from the resync
 	// that follows the Hello.
 	unknownLog bool
+
+	// state is what this Hub last told the Client about this Host. It is held only
+	// to keep from saying the same thing twice: Host State is derived from the
+	// connection below, never stored, and this is one connection's memory of what
+	// it has already said.
+	state protocol.HostState
+
+	// failures is how many attempts in a row have not reached Ready. A Host is
+	// Connecting until three of them, because a stream that dropped is usually back
+	// before the third, and dimming a Host for a blink costs the user more than
+	// holding the last display for seven seconds does.
+	failures int
 }
+
+// downAfter is how many attempts in a row must fail before a Host is Down. ADR
+// 0004 counts three, which is about seven seconds on this curve.
+const downAfter = 3
 
 // run reads this Host until the Client leaves. It retries forever, so a Host the
 // user switches on comes back without being told to.
 func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
-	delay := firstDelay
+	delay := r.hub.backoff
 	for ctx.Err() == nil {
-		start := time.Now()
-		r.once(ctx, out)
-		if time.Since(start) >= steadyFor {
-			delay = firstDelay
+		// A stream that dropped is Connecting again, which is ADR 0004's transition
+		// out of Ready when the stream closes.
+		r.says(ctx, protocol.Connecting, "", out)
+
+		// The curve starts over only after a connection that was Ready for a whole
+		// minute. That is measured here rather than read off the state afterwards,
+		// because by then this Host is Connecting again and every connection would
+		// look like a flap.
+		if steady := r.once(ctx, out); steady >= r.hub.steady {
+			delay = r.hub.backoff
 		}
 		if !sleep(ctx, jitter(delay)) {
 			return
@@ -152,11 +175,49 @@ func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 	}
 }
 
-// once holds one connection to this Host's Daemon and reads it until it ends.
-func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) {
+// failed counts one attempt that did not reach Ready, and calls the Host Down once
+// three in a row have. The cause is where the last one failed: nothing answering
+// at all and a tunnel with nothing behind it are different problems for the user.
+func (r *hostReader) failed(ctx context.Context, why protocol.Cause, out chan<- daemonFrame) {
+	r.failures++
+	if r.failures < downAfter {
+		return
+	}
+	r.says(ctx, protocol.Down, why, out)
+}
+
+// says tells the Client what this Host is, unless it has said so already. The
+// frame is the Hub's own: it cannot be an Event, because every Event carries a
+// Session id and a Host that is down has no Session to carry one.
+func (r *hostReader) says(ctx context.Context, state protocol.HostState, why protocol.Cause, out chan<- daemonFrame) bool {
+	if r.state == state {
+		return true
+	}
+	r.state = state
+	// The merged-stream writer adds the Host to every Frame. It must not be in this
+	// body too, or JSON carries the same key twice.
+	body, _ := json.Marshal(protocol.HostStateFrame{State: state, Cause: why})
+	select {
+	case out <- daemonFrame{host: r.id, name: string(protocol.FrameHost), data: body}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// once holds one connection to this Host's Daemon and reads it until it ends. It
+// answers how long that connection was Ready, which is what decides whether the
+// backoff curve starts over.
+func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Duration {
 	conn, err := r.hub.dialer.Dial(ctx, r.id)
 	if err != nil {
-		return
+		if errors.Is(err, hostset.ErrNoDaemon) {
+			r.failed(ctx, protocol.NoDaemon, out)
+		} else {
+			// Nothing answered at all, which is a machine that is not there.
+			r.failed(ctx, protocol.Unreachable, out)
+		}
+		return 0
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -176,28 +237,84 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) {
 		req.Header.Set(protocol.LogHeader, logID)
 	}
 	if err := req.Write(conn); err != nil {
-		return
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
-		return
+		// The tunnel opened and nothing was behind it, which is a different problem
+		// for the user: the machine is there and its Daemon is not.
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
 	}
 	defer resp.Body.Close()
-	r.read(ctx, resp.Body, out)
+	// A Daemon that refused the Handshake answers 426 with the versions it can
+	// serve. That Host is Incompatible and the Hub never retries one, which is #54:
+	// until it lands, a refusal is counted with the rest and retried, which is
+	// wrong in the way a Host nobody can use being retried is wrong.
+	if resp.StatusCode != http.StatusOK {
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
+	}
+
+	// A live connection that says nothing is watched by a timer of its own. A read
+	// deadline is not enough: an SSH channel answers SetReadDeadline with "deadline
+	// not supported", so the only way to end a read that will never return is to
+	// close the connection under it.
+	quiet := time.AfterFunc(r.hub.stale, func() { conn.Close() })
+	defer quiet.Stop()
+
+	ready := r.read(ctx, beating(quiet, r.hub.stale, resp.Body), out)
+	if ready.IsZero() {
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
+	}
+	return time.Since(ready)
 }
 
-// read splits SSE into Frames. It parses no body but the Hello's, so an Event Kind
-// this build has never heard of still reaches the Client.
-func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemonFrame) {
+// beating pushes the watchdog out every time the Host says anything, and a
+// keepalive comment is something. A stream that is open and silent looks exactly
+// like a stream that is working, so the silence is the only evidence there is.
+func beating(quiet *time.Timer, wait time.Duration, body io.Reader) io.Reader {
+	return readerFunc(func(p []byte) (int, error) {
+		n, err := body.Read(p)
+		if err == nil {
+			quiet.Reset(wait)
+		}
+		return n, err
+	})
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
+
+// read splits SSE into Frames. The first Frame must be a valid Hello: an open HTTP
+// response proves only that something answered, while the Handshake proves it was
+// this Host's Daemon. After that it parses no body, so an Event Kind this build has
+// never heard of still reaches the Client.
+func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemonFrame) time.Time {
 	reader := bufio.NewReader(body)
 	frame := daemonFrame{host: r.id}
+	var ready time.Time
 	for {
 		line, err := reader.ReadString('\n')
 		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
 		switch {
 		case line == "":
-			if frame.name != "" && !r.deliver(ctx, frame, out) {
-				return
+			if frame.name != "" {
+				if ready.IsZero() {
+					if frame.name != string(protocol.FrameHello) || !validHello(frame.data) {
+						return time.Time{}
+					}
+					if !r.deliver(ctx, frame, out) || !r.says(ctx, protocol.Ready, "", out) {
+						return time.Time{}
+					}
+					r.failures = 0
+					ready = time.Now()
+				} else if !r.deliver(ctx, frame, out) {
+					return ready
+				}
 			}
 			frame = daemonFrame{host: r.id}
 		case strings.HasPrefix(line, "id:"):
@@ -215,9 +332,14 @@ func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemon
 			frame.data = append(frame.data, data...)
 		}
 		if err != nil {
-			return
+			return ready
 		}
 	}
+}
+
+func validHello(data []byte) bool {
+	var hello protocol.Hello
+	return json.Unmarshal(data, &hello) == nil && hello.Protocol == protocol.Version
 }
 
 // deliver forwards one Frame and keeps what the Hub learns from a Hello. It reports

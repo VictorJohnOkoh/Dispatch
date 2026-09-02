@@ -541,6 +541,47 @@ console.log(JSON.stringify(seen));
 	}
 }
 
+// Precedence: Host State, then the HTTP status, then an Event, then the
+// operational log. A user looking at a Down Host is not also told that its Vendor
+// stopped answering, because that is what a machine nobody can reach looks like.
+func TestADownHostDoesNotAlsoRaiseItsVendorsFailure(t *testing.T) {
+	var got struct {
+		Ready string `json:"ready"`
+		Down  string `json:"down"`
+		After string `json:"after"`
+	}
+	hostsUnder(t, `
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3.5-9b"}]},
+]});
+const ready = page.get("desk").row.textContent;
+
+// The Host goes. Its Vendor row says the Host is not answering, and not that its
+// Vendor is: one failure reaches the user, and it is the one furthest up.
+opened.send("host", {host: "desk", state: "Down", cause: "unreachable"});
+const down = page.get("desk").row.textContent;
+
+// A vendors frame that was already in flight when the Host went changes nothing.
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: []},
+]});
+console.log(JSON.stringify({ready, down, after: page.get("desk").row.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Ready, "qwen3.5-9b") {
+		t.Fatalf("the row read %q while the Host was answering", got.Ready)
+	}
+	if !strings.Contains(got.Down, "this Host is not answering") {
+		t.Errorf("a Down Host's Vendor row reads %q", got.Down)
+	}
+	if strings.Contains(got.Down, "not answering") && strings.Count(got.Down, "not answering") != 1 {
+		t.Errorf("the row says it twice: %q", got.Down)
+	}
+	if got.After != got.Down {
+		t.Errorf("a late vendors frame rewrote a Down Host's row: %q", got.After)
+	}
+}
+
 // Down dims and stamps, live as well as on the server. A Host that goes Down while
 // this page is open would otherwise keep content that claims to be current.
 func TestALiveHostGoingDownStampsItsCard(t *testing.T) {
@@ -726,5 +767,45 @@ console.log(JSON.stringify(dom.stateElement.dataset.sessionState));
 	}
 	if !strings.Contains(string(css), `[data-session-state^="Asking"]`) {
 		t.Error("the stylesheet no longer draws Asking off data-session-state, so the page and it have parted")
+	}
+}
+
+// The Host half of the pair is the Host State itself. It used to be a pill the
+// server drew once and nothing ever wrote again, so a Session on a Host that went
+// Down kept a pill reading "answering".
+func TestTheHostPillFollowsTheHostFrame(t *testing.T) {
+	var got struct {
+		Down string `json:"down"`
+		Back string `json:"back"`
+	}
+	pageUnder(t, `
+opened.send("host", {host: "desk", state: "Down", cause: "no-daemon"});
+const down = dom.hostStateElement.dataset.hostState;
+opened.send("host", {host: "desk", state: "Ready"});
+console.log(JSON.stringify({down, back: dom.hostStateElement.dataset.hostState}));
+`, &got)
+
+	if got.Down != "Down" || got.Back != "Ready" {
+		t.Errorf("the pill read %q then %q", got.Down, got.Back)
+	}
+}
+
+// Nothing on the Session page says how the Host is except the pair's Host half,
+// which the stream writes. A second, frozen answer is a second answer that is wrong.
+func TestTheSessionHeaderCarriesNoFrozenHostPill(t *testing.T) {
+	markup, err := os.ReadFile("page.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, desk, found := strings.Cut(string(markup), `<main class="desk">`)
+	if !found {
+		t.Fatal("page.html has no desk")
+	}
+	header, _, found := strings.Cut(desk, "</header>")
+	if !found {
+		t.Fatal("page.html has no header")
+	}
+	if strings.Contains(header, "data-host-answering") {
+		t.Error("the header still draws a Host pill the stream never writes")
 	}
 }

@@ -179,3 +179,43 @@ func stampOn(t *testing.T, card, says string) time.Time {
 	}
 	return at
 }
+
+// Stale survives every reload, not only the first one after the Host went quiet.
+// The Hub answers a failed read from what the Host last said, and a failed read
+// never replaces that, so the stamp does not creep forward either.
+func TestReloadingTheHostsViewKeepsTheStaleSessionAndItsStamp(t *testing.T) {
+	var answering atomic.Bool
+	answering.Store(true)
+	live, gone := railHost("s-1 Working"), silent()
+	h := hub.New([]hostset.Host{{ID: "desk"}}, pipeDialer{
+		handlers: map[hostset.HostID]http.Handler{
+			"desk": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if answering.Load() {
+					live.ServeHTTP(w, r)
+					return
+				}
+				gone.ServeHTTP(w, r)
+			}),
+		},
+	}).Handler()
+
+	get(t, h, "/hosts")
+	answering.Store(false)
+
+	body, _ := get(t, h, "/hosts")
+	first := stampOn(t, section(t, body, "desk"), "last answered at ")
+
+	for reload := 2; reload <= 4; reload++ {
+		body, _ = get(t, h, "/hosts")
+		desk := section(t, body, "desk")
+		if !strings.Contains(desk, "s-1") {
+			t.Fatalf("reload %d dropped the Stale Session: %s", reload, desk)
+		}
+		if got := stampOn(t, desk, "last answered at "); !got.Equal(first) {
+			t.Errorf("reload %d moved the stamp from %s to %s", reload, first, got)
+		}
+		if strings.Contains(desk, "asked at ") {
+			t.Errorf("reload %d invented an asked-at time beside a real one", reload)
+		}
+	}
+}
