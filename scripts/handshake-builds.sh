@@ -21,6 +21,7 @@ served=$(grep -oP 'const Version = \K[0-9]+' "$root/internal/protocol/protocol.g
 asked=$((served + 1))
 
 mkdir -p "$out"
+out=$(cd "$out" && pwd)
 
 # Both binaries come from the commit rather than from the working tree, so the
 # record below is enough to make them again. The copies are thrown away.
