@@ -103,7 +103,7 @@ embedded.textContent = JSON.stringify([
 ]);
 
 const stateElement = new El("p");
-stateElement.dataset.state = "Starting";
+stateElement.dataset.sessionState = "Starting";
 stateElement.textContent = "Starting";
 
 // The rail's rows, which page.js redraws whole.

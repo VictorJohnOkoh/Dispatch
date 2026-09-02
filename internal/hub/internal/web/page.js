@@ -177,7 +177,7 @@ function at(seq) {
 
 function refold() {
   const view = foldSession(order.map((seq) => events.get(seq)));
-  stateLine.dataset.state = view.state;
+  stateLine.dataset.sessionState = view.state;
   stateLine.textContent = view.reason ? `${view.state} ${view.reason}` : view.state;
 }
 

@@ -19,10 +19,6 @@ h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
 .vendors li { display: inline; margin-left: 0.5rem; }
 .vendors .detail { display: inline; }
 
-/* The Session's State, folded in the browser and updated on every Event. */
-.state { margin: 0 0 0.8rem; font-weight: 600; }
-.state[data-state="Ended"] { opacity: 0.6; }
-
 /* A Host that is not answering dims its page and keeps showing what it last knew,
    because a Host is never hidden for being unreachable. */
 body[data-host-state="Down"] { opacity: 0.6; }

@@ -89,8 +89,11 @@ type Daemon struct {
 	closing sync.Mutex
 
 	// writing keeps a Session's recorded Events in the order the log gave them
-	// Sequence Numbers, which is the order the fold reads them in.
-	writing sync.Mutex
+	// Sequence Numbers, which is the order the fold reads them in. A read of the
+	// Session list holds it too: the log sends an Event before the Session has
+	// recorded it, so a Client that answers that Event by asking for the list
+	// would otherwise be told a state the Event has already moved on from.
+	writing sync.RWMutex
 
 	// base is the context every Session hangs off, which is Serve's. A handler
 	// exercised without Serve gets the background one this starts as.

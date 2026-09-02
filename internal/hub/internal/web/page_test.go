@@ -349,3 +349,31 @@ setTimeout(() => console.log(JSON.stringify({
 		t.Errorf("the resync commit left %d rows and State %q", got.Rows, got.State)
 	}
 }
+
+// The stylesheet draws Asking and Ended off one attribute, and the live update
+// has to write that same one. An update that wrote another name would leave the
+// pill's text right and its styling stuck on whatever the first paint drew.
+func TestTheLiveStateWritesTheAttributeTheStylesheetReads(t *testing.T) {
+	var got string
+	pageUnder(t, `
+const frames = [
+  {seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}},
+  {seq: 2, kind: "PromptSubmitted", payload: {text: "go"}},
+  {seq: 3, kind: "ToolCallRequested", payload: {toolCallId: "c1", name: "bash"}},
+  {seq: 4, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "run it"}},
+];
+for (const f of frames) opened.send("event", {host: "desk", session: "s-1", ...f});
+console.log(JSON.stringify(dom.stateElement.dataset.sessionState));
+`, &got)
+
+	if got != "Asking" {
+		t.Errorf("the state pill carries %q, and the stylesheet reads data-session-state", got)
+	}
+	css, err := files.ReadFile("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), `[data-session-state^="Asking"]`) {
+		t.Error("the stylesheet no longer draws Asking off data-session-state, so the page and it have parted")
+	}
+}
