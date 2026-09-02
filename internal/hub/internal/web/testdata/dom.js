@@ -51,6 +51,13 @@ const hostMarkElement = new El("span");
 const staleElement = new El("span");
 const vendorsElement = new El("ul");
 
+// The toast rack, empty until a question from another Session raises one.
+const toastRack = new El("div");
+
+// Questions that were open when page.html was drawn.
+const approvals = new El("script");
+approvals.textContent = "[]";
+
 const body = new El("body");
 
 globalThis.document = {
@@ -58,7 +65,9 @@ globalThis.document = {
     transcript,
     state: stateElement,
     events: embedded,
+    approvals,
     rail: railNav,
+    toasts: toastRack,
     "host-state": hostStateElement,
     "host-cause": hostCauseElement,
     "host-mark": hostMarkElement,
@@ -91,7 +100,14 @@ globalThis.EventSource = EventSource;
 // the Hub answers a Session it cannot read.
 globalThis.served = new Map();
 globalThis.fetched = [];
-globalThis.fetch = async (url) => {
+globalThis.posted = [];
+globalThis.fetch = async (url, options) => {
+  if (options?.method === "POST") {
+    posted.push({ url, body: options.body });
+    const answer = globalThis.postAnswer ?? { ok: true, status: 202 };
+    if (answer === "unreachable") throw new Error("no route to that Host");
+    return { ...answer, json: async () => ({}) };
+  }
   fetched.push(url);
   if (url.startsWith("/rail/")) {
     return { ok: true, json: async () => ({ rail: globalThis.railAnswer ?? [] }) };
@@ -113,6 +129,7 @@ globalThis.dom = {
   vendorsElement,
   embedded,
   rail: railNav,
+  toasts: toastRack,
   body,
   row,
 };

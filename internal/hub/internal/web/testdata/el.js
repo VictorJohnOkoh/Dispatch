@@ -44,8 +44,13 @@ class El {
     this.append(...parts);
   }
 
+  get parentElement() {
+    return this.parent;
+  }
+
   remove() {
-    if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1);
+    if (!this.parent) return;
+    this.parent.children.splice(this.parent.children.indexOf(this), 1);
     this.parent = null;
   }
 

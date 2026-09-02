@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,11 +16,15 @@ import (
 // pageUnder loads fold.js, render.js and page.js over the stub page, runs the
 // test's own script, and decodes what it printed.
 func pageUnder(t *testing.T, script string, into any) {
+	pageUnderSetup(t, "", script, into)
+}
+
+func pageUnderSetup(t *testing.T, setup, script string, into any) {
 	t.Helper()
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js", "page.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -27,17 +32,47 @@ func pageUnder(t *testing.T, script string, into any) {
 		program.WriteString(string(source))
 		program.WriteString("\n")
 	}
+	program.WriteString(setup)
+	program.WriteString("\n")
+	source, err := os.ReadFile("page.js")
+	if err != nil {
+		t.Fatalf("page.js: %v", err)
+	}
+	program.WriteString(string(source))
+	program.WriteString("\n")
 	// The script runs after the page's own load() has settled, because that one is
 	// asynchronous and everything a test asserts on comes after it.
 	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
 
-	cmd := exec.Command(node, "-e", program.String())
+	path := filepath.Join(t.TempDir(), "page.js")
+	if err := os.WriteFile(path, []byte(program.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, path)
 	said, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, said)
 	}
 	if err := json.Unmarshal(said, into); err != nil {
 		t.Fatalf("node said %q: %v", said, err)
+	}
+}
+
+// The first paint carries questions that are already open on other Sessions.
+// Without this, a reload can hide the only path the user has to answer one.
+func TestAQuestionAlreadyOpenAtFirstPaintRaisesAToast(t *testing.T) {
+	var got []string
+	pageUnderSetup(t, `
+document.getElementById("approvals").textContent = JSON.stringify([
+  {host: "attic", session: "s-9", kind: "ApprovalRequested",
+    payload: {toolCallId: "c1", title: "write out.txt"}},
+]);
+`, `
+console.log(JSON.stringify(dom.toasts.children.map((t) => t.textContent)));
+`, &got)
+
+	if len(got) != 1 || !strings.Contains(got[0], "s-9 on attic") || !strings.Contains(got[0], "write out.txt") {
+		t.Errorf("the first paint raised %v", got)
 	}
 }
 
@@ -316,6 +351,192 @@ console.log(JSON.stringify(seen));
 	for i, state := range want {
 		if got[i] != state {
 			t.Errorf("frame %d left the card %q, want %q", i+1, got[i], state)
+		}
+	}
+}
+
+// The toast is the only path a question from a Session that is not on screen has
+// to the user, because this layout hides every Session but one.
+func TestAQuestionFromAnotherSessionRaisesAToast(t *testing.T) {
+	var got struct {
+		Toasts []string `json:"toasts"`
+		Where  []string `json:"where"`
+		Posted []string `json:"posted"`
+		After  int      `json:"after"`
+	}
+	pageUnder(t, `
+// Two questions, from two Sessions on two Hosts, at once.
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+// The same tool call id, from another Host. A tool call id is unique inside one
+// Session and nowhere else.
+opened.send("event", {host: "shed", session: "s-3", seq: 9, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "write out.txt"}});
+
+const toasts = dom.toasts.children.map((t) => t.textContent);
+const where = dom.toasts.children.map((t) => t.querySelector(".where").href);
+
+// The user answers the first. The command goes to the Host that asked.
+dom.toasts.children[0].children.find((c) => c.dataset.decision === "allowed").onclick();
+
+// The Daemon's own decision comes back on the stream, and takes the toast down.
+opened.send("event", {host: "attic", session: "s-9", seq: 5, kind: "ApprovalDecided",
+  payload: {toolCallId: "c1", decision: "allowed", by: "user"}});
+
+setTimeout(() => {
+  console.log(JSON.stringify({
+    toasts,
+    where,
+    posted: posted.map((p) => p.url + " " + p.body),
+    after: dom.toasts.children.length,
+  }));
+}, 0);
+`, &got)
+
+	if len(got.Toasts) != 2 {
+		t.Fatalf("two questions raised %d toasts: %v", len(got.Toasts), got.Toasts)
+	}
+	// Each names the Host and the Session it came from, because a question with no
+	// machine on it is one the user cannot place.
+	if !strings.Contains(got.Toasts[0], "s-9 on attic") || !strings.Contains(got.Toasts[0], "rm -rf build/") {
+		t.Errorf("the first toast reads %q", got.Toasts[0])
+	}
+	if !strings.Contains(got.Toasts[1], "s-3 on shed") {
+		t.Errorf("the second toast reads %q, and neither replaced the other", got.Toasts[1])
+	}
+	// Acting on it makes that Session the primary.
+	if got.Where[0] != "/hosts/attic/sessions/s-9" {
+		t.Errorf("the toast leads to %q", got.Where[0])
+	}
+	// The decision reaches the Host that asked, naming the call it answers.
+	if len(got.Posted) != 1 || !strings.Contains(got.Posted[0], "/v1/hosts/attic/sessions/s-9/approvals") {
+		t.Fatalf("the decision went to %v", got.Posted)
+	}
+	if !strings.Contains(got.Posted[0], `"decision":"allowed"`) || !strings.Contains(got.Posted[0], `"toolCallId":"c1"`) {
+		t.Errorf("the decision said %q", got.Posted[0])
+	}
+	// The answered question's toast goes when the Daemon says it was decided, and
+	// the other one stays: a command is an intention, and the Event is the fact.
+	if got.After != 1 {
+		t.Errorf("%d toasts are left, and one of two questions was answered", got.After)
+	}
+}
+
+// A question from the Session on screen is drawn in the transcript, where it
+// belongs. A toast for it would say the same thing twice.
+func TestAQuestionFromTheSessionOnScreenRaisesNoToast(t *testing.T) {
+	var got struct {
+		Toasts int `json:"toasts"`
+		Rows   int `json:"rows"`
+	}
+	pageUnder(t, `
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+setTimeout(() => {
+  console.log(JSON.stringify({toasts: dom.toasts.children.length, rows: dom.transcript.children.length}));
+}, 0);
+`, &got)
+
+	if got.Toasts != 0 {
+		t.Errorf("the Session on screen raised %d toasts, and its question is already drawn", got.Toasts)
+	}
+	if got.Rows < 2 {
+		t.Errorf("the question was not drawn in the transcript either: %d rows", got.Rows)
+	}
+}
+
+// A decision that did not land leaves the toast up and the button usable. The
+// question is open until an Event says otherwise, and a toast that went quiet
+// would be the user believing they had answered.
+func TestADecisionThatDoesNotLandLeavesTheToastUsable(t *testing.T) {
+	var got struct {
+		Toasts   int    `json:"toasts"`
+		Disabled bool   `json:"disabled"`
+		Why      string `json:"why"`
+		Tries    int    `json:"tries"`
+	}
+	pageUnder(t, `
+postAnswer = {ok: false, status: 502};
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+
+const toast = dom.toasts.children[0];
+const allow = toast.children.find((c) => c.dataset.decision === "allowed");
+allow.onclick();
+
+setTimeout(() => {
+  const after = {
+    toasts: dom.toasts.children.length,
+    disabled: allow.disabled === true,
+    why: toast.querySelector(".why") ? toast.querySelector(".why").textContent : "",
+  };
+  // And a second try, which the button has to still allow.
+  postAnswer = {ok: true, status: 202};
+  allow.onclick();
+  setTimeout(() => console.log(JSON.stringify({...after, tries: posted.length})), 0);
+}, 0);
+`, &got)
+
+	if got.Toasts != 1 {
+		t.Fatalf("%d toasts are up, and the question was never answered", got.Toasts)
+	}
+	if got.Disabled {
+		t.Error("the button is still disabled, so the question cannot be answered again")
+	}
+	if !strings.Contains(got.Why, "502") {
+		t.Errorf("the toast says %q, and it has to say what happened", got.Why)
+	}
+	if got.Tries != 2 {
+		t.Errorf("the decision was sent %d times, and it was answered twice", got.Tries)
+	}
+}
+
+// Every way a question ends takes its toast down. A toast left on screen for a
+// question nobody can answer any more is worse than no toast: the user acts on it
+// and nothing happens.
+func TestAToastGoesWhateverEndedItsQuestion(t *testing.T) {
+	var got []int
+	pageUnder(t, `
+const seen = [];
+function raise(host, session, id) {
+  opened.send("event", {host, session, seq: 1, kind: "ApprovalRequested", payload: {toolCallId: id, title: "t"}});
+}
+
+// The Tool Call ended without a decision, which is the Daemon's own synthesis
+// when a Prompt completes with the call still open.
+raise("attic", "s-9", "c1");
+opened.send("event", {host: "attic", session: "s-9", seq: 2, kind: "ToolCallEnded",
+  payload: {toolCallId: "c1", outcome: "unknown"}});
+seen.push(dom.toasts.children.length);
+
+// The Session ended under the question.
+raise("attic", "s-9", "c2");
+opened.send("event", {host: "attic", session: "s-9", seq: 3, kind: "SessionEnded", payload: {reason: "stopped"}});
+seen.push(dom.toasts.children.length);
+
+// A resync discards only questions from that Host. Every other Host on the merged
+// stream keeps its own log and its open questions.
+raise("attic", "s-9", "c3");
+raise("shed", "s-3", "c4");
+served.set("0", []);
+opened.send("resync", {host: "attic"});
+seen.push(dom.toasts.children.length);
+
+// A resync for the primary Host also leaves questions from other Hosts alone.
+opened.send("resync", {host: "desk"});
+seen.push(dom.toasts.children.length);
+
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := []string{"the Tool Call ended", "the Session ended", "another Host's resync", "the primary Host's resync"}
+	left := []int{0, 0, 1, 1}
+	if len(got) != len(want) {
+		t.Fatalf("the page answered %v", got)
+	}
+	for i, why := range want {
+		if got[i] != left[i] {
+			t.Errorf("%d toasts are up after %s, want %d", got[i], why, left[i])
 		}
 	}
 }
