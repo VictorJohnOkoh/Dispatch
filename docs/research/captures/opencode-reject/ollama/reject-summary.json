@@ -1,0 +1,203 @@
+{
+  "label": "reject",
+  "captured_at": "2026-09-02T19:13:01.305049+00:00",
+  "agent_cmd": "C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe acp",
+  "cwd": "C:\\Users\\Victor\\capstone-opencode\\work",
+  "prompt": "Create a file called refused.txt in this directory whose entire contents are the word banana.",
+  "client_capabilities": {
+    "fs": true,
+    "terminal": false
+  },
+  "permission_policy": "reject",
+  "close_stdin_after_prompt": false,
+  "close_stdin_on_tool_call": false,
+  "close_stdin_on_permission": false,
+  "capture_exit_code": 0,
+  "agent_exit_code": 0,
+  "session_id": "ses_f9c76a858ffeGxBG4BuJL68fIs",
+  "stop_reason": "end_turn",
+  "usage": {
+    "inputTokens": 9959,
+    "outputTokens": 74,
+    "totalTokens": 10033
+  },
+  "initialize_result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "promptCapabilities": {
+        "embeddedContext": true,
+        "image": true
+      },
+      "sessionCapabilities": {
+        "close": {},
+        "fork": {},
+        "list": {},
+        "resume": {}
+      }
+    },
+    "authMethods": [
+      {
+        "description": "Run `opencode auth login` in the terminal",
+        "name": "Login with opencode",
+        "id": "opencode-login"
+      }
+    ],
+    "agentInfo": {
+      "name": "OpenCode",
+      "version": "1.18.25"
+    }
+  },
+  "new_session_result": {
+    "sessionId": "ses_f9c76a858ffeGxBG4BuJL68fIs",
+    "configOptions": [
+      {
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "capstone/qwen3.5:9b",
+        "options": [
+          {
+            "value": "lmstudio/openai/gpt-oss-20b",
+            "name": "LM Studio/GPT OSS 20B"
+          },
+          {
+            "value": "lmstudio/gpt-oss-20b",
+            "name": "LM Studio/gpt-oss-20b"
+          },
+          {
+            "value": "lmstudio/prism-ml/bonsai-27b",
+            "name": "LM Studio/prism-ml/bonsai-27b"
+          },
+          {
+            "value": "lmstudio/qwen/qwen3.5-9b",
+            "name": "LM Studio/qwen/qwen3.5-9b"
+          },
+          {
+            "value": "lmstudio/qwen2.5-coder-1.5b-instruct",
+            "name": "LM Studio/qwen2.5-coder-1.5b-instruct"
+          },
+          {
+            "value": "lmstudio/qwen/qwen3-30b-a3b-2507",
+            "name": "LM Studio/Qwen3 30B A3B 2507"
+          },
+          {
+            "value": "lmstudio/qwen/qwen3-coder-30b",
+            "name": "LM Studio/Qwen3 Coder 30B"
+          },
+          {
+            "value": "lmstudio/qwen3.8-27b@q3_k_s",
+            "name": "LM Studio/qwen3.8-27b@q3_k_s"
+          },
+          {
+            "value": "lmstudio/qwen3.8-27b@q4_0",
+            "name": "LM Studio/qwen3.8-27b@q4_0"
+          },
+          {
+            "value": "ollama/qwen3:latest",
+            "name": "Ollama/qwen3:latest"
+          },
+          {
+            "value": "ollama/qwen3.5:9b",
+            "name": "Ollama/qwen3.5:9b"
+          },
+          {
+            "value": "capstone/qwen3:latest",
+            "name": "Capstone Vendor (ollama)/qwen3:latest"
+          },
+          {
+            "value": "capstone/qwen3.5:9b",
+            "name": "Capstone Vendor (ollama)/qwen3.5:9b"
+          }
+        ]
+      },
+      {
+        "id": "mode",
+        "name": "Session Mode",
+        "category": "mode",
+        "type": "select",
+        "currentValue": "build",
+        "options": [
+          {
+            "value": "build",
+            "name": "build",
+            "description": "The default agent. Executes tools based on configured permissions."
+          },
+          {
+            "value": "plan",
+            "name": "plan",
+            "description": "Plan mode. Disallows all edit tools."
+          }
+        ]
+      }
+    ]
+  },
+  "session_update_kinds": {
+    "available_commands_update": 1,
+    "agent_thought_chunk": 19,
+    "tool_call": 1,
+    "tool_call_update": 2
+  },
+  "agent_methods": {
+    "session/update": 23,
+    "session/request_permission": 1
+  },
+  "permission_request_count": 1,
+  "permission_requests": [
+    {
+      "sessionId": "ses_f9c76a858ffeGxBG4BuJL68fIs",
+      "toolCall": {
+        "toolCallId": "call_0nitqe0i",
+        "title": "C:/Users/Victor/capstone-opencode/work/refused.txt",
+        "kind": "edit",
+        "status": "pending",
+        "locations": [
+          {
+            "path": "C:/Users/Victor/capstone-opencode/work/refused.txt"
+          }
+        ],
+        "rawInput": {
+          "filepath": "C:/Users/Victor/capstone-opencode/work/refused.txt",
+          "diff": "Index: C:/Users/Victor/capstone-opencode/work/refused.txt\n===================================================================\n--- C:/Users/Victor/capstone-opencode/work/refused.txt\n+++ C:/Users/Victor/capstone-opencode/work/refused.txt\n@@ -0,0 +1,1 @@\n+banana\n"
+        },
+        "content": [
+          {
+            "type": "diff",
+            "path": "C:/Users/Victor/capstone-opencode/work/refused.txt",
+            "oldText": "",
+            "newText": "banana\n"
+          }
+        ]
+      },
+      "options": [
+        {
+          "optionId": "once",
+          "kind": "allow_once",
+          "name": "Allow once"
+        },
+        {
+          "optionId": "always",
+          "kind": "allow_always",
+          "name": "Always allow"
+        },
+        {
+          "optionId": "reject",
+          "kind": "reject_once",
+          "name": "Reject"
+        }
+      ]
+    }
+  ],
+  "permission_answers": [
+    {
+      "optionId": "reject",
+      "kind": "reject_once",
+      "name": "Reject"
+    }
+  ]
+}

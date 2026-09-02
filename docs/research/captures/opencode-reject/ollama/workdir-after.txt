@@ -1,0 +1,9 @@
+total 6
+drwxr-xr-x 1 Victor 197121   0 Sep  2 20:12 .
+drwxr-xr-x 1 Victor 197121   0 Sep  2 20:12 ..
+-rw-r--r-- 1 Victor 197121  12 Sep  2 20:12 notes.txt
+-rw-r--r-- 1 Victor 197121 498 Sep  2 20:12 opencode.json
+--- out.txt ---
+cat: /c/Users/Victor/capstone-opencode/work/out.txt: No such file or directory
+--- refused.txt ---
+cat: /c/Users/Victor/capstone-opencode/work/refused.txt: No such file or directory

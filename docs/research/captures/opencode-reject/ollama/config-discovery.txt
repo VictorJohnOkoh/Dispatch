@@ -1,0 +1,13 @@
+capstone/qwen3:latest
+capstone/qwen3.5:9b
+lmstudio/gpt-oss-20b
+lmstudio/openai/gpt-oss-20b
+lmstudio/prism-ml/bonsai-27b
+lmstudio/qwen/qwen3-30b-a3b-2507
+lmstudio/qwen/qwen3-coder-30b
+lmstudio/qwen/qwen3.5-9b
+lmstudio/qwen2.5-coder-1.5b-instruct
+lmstudio/qwen3.8-27b@q3_k_s
+lmstudio/qwen3.8-27b@q4_0
+ollama/qwen3:latest
+ollama/qwen3.5:9b
