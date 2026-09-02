@@ -33,7 +33,7 @@ func TestTheSevenFrameTypes(t *testing.T) {
 	}
 }
 
-// Ten endpoints on the Daemon's leg. The Client's are the same under one more path
+// The endpoints on the Daemon's leg. The Client's are the same under one more path
 // segment, and that segment is the whole difference between the two legs.
 func TestEveryRouteIsOneCommandUnderV1(t *testing.T) {
 	seen := make(map[string]bool, len(Routes))

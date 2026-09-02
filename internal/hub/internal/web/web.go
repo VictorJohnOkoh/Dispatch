@@ -45,6 +45,10 @@ var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
 // that held a slash would otherwise build a link to somewhere else.
+// pathEscape is the one function the template calls, and only in a path. A value
+// in a query needs no help: html/template escapes one itself, and escaping it
+// first would send %2B to the Host as %252B. A path segment it leaves alone, so a
+// Session id holding a slash needs this.
 var funcs = template.FuncMap{"pathEscape": url.PathEscape}
 
 var page = template.Must(template.New("page.html").Funcs(funcs).ParseFS(files, "page.html"))
@@ -57,13 +61,13 @@ var start = template.Must(template.New("start.html").Funcs(funcs).ParseFS(files,
 // the largest the Daemon serves, and a longer Session is several reads.
 const transcriptPage = 1000
 
-// The one page, one Session, with every other Session beside it. The wizard and
-// the Hosts view are later work, so a human names the Session in the URL.
+// The one page, one Session, with every other Session beside it. The Hosts view
+// is later work, so a human names the Session in the URL.
 const sessionPage = "GET /hosts/{host}/sessions/{session}"
 
 // railRoute answers the rail on its own, so the browser can redraw it when the
 // merged stream says a Session it is not drawing has changed. It is the Client's
-// own route and not one of the protocol's ten.
+// own route and not one of the protocol's.
 const railRoute = "GET /rail/{host}/{session}"
 
 // The wizard, and the start it ends in. Both are the Client's own.

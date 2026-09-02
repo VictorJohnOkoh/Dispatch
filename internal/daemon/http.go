@@ -57,7 +57,14 @@ func (d *Daemon) listHarnesses(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
 		Harnesses []HarnessView `json:"harnesses"`
-	}{out})
+
+		// PolicyDefault is the Host config's, unclipped. It is here because the
+		// Client's start step needs it and this is the read that step makes: a
+		// Client that guessed it would quietly override what the Host was set up
+		// with, which CONTEXT.md gives the user the right to override and nobody
+		// else.
+		PolicyDefault event.Policy `json:"policyDefault"`
+	}{out, d.policyDefault})
 }
 
 // HarnessView is one Harness this Host serves. Gates is the ToolKinds this

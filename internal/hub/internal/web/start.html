@@ -21,8 +21,8 @@
            after it, so a step can be gone back to without the browser's own
            button and without losing the way forward. */ -}}
     {{- if .Host}}<a class="pill" href="/new">{{.Host}}</a>{{end}}
-    {{- if .Model}}<a class="pill" href="/new?host={{.Host | pathEscape}}">{{.Model}}</a>{{end}}
-    {{- if .Harness}}<a class="pill" href="/new?host={{.Host | pathEscape}}&amp;model={{.Model | pathEscape}}">{{.Harness}}</a>{{end}}
+    {{- if .Model}}<a class="pill" href="/new?host={{.Host}}">{{.Model}}</a>{{end}}
+    {{- if .Harness}}<a class="pill" href="/new?host={{.Host}}&amp;model={{.Model}}">{{.Harness}}</a>{{end}}
   </p>
 </header>
 
@@ -49,8 +49,8 @@
 <ul class="choices">
   {{- range .Hosts}}
   <li>
-    {{- if .Ready}}
-    <a href="/new?host={{.Host | pathEscape}}">{{.Host}}</a>
+    {{- if .Answering}}
+    <a href="/new?host={{.Host}}">{{.Host}}</a>
     {{- else}}
     <span class="off">{{.Host}}</span>
     <span class="pill host" data-host-answering="false">not answering</span>
@@ -63,7 +63,7 @@
 <ul class="choices">
   {{- range .Models}}
   <li>
-    <a href="/new?host={{$.Host | pathEscape}}&amp;model={{.ID | pathEscape}}">{{.ID}}</a>
+    <a href="/new?host={{$.Host}}&amp;model={{.ID}}">{{.ID}}</a>
     <span class="meta">{{.Vendor}}</span>
     {{- range .Capabilities}}
     <span class="pill cap">{{.}}</span>
@@ -76,7 +76,7 @@
 <ul class="choices">
   {{- range .Harnesses}}
   <li>
-    <a href="/new?host={{$.Host | pathEscape}}&amp;model={{$.Model | pathEscape}}&amp;harness={{.Name | pathEscape}}">{{.Name}}</a>
+    <a href="/new?host={{$.Host}}&amp;model={{$.Model}}&amp;harness={{.Name}}">{{.Name}}</a>
     {{- if .Tools}}
     {{- range .Gates}}<span class="pill">gates {{.}}</span>{{end}}
     {{- else}}

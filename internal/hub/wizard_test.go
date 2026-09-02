@@ -340,3 +340,45 @@ func TestEachAnsweredStepLinksBackToItself(t *testing.T) {
 		}
 	}
 }
+
+// A start changes a machine in another room, so it is taken only from this
+// Client's own pages. A browser sends Origin on every cross-site form post.
+func TestAStartFromSomebodyElsesPageIsRefused(t *testing.T) {
+	host := newStartingHost(t, started)
+	h := wizardOn(t, host)
+
+	r := httptest.NewRequest(http.MethodPost, "/start", strings.NewReader("host=desk&model=m&harness=opencode"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "http://somewhere.else")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("a cross-site start answered %d", w.Code)
+	}
+	if len(*host.took) != 0 {
+		t.Errorf("the Host was told %v by a page somebody else wrote", *host.took)
+	}
+}
+
+// A Model id is put in a link's query, where a path escape leaves &, = and + as
+// themselves and the link would mean something else.
+func TestAModelIdWithAQueryCharacterStillLinksToItself(t *testing.T) {
+	took := &[]string{}
+	mux := http.NewServeMux()
+	mux.HandleFunc(protocol.ListSessions, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"sessions": []any{}, "cursor": 0})
+	})
+	mux.HandleFunc(protocol.ListModels, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"vendors": []any{map[string]any{
+			"kind": "lmstudio", "models": []any{map[string]any{"id": "qwen+coder&x", "caps": map[string]any{}}},
+		}}})
+	})
+	h := wizardOn(t, startingHost{Handler: mux, took: took})
+
+	body, _ := get(t, h, "/new?host=desk")
+	// html/template escapes a value in a query itself, and lowercases the hex.
+	if !strings.Contains(body, "model=qwen%2bcoder%26x") {
+		t.Errorf("the Model link would split into another parameter: %s", body)
+	}
+}

@@ -34,9 +34,11 @@ func (h *Hub) Handler() http.Handler {
 		mux.HandleFunc(protocol.OnHost(route), h.forward)
 	}
 	// The Client is everything the protocol does not claim. It is last because a
-	// pattern of "/" matches whatever the routes above did not, and it takes every
-	// method, because the wizard posts a start to it.
-	mux.Handle("/", h.page)
+	// pattern of "GET /" matches whatever the routes above did not. Its one command
+	// is named rather than taken from a pattern that would answer every method on
+	// every path this Hub does not otherwise serve.
+	mux.Handle("GET /", h.page)
+	mux.Handle("POST /start", h.page)
 	return mux
 }
 

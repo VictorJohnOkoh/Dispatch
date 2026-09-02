@@ -53,9 +53,12 @@ type wizard struct {
 
 type hostChoice struct {
 	Host string
-	// Ready is whether this Host answered just now. A start on a Host that is not
-	// answering is disabled rather than failing silently.
-	Ready bool
+
+	// Answering is whether this Host answered just now, and it is deliberately not
+	// called Ready: Ready is one of four Host States and comes from the liveness of
+	// the Hub's Event stream. A start on a Host that is not answering is disabled
+	// rather than failing silently once the user has filled in four steps.
+	Answering bool
 }
 
 type modelChoice struct {
@@ -101,7 +104,7 @@ func (c *client) newSession(w http.ResponseWriter, r *http.Request) {
 	case "model":
 		view.Models = c.modelChoices(r.Context(), view.Host)
 	case "harness":
-		view.Harnesses = c.harnessChoices(r.Context(), view.Host)
+		view.Harnesses = c.harnessChoices(r.Context(), view.Host).Harnesses
 	case "policy":
 		view.Slots = chosenSlots(c.harnessChoices(r.Context(), view.Host), view.Harness, ask)
 	}
@@ -133,7 +136,7 @@ func (c *client) hostChoices(ctx context.Context) []hostChoice {
 			continue
 		}
 		seen[e.Host] = true
-		out = append(out, hostChoice{Host: e.Host, Ready: e.Answering})
+		out = append(out, hostChoice{Host: e.Host, Answering: e.Answering})
 	}
 	return out
 }
@@ -185,21 +188,26 @@ func capability(name, answer string) string {
 	return name + " " + answer
 }
 
-func (c *client) harnessChoices(ctx context.Context, host string) []harnessChoice {
-	var body struct {
-		Harnesses []harnessChoice `json:"harnesses"`
-	}
+// harnesses is what one Host answers about what a start may name: the Adapters it
+// serves, and the Approval Policy default the Host config carries.
+type harnesses struct {
+	Harnesses     []harnessChoice `json:"harnesses"`
+	PolicyDefault event.Policy    `json:"policyDefault"`
+}
+
+func (c *client) harnessChoices(ctx context.Context, host string) harnesses {
+	var body harnesses
 	if !c.read(ctx, host, path(protocol.ListHarnesses), &body) {
-		return nil
+		return harnesses{}
 	}
-	return body.Harnesses
+	return body
 }
 
 // chosenSlots is the Approval Policy step with whatever the user already chose
 // still chosen. A refusal sends the wizard back here, and a step that forgot the
 // answers would make the user set them again to say yes to the same question.
-func chosenSlots(harnesses []harnessChoice, name string, ask url.Values) []slotChoice {
-	out := slots(harnesses, name)
+func chosenSlots(from harnesses, name string, ask url.Values) []slotChoice {
+	out := slots(from, name)
 	for i, slot := range out {
 		if chose := ask.Get("policy." + slot.Kind); chose != "" && slot.Gated {
 			out[i].Rule = chose
@@ -211,9 +219,9 @@ func chosenSlots(harnesses []harnessChoice, name string, ask url.Values) []slotC
 // slots is the Approval Policy step for one Harness. A slot with no Gate is auto
 // and cannot be changed. A Harness with no tools has no Approval Policy at all, so
 // it draws no slots: that is ugly and it is true, which is the correct pairing.
-func slots(harnesses []harnessChoice, name string) []slotChoice {
+func slots(harnesses harnesses, name string) []slotChoice {
 	var chosen harnessChoice
-	for _, h := range harnesses {
+	for _, h := range harnesses.Harnesses {
 		if h.Name == name {
 			chosen = h
 		}
@@ -224,17 +232,16 @@ func slots(harnesses []harnessChoice, name string) []slotChoice {
 
 	out := make([]slotChoice, 0, event.NumToolKinds)
 	for kind := range event.NumToolKinds {
-		name := event.ToolKind(kind).String()
-		gated := false
-		for _, g := range chosen.Gates {
-			gated = gated || g == name
+		slot := slotChoice{Kind: event.ToolKind(kind).String(), Rule: string(event.RuleAuto)}
+		for _, gated := range chosen.Gates {
+			slot.Gated = slot.Gated || gated == slot.Kind
 		}
-		slot := slotChoice{Kind: name, Rule: string(event.RuleAuto), Gated: gated}
-		if gated {
+		if slot.Gated {
 			slot.Choose = []string{string(event.RuleAuto), string(event.RuleWait), string(event.RuleRefuse)}
-			// ADR 0008's default: auto for read and wait for the other four.
-			if name != event.ToolRead.String() {
-				slot.Rule = string(event.RuleWait)
+			// The Host config's own default, which is the one the user may always
+			// override and the Daemon would have used had the start named none.
+			if rule := harnesses.PolicyDefault[kind]; rule != "" {
+				slot.Rule = string(rule)
 			}
 		}
 		out = append(out, slot)
@@ -270,6 +277,13 @@ func path(route string) string {
 // refused draws the wizard again with the refusal on it, and one that is accepted
 // leaves the browser on the Session it made.
 func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
+	// A start changes a machine in another room, so it is taken only from this
+	// Client's own pages. A browser sends Origin on every cross-site form post, and
+	// one that does not match is a page somebody else wrote.
+	if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r.Host) {
+		http.Error(w, "a start comes from this Client's own page", http.StatusForbidden)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "that form could not be read", http.StatusBadRequest)
 		return
@@ -342,6 +356,14 @@ func (c *client) stop(ctx context.Context, host, id string) string {
 		return id + " was not stopped: " + refusal.Detail
 	}
 	return fmt.Sprintf("%s was not stopped, and this Host answered %d", id, resp.StatusCode)
+}
+
+// sameOrigin says whether an Origin header names the host this request came in
+// on. It compares the host and not the scheme, because a Hub reached over an SSH
+// tunnel is http on one side and may be anything on the other.
+func sameOrigin(origin, host string) bool {
+	at, err := url.Parse(origin)
+	return err == nil && at.Host == host
 }
 
 // chosenPolicy is the five slots the form carried. A Session whose Harness runs no
