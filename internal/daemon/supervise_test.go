@@ -21,13 +21,57 @@ import (
 // spawnStub starts one stub Harness the way the Daemon starts a real one.
 func spawnStub(t *testing.T, w *tower, role string, stderr io.Writer) (*harnessProcess, harness.Pipes) {
 	t.Helper()
+	return spawnStubTeed(t, w, role, stderr, nil)
+}
+
+// spawnStubTeed is spawnStub with a transcript under stdout as well.
+func spawnStubTeed(t *testing.T, w *tower, role string, stderr, raw io.Writer) (*harnessProcess, harness.Pipes) {
+	t.Helper()
 	exe, l := stubLaunch(t, w, role)
-	p, pipes, err := spawn(exe, t.TempDir(), l, stderr)
+	p, pipes, err := spawn(exe, t.TempDir(), l, stderr, raw)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
 	t.Cleanup(func() { p.stop(time.Second) })
 	return p, pipes
+}
+
+// The stop returns only once the Adapter has read stdout to the end, because the
+// caller closes the transcript the moment it does. A Harness says its last words
+// as it goes, so those bytes are still travelling when the Session is ending.
+func TestTheStopWaitsForTheAdapterToFinishReadingStdout(t *testing.T) {
+	w := newTower(t)
+	tr, err := newTranscript(t.TempDir(), "s-tee")
+	if err != nil {
+		t.Fatalf("newTranscript: %v", err)
+	}
+	p, pipes := spawnStubTeed(t, w, "parting", nil, tr)
+
+	// A byte at a time with a pause between, which is a slow Adapter and not a
+	// broken one. A stop that does not wait returns while this is still going.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		one := make([]byte, 1)
+		for {
+			if _, err := pipes.Out.Read(one); err != nil {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	p.stop(10 * time.Second)
+	tr.Close()
+
+	select {
+	case <-done:
+	default:
+		t.Fatal("the stop returned while the Adapter was still reading stdout")
+	}
+	if said := tr.said(t); !strings.Contains(said, partingWords) {
+		t.Errorf("the transcript holds %q, and the Harness said %q on its way out", said, partingWords)
+	}
 }
 
 // The rig itself: a real OS process that spawns a real child of its own. Every
@@ -201,6 +245,30 @@ func stubHost(t *testing.T, w *tower, role string) (*host, *spawning) {
 }
 
 const stubStart = `{"harness":"stub","model":"qwen3:8b"}`
+
+// A stop that lands while the Harness is starting has run its kill already, and
+// found no process because there was none yet. The spawn owns what it made until
+// the registry takes it, so it takes it back rather than leaving a Harness nobody
+// owns and a transcript nobody closes.
+func TestASpawnTheStopMissedTakesBackItsHarness(t *testing.T) {
+	w := newTower(t)
+	exe, l := stubLaunch(t, w, "deaf")
+	h := newHost(t)
+	h.stopWait = 100 * time.Millisecond
+
+	id := h.idle(t)
+	s, _, _ := h.sessions.find(id)
+	h.command(t, id, "stop", "")
+
+	// The spawn finishes after the stop, which is the order the ladder cannot see.
+	stub := &Harness{Name: "stub", Exe: exe}
+	if _, err := h.spawner(s, stub)(t.Context(), l); err == nil {
+		t.Fatal("the spawn kept a Harness for a Session that had already ended")
+	}
+	if !w.gone(t, "harness", 10*time.Second) {
+		t.Error("the Harness the stop missed is still running")
+	}
+}
 
 // The whole ladder, in order, against a Harness that ignores every polite step.
 // Steps 1, 2 and 7 are Events; step 3 is the Adapter's goodbye; steps 4 to 6 are

@@ -19,10 +19,12 @@ import (
 // still open here was in flight, and nothing observed its result: a call the
 // Daemon refused was ended by that refusal and is not open any more.
 //
-// The two triggers reach this from two goroutines: the Prompt completes on the
-// Adapter's reader and the Session ends on the request that stopped it. So the
-// fold and the writes it decided on are one step, and whichever trigger fires
-// first is the one that finds the call open.
+// The two triggers reach this through the Session's Sink, whose mutex the caller
+// holds: the Prompt completes on the Adapter's reader and the Session ends on the
+// request that stopped it, so the fold and the writes it decided on are one step
+// against everything the Adapter reports. The ledger's own lock is what the
+// Daemon's refusals meet it on, because a refusal is written by whoever decided it
+// and not by the Adapter.
 func (d *Daemon) closeCalls(s *Session) {
 	d.closing.Lock()
 	defer d.closing.Unlock()

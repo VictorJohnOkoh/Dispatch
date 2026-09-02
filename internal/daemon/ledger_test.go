@@ -89,7 +89,7 @@ func TestAToolCallStillOpenWhenTheSessionEndsEndsUnknown(t *testing.T) {
 	h := newHost(t)
 	id := h.idle(t)
 	s, _, _ := h.sessions.find(id)
-	k := &sink{d: h.Daemon, s: s}
+	k := s.sink
 
 	k.ToolCallRequested("c1", "bash", event.ToolExecute, "run it", nil)
 	h.command(t, id, "stop", "")
@@ -107,7 +107,7 @@ func TestTheSecondTriggerDoesNotEndAToolCallAgain(t *testing.T) {
 	h := newHost(t)
 	id := h.idle(t)
 	s, _, _ := h.sessions.find(id)
-	k := &sink{d: h.Daemon, s: s}
+	k := s.sink
 
 	k.ToolCallRequested("c1", "bash", event.ToolExecute, "run it", nil)
 	k.Completed("stop", event.Usage{})
@@ -118,6 +118,25 @@ func TestTheSecondTriggerDoesNotEndAToolCallAgain(t *testing.T) {
 	}
 }
 
+// The Harness's own result is the one end the ledger never has to invent, and a
+// result that arrives after the Session ended is not a second one. The Adapter's
+// reader and the request that stopped the Session are two goroutines, and the Sink
+// is the fence between them.
+func TestARealEndAfterTheSessionEndedIsNotASecondEnd(t *testing.T) {
+	h := newHost(t)
+	id := h.idle(t)
+	s, _, _ := h.sessions.find(id)
+
+	s.sink.ToolCallRequested("c1", "bash", event.ToolExecute, "run it", nil)
+	h.command(t, id, "stop", "")
+	s.sink.ToolCallEnded("c1", event.OutcomeOK, "the Harness answered too late")
+
+	ends := h.ended(t)
+	if len(ends) != 1 || ends[0].Outcome != event.OutcomeUnknown {
+		t.Fatalf("the ledger wrote %+v, want the one end the stop gave it", ends)
+	}
+}
+
 // The two triggers arrive on two goroutines, so first is decided by the ledger
 // and not by which one the scheduler ran. One of them writes the end and the
 // other finds nothing open, whichever way round they land.
@@ -125,7 +144,7 @@ func TestTheTwoTriggersEndAToolCallOnlyOnce(t *testing.T) {
 	h := newHost(t)
 	id := h.idle(t)
 	s, _, _ := h.sessions.find(id)
-	k := &sink{d: h.Daemon, s: s}
+	k := s.sink
 	k.ToolCallRequested("c1", "bash", event.ToolExecute, "run it", nil)
 
 	// The stop is posted rather than commanded, because a helper that fails the

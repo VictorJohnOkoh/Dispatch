@@ -28,6 +28,13 @@ type startRequest struct {
 	Model   string `json:"model"`
 	Dir     string `json:"dir"`
 
+	// Vendor is the Base of the Vendor that serves the Model, as GET /v1/models
+	// gave it. A Model id is unique only inside one Vendor, so a start that names
+	// only the Model lets this Host pick among Vendors that all answer to that id.
+	// It is optional, and a start without it takes the first Vendor that lists the
+	// Model.
+	Vendor string `json:"vendor"`
+
 	// Policy is the user choosing the Approval Policy at the start. Without it the
 	// Session gets the Host config's default, clipped by the Harness's Gates. With
 	// it, a slot the Harness cannot gate fails the start rather than being quietly
@@ -85,11 +92,11 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	vendor := d.vendors.serving(req.Model)
+	vendor := d.vendors.serving(req.Vendor, req.Model)
 	if vendor == nil {
 		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
 			Reason: protocol.ReasonUnknownModel,
-			Detail: fmt.Sprintf("no Vendor on this Host serves the Model %q", req.Model),
+			Detail: unknownModel(req.Vendor, req.Model),
 		})
 		return
 	}
@@ -126,6 +133,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		started: time.Now().UTC(),
 		cancel:  cancel,
 	}
+	s.sink = &sink{d: d, s: s}
 	// The Session joins the registry only once its first Event is in the log. A
 	// Session with no Event folds to Starting, so one added ahead of a write that
 	// failed would hold the Host's one slot for as long as the Daemon runs.
@@ -174,7 +182,7 @@ func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vend
 		Dir:     s.dir,
 		Spawn:   d.spawner(s, h),
 		Files:   files{root: d.root, dir: s.dir},
-	}, &sink{d: d, s: s})
+	}, s.sink)
 	if err != nil {
 		d.endFailed(s, event.ErrHarnessFailed, err.Error())
 		return
@@ -201,7 +209,7 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 		return
 	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
-	d.closeCalls(s)
+	s.sink.end()
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
 	// A Harness that died still has a group, and on Windows that group is a handle
 	// that a child of its own may still be living inside.
@@ -218,10 +226,14 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 // Because step 6 is a kill, a stop always finishes.
 func (d *Daemon) ladder(s *Session, run harness.Run) {
 	d.refuseHeld(s, event.BySessionStopped)
-	d.closeCalls(s)
+	// Step 3 is the goodbye and the fence both. Each Adapter joins its own reader
+	// before Close returns, so everything the Harness said is in the log by the
+	// time the ledger folds what is still open, and a Session that is Starting has
+	// no Run and leans on the Sink for the same thing.
 	if run != nil {
 		run.Close()
 	}
+	s.sink.end()
 	d.kill(s)
 }
 
@@ -259,6 +271,13 @@ func (d *Daemon) kill(s *Session) {
 // The Cursor beside them is where the log stood when they were read, so a Client
 // that opens the stream there loses nothing that fell in between.
 func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
+	// The read waits for the write in flight. A Client asks for this list because
+	// an Event told it something changed, and the log sends an Event before the
+	// Session it belongs to has recorded it, so a read that did not wait could
+	// answer with the state from before the Event and stay wrong until the next.
+	d.writing.RLock()
+	defer d.writing.RUnlock()
+
 	// The Cursor is read first. One read behind the data replays what the answer
 	// already carried, which costs a redrawn row; one read ahead of it drops what
 	// landed in between, which is the loss this Cursor exists to prevent.
@@ -391,6 +410,11 @@ type Session struct {
 	// cancel ends the launch, the Run and every call either has in flight.
 	cancel context.CancelFunc
 
+	// sink is this Session's whole view of the Daemon, which the Adapter reports
+	// through and the Session's end closes. It is made with the Session and never
+	// replaced, so it is read without the registry mutex.
+	sink *sink
+
 	// run is the live Session the Adapter handed back, which the Daemon holds
 	// because it is the Daemon that prompts and stops it. It is nil until the
 	// Harness is up, and stays nil for a launch that failed.
@@ -505,6 +529,24 @@ func (r *sessions) kindOf(s *Session, id string) (event.ToolKind, bool) {
 	return 0, false
 }
 
+// ruleFor is the Approval Policy slot that applied when this Tool Call was
+// requested. A later policy change applies only to later Tool Calls.
+func (r *sessions) ruleFor(s *Session, id string) (event.Rule, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, e := range s.events {
+		if e.Kind != event.KindToolCallRequested {
+			continue
+		}
+		p, ok := e.Payload.(*event.ToolCallRequested)
+		if !ok || p.ToolCallID != id {
+			continue
+		}
+		return session.Policy(s.events[:i+1])[p.ToolKind], true
+	}
+	return "", false
+}
+
 // policy is the Approval Policy this Session holds now, folded from its own Events.
 func (r *sessions) policy(s *Session) event.Policy {
 	r.mu.Lock()
@@ -550,10 +592,18 @@ func (r *sessions) setRun(s *Session, run harness.Run) {
 	s.run = run
 }
 
-func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) {
+// setProcess keeps the Harness process and its transcript, and reports whether the
+// Session still wants them. A stop that landed while the Harness was starting has
+// already run its kill and found no process, so the spawn takes the process back
+// rather than leaving one nobody owns.
+func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if s.ending {
+		return false
+	}
 	s.proc, s.raw = p, raw
+	return true
 }
 
 // process is the Harness process and the transcript its output is going to. They
@@ -629,4 +679,13 @@ func (r *sessions) lookup(id event.SessionID) *Session {
 		}
 	}
 	return nil
+}
+
+// unknownModel says which of the two the Host could not match, because a start
+// that named a Vendor and a start that named none fail for different reasons.
+func unknownModel(vendor, model string) string {
+	if vendor == "" {
+		return fmt.Sprintf("no Vendor on this Host serves the Model %q", model)
+	}
+	return fmt.Sprintf("the Vendor at %s does not serve the Model %q", vendor, model)
 }

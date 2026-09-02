@@ -40,16 +40,31 @@ embedded.textContent = JSON.stringify([
 ]);
 
 const stateElement = new El("p");
-stateElement.dataset.state = "Starting";
+stateElement.dataset.sessionState = "Starting";
 stateElement.textContent = "Starting";
 
 // The rail's rows, which page.js redraws whole.
 const railNav = new El("div");
+const hostStateElement = new El("span");
+const hostCauseElement = new El("span");
+const hostMarkElement = new El("span");
+const staleElement = new El("span");
+const vendorsElement = new El("ul");
 
 const body = new El("body");
 
 globalThis.document = {
-  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, rail: railNav })[id] ?? null,
+  getElementById: (id) => ({
+    transcript,
+    state: stateElement,
+    events: embedded,
+    rail: railNav,
+    "host-state": hostStateElement,
+    "host-cause": hostCauseElement,
+    "host-mark": hostMarkElement,
+    stale: staleElement,
+    vendors: vendorsElement,
+  })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
 };
@@ -88,4 +103,16 @@ globalThis.fetch = async (url) => {
   return { ok: true, json: async () => ({ events: page }) };
 };
 
-globalThis.dom = { transcript, stateElement, embedded, rail: railNav, body, row };
+globalThis.dom = {
+  transcript,
+  stateElement,
+  hostStateElement,
+  hostCauseElement,
+  hostMarkElement,
+  staleElement,
+  vendorsElement,
+  embedded,
+  rail: railNav,
+  body,
+  row,
+};
