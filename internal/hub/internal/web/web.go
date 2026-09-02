@@ -23,10 +23,15 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// Hosts is the one thing this package needs from the Hub: a GET against a named
-// Host's Daemon, answered as that Daemon answered it. Closing the answer's body
-// releases the connection.
+// Hosts is what this package needs from the Hub: the Hosts it is configured with,
+// and a GET against one of their Daemons answered as that Daemon answered it.
+// Closing an answer's body releases the connection.
+//
+// The Hub is the only component that knows more than one Host exists, and this is
+// the whole of what it lends the Client. There is no second way to reach a Host
+// from here.
 type Hosts interface {
+	All() []string
 	Get(ctx context.Context, host, path string) (*http.Response, error)
 }
 
@@ -79,15 +84,18 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rail := c.rail(r.Context(), host, id)
 	state, reason := fold(events)
 	if err := page.Execute(w, view{
-		Host:    host,
-		Session: id,
-		Cursor:  protocol.MergedCursor{host: at}.String(),
-		State:   state.String(),
-		Reason:  string(reason),
-		Rows:    rows(events),
-		Events:  payloads(events),
+		Host:      host,
+		Session:   id,
+		Cursor:    protocol.MergedCursor{host: at}.String(),
+		State:     state.String(),
+		Reason:    string(reason),
+		HostState: hostState(rail, host),
+		Rail:      rail,
+		Rows:      rows(events),
+		Events:    payloads(events),
 	}); err != nil {
 		// The header has gone and half a page with it, so there is nothing left to
 		// answer with. The operational log is the Daemon's; the Hub's is stderr.
@@ -108,6 +116,14 @@ type view struct {
 	State  string
 	Reason string
 
+	// HostState is this Hub's view of the machine the Session runs on. It is drawn
+	// beside the Session State and never instead of it.
+	HostState string
+
+	// Rail is every Session on every Host, which is the only place this page says
+	// that a second Host exists.
+	Rail []entry
+
 	Rows []row
 
 	// Events is those same Events as JSON, for the browser to fold. The rows carry
@@ -115,6 +131,17 @@ type view struct {
 	// that shipped only the rows would have to fetch the Session again to know what
 	// it was already showing.
 	Events template.JS
+}
+
+// hostState is the rail's view of one Host, so the header and the rail rows agree
+// rather than each asking separately and disagreeing by a moment.
+func hostState(rail []entry, host string) string {
+	for _, e := range rail {
+		if e.Host == host {
+			return e.HostState
+		}
+	}
+	return "not answering"
 }
 
 // payloads is the Events as the page carries them, in the shape the stream sends and

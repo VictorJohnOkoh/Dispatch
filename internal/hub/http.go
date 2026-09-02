@@ -38,6 +38,18 @@ func (h *Hub) Handler() http.Handler {
 	return mux
 }
 
+// All is the Hosts this Hub is configured with, by id. It is what the Client
+// builds its rail from, and it is the only way that package learns a second Host
+// exists.
+func (h *Hub) All() []string {
+	hosts := h.hosts.All()
+	out := make([]string, len(hosts))
+	for i, host := range hosts {
+		out[i] = string(host.ID)
+	}
+	return out
+}
+
 func (h *Hub) listHosts(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {

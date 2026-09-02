@@ -180,9 +180,10 @@ stream.addEventListener("vendors", () => {});
 // render builds one row, matching page.html's shape element for element.
 function render(seq, kind, r) {
   const el = document.createElement("li");
-  el.className = "row";
+  el.className = r.inset ? "row inset" : "row";
   el.dataset.seq = seq;
   el.dataset.kind = kind;
+  if (r.tone) el.dataset.tone = r.tone;
   el.append(node("p", "title", r.title));
   if (r.text || r.appendable) el.append(node("pre", "text", r.text));
   if (r.detail) el.append(node("p", "detail", r.detail));

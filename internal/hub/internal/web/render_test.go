@@ -103,3 +103,61 @@ func TestTheEmbeddedEventsCannotCloseTheScriptTag(t *testing.T) {
 		t.Errorf("the text came back as %q", back[0].Payload.Text)
 	}
 }
+
+// Two levels is the ceiling. A Prompt holds Tool Calls, a Tool Call has an end,
+// and that is all the structure the Event model has: ToolCallRequested carries no
+// parent id, so a Client that drew a Tool Call inside another one would be
+// inventing a relation no Event states.
+func TestNestingStopsAtTwoLevels(t *testing.T) {
+	inset := map[event.Kind]bool{
+		event.KindReasoning: true, event.KindToolCallRequested: true,
+		event.KindApprovalRequested: true, event.KindApprovalDecided: true,
+		event.KindToolCallEnded: true,
+	}
+	for _, c := range []struct {
+		kind    event.Kind
+		payload any
+	}{
+		{event.KindSessionStarted, &event.SessionStarted{}},
+		{event.KindPromptSubmitted, &event.PromptSubmitted{}},
+		{event.KindReasoning, &event.Reasoning{}},
+		{event.KindToolCallRequested, &event.ToolCallRequested{}},
+		{event.KindApprovalRequested, &event.ApprovalRequested{}},
+		{event.KindApprovalDecided, &event.ApprovalDecided{}},
+		{event.KindToolCallEnded, &event.ToolCallEnded{}},
+		{event.KindPromptCompleted, &event.PromptCompleted{}},
+		{event.KindSessionEnded, &event.SessionEnded{}},
+	} {
+		r := draw(event.Event{Seq: 1, Kind: c.kind, Payload: c.payload})
+		if r.Inset != inset[c.kind] {
+			t.Errorf("%s draws inset = %v, want %v", c.kind, r.Inset, inset[c.kind])
+		}
+	}
+	// There is no third level to draw one in: Inset is a bool, and a Tool Call is
+	// drawn beside the calls around it rather than inside any of them.
+	if got := draw(event.Event{Kind: event.KindToolCallRequested, Payload: &event.ToolCallRequested{}}); !got.Inset {
+		t.Error("a Tool Call is not in the turn it belongs to")
+	}
+}
+
+// An outcome nobody reported is grey, not red. It means the Harness went quiet,
+// which is not a failure and is not the user's to fix.
+func TestAnUnknownOutcomeIsGreyAndAFailureIsNot(t *testing.T) {
+	for _, c := range []struct {
+		outcome event.Outcome
+		want    string
+	}{
+		{event.OutcomeUnknown, toneUnknown},
+		{event.OutcomeOK, toneOK},
+		{event.OutcomeError, toneBad},
+		{event.OutcomeRefused, toneBad},
+	} {
+		got := draw(event.Event{Kind: event.KindToolCallEnded, Payload: &event.ToolCallEnded{Outcome: c.outcome}})
+		if got.Tone != c.want {
+			t.Errorf("%s draws %q, want %q", c.outcome, got.Tone, c.want)
+		}
+	}
+	if toneUnknown == toneBad {
+		t.Error("no result reported and failed are the same colour")
+	}
+}
