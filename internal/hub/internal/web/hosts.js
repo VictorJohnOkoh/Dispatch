@@ -20,13 +20,25 @@ function byHost(selector, id) {
   return found;
 }
 
-// The stream resumes where the page was drawn, so the Hosts view is sent what
-// happens next rather than every Event every Host has ever written.
+// What the Hub stamped the page with: the Cursor it was drawn at, and when. The
+// stream resumes from the Cursor, so the Hosts view is sent what happens next
+// rather than every Event every Host has ever written.
+const drawnPage = document.querySelectorAll("[data-cursor]")[0];
+
 const stream = new EventSource("/v1/events?from=" + encodeURIComponent(at()));
 
 function at() {
-  const cursor = document.querySelectorAll("[data-cursor]")[0];
-  return cursor ? cursor.dataset.cursor : "";
+  return drawnPage ? drawnPage.dataset.cursor : "";
+}
+
+// trueAt is when each card's content was last true, which is what a Stale stamp
+// carries. Both times it can hold come from the Hub: the page was drawn at one,
+// and a host frame says when the Hub last heard from that Host. The browser's own
+// clock is never one of them, because it is not the clock the other stamps on the
+// page were made on.
+const trueAt = new Map();
+for (const [host, card] of cards) {
+  if (card.dataset.hostState === "Ready" && drawnPage) trueAt.set(host, drawnPage.dataset.drawn);
 }
 
 stream.addEventListener("vendors", (frame) => {
@@ -84,7 +96,31 @@ stream.addEventListener("host", (frame) => {
   if (row && down(f.host)) {
     row.replaceChildren(node("li", "meta", "this Host is not answering, so what it serves is not known"));
   }
+  if (f.since) trueAt.set(f.host, f.since);
+  if (f.state !== "Down") unstamp(card);
+  else if (trueAt.has(f.host)) stamp(card, trueAt.get(f.host));
 });
+
+// stamp says how old this card is, and unstamp takes the saying away when the card
+// is current again. A Host that goes Down while this page is open is the same Stale
+// case the server draws on a page opened after it went down, and it reads the same.
+//
+// A Down Host this page has no time for keeps whatever stamp the server gave it,
+// because an empty stamp would be a card that claims to be current.
+function stamp(card, since) {
+  const had = card.querySelector(".stamp");
+  if (had) {
+    had.textContent = `last answered at ${since}`;
+    return;
+  }
+  const who = card.querySelector(".who");
+  if (who) who.append(node("span", "stamp", `last answered at ${since}`));
+}
+
+function unstamp(card) {
+  const had = card.querySelector(".stamp");
+  if (had) had.remove();
+}
 
 function down(host) {
   return cards.get(host)?.dataset.hostState === "Down";

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -193,7 +194,9 @@ func (r *hostReader) says(ctx context.Context, state protocol.HostState, why pro
 		return true
 	}
 	r.state = state
-	body, _ := json.Marshal(protocol.HostStateFrame{Host: string(r.id), State: state, Cause: why})
+	// The merged-stream writer adds the Host to every Frame. It must not be in this
+	// body too, or JSON carries the same key twice.
+	body, _ := json.Marshal(protocol.HostStateFrame{State: state, Cause: why})
 	select {
 	case out <- daemonFrame{host: r.id, name: string(protocol.FrameHost), data: body}:
 		return true
@@ -208,8 +211,12 @@ func (r *hostReader) says(ctx context.Context, state protocol.HostState, why pro
 func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Duration {
 	conn, err := r.hub.dialer.Dial(ctx, r.id)
 	if err != nil {
-		// Nothing answered at all, which is a machine that is not there.
-		r.failed(ctx, protocol.Unreachable, out)
+		if errors.Is(err, hostset.ErrNoDaemon) {
+			r.failed(ctx, protocol.NoDaemon, out)
+		} else {
+			// Nothing answered at all, which is a machine that is not there.
+			r.failed(ctx, protocol.Unreachable, out)
+		}
 		return 0
 	}
 	defer conn.Close()
@@ -250,12 +257,6 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 		return 0
 	}
 
-	// The stream is live, so the Host is Ready. Presence is connection liveness and
-	// nothing else: there is no health check and no ping endpoint.
-	r.failures = 0
-	if !r.says(ctx, protocol.Ready, "", out) {
-		return 0
-	}
 	// A live connection that says nothing is watched by a timer of its own. A read
 	// deadline is not enough: an SSH channel answers SetReadDeadline with "deadline
 	// not supported", so the only way to end a read that will never return is to
@@ -263,8 +264,11 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 	quiet := time.AfterFunc(r.hub.stale, func() { conn.Close() })
 	defer quiet.Stop()
 
-	ready := time.Now()
-	r.read(ctx, beating(quiet, r.hub.stale, resp.Body), out)
+	ready := r.read(ctx, beating(quiet, r.hub.stale, resp.Body), out)
+	if ready.IsZero() {
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
+	}
 	return time.Since(ready)
 }
 
@@ -285,18 +289,32 @@ type readerFunc func([]byte) (int, error)
 
 func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
 
-// read splits SSE into Frames. It parses no body but the Hello's, so an Event Kind
-// this build has never heard of still reaches the Client.
-func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemonFrame) {
+// read splits SSE into Frames. The first Frame must be a valid Hello: an open HTTP
+// response proves only that something answered, while the Handshake proves it was
+// this Host's Daemon. After that it parses no body, so an Event Kind this build has
+// never heard of still reaches the Client.
+func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemonFrame) time.Time {
 	reader := bufio.NewReader(body)
 	frame := daemonFrame{host: r.id}
+	var ready time.Time
 	for {
 		line, err := reader.ReadString('\n')
 		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
 		switch {
 		case line == "":
-			if frame.name != "" && !r.deliver(ctx, frame, out) {
-				return
+			if frame.name != "" {
+				if ready.IsZero() {
+					if frame.name != string(protocol.FrameHello) || !validHello(frame.data) {
+						return time.Time{}
+					}
+					if !r.deliver(ctx, frame, out) || !r.says(ctx, protocol.Ready, "", out) {
+						return time.Time{}
+					}
+					r.failures = 0
+					ready = time.Now()
+				} else if !r.deliver(ctx, frame, out) {
+					return ready
+				}
 			}
 			frame = daemonFrame{host: r.id}
 		case strings.HasPrefix(line, "id:"):
@@ -314,9 +332,14 @@ func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemon
 			frame.data = append(frame.data, data...)
 		}
 		if err != nil {
-			return
+			return ready
 		}
 	}
+}
+
+func validHello(data []byte) bool {
+	var hello protocol.Hello
+	return json.Unmarshal(data, &hello) == nil && hello.Protocol == protocol.Version
 }
 
 // deliver forwards one Frame and keeps what the Hub learns from a Hello. It reports

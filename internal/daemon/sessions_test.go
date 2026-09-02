@@ -446,3 +446,32 @@ func TestSessionEventsPagesOneSessionAndNoOther(t *testing.T) {
 		t.Errorf("a limit that is not a number answers %d", w.Code)
 	}
 }
+
+// The Client asks for this list because an Event told it something changed, and
+// the log sends an Event before the Session it belongs to has recorded it. A read
+// that answered from inside that gap would give the state from before the Event
+// and stay wrong until the next one.
+func TestTheSessionListWaitsForTheWriteInFlight(t *testing.T) {
+	h := newHost(t)
+
+	h.writing.Lock()
+	answered := make(chan int, 1)
+	go func() { answered <- get(t, h.Daemon, "/v1/sessions").Code }()
+
+	select {
+	case <-answered:
+		h.writing.Unlock()
+		t.Fatal("the list answered while an Event was still being recorded")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	h.writing.Unlock()
+	select {
+	case code := <-answered:
+		if code != http.StatusOK {
+			t.Errorf("the list answered %d once the write finished", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the list never answered")
+	}
+}

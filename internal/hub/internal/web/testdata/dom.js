@@ -40,19 +40,40 @@ embedded.textContent = JSON.stringify([
 ]);
 
 const stateElement = new El("p");
-stateElement.dataset.state = "Starting";
+stateElement.dataset.sessionState = "Starting";
 stateElement.textContent = "Starting";
 
 // The rail's rows, which page.js redraws whole.
 const railNav = new El("div");
+const hostStateElement = new El("span");
+const hostCauseElement = new El("span");
+const hostMarkElement = new El("span");
+const staleElement = new El("span");
+const vendorsElement = new El("ul");
 
 // The toast rack, empty until a question from another Session raises one.
 const toastRack = new El("div");
 
+// Questions that were open when page.html was drawn.
+const approvals = new El("script");
+approvals.textContent = "[]";
+
 const body = new El("body");
 
 globalThis.document = {
-  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, rail: railNav, toasts: toastRack })[id] ?? null,
+  getElementById: (id) => ({
+    transcript,
+    state: stateElement,
+    events: embedded,
+    approvals,
+    rail: railNav,
+    toasts: toastRack,
+    "host-state": hostStateElement,
+    "host-cause": hostCauseElement,
+    "host-mark": hostMarkElement,
+    stale: staleElement,
+    vendors: vendorsElement,
+  })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
 };
@@ -98,4 +119,17 @@ globalThis.fetch = async (url, options) => {
   return { ok: true, json: async () => ({ events: page }) };
 };
 
-globalThis.dom = { transcript, stateElement, embedded, rail: railNav, toasts: toastRack, body, row };
+globalThis.dom = {
+  transcript,
+  stateElement,
+  hostStateElement,
+  hostCauseElement,
+  hostMarkElement,
+  staleElement,
+  vendorsElement,
+  embedded,
+  rail: railNav,
+  toasts: toastRack,
+  body,
+  row,
+};

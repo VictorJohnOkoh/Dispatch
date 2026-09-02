@@ -22,6 +22,8 @@ import (
 // this file is that.
 const swapModel = "qwen3.5-9b"
 
+const configFile = "opencode.json"
+
 // recording is the Daemon as a test sees it. Every Sink call lands in one list, in
 // order, because order is half of what these fixtures prove.
 type recording struct {
@@ -182,11 +184,8 @@ func TestACallIsNotReportedAsRunningBeforeItsQuestion(t *testing.T) {
 func TestTheDelegatedWriteGoesThroughContainedFileAccess(t *testing.T) {
 	d, _ := replay(t, "llamaswap/edit-frames.jsonl", swapModel)
 
-	if len(d.files) < 2 {
-		t.Fatalf("the Adapter wrote %v, and it owes both a config and the Harness's file", keys(d.files))
-	}
-	if _, ok := d.files[configFile]; !ok {
-		t.Errorf("the Session's %s was never written: %v", configFile, keys(d.files))
+	if len(d.files) != 1 {
+		t.Fatalf("the Adapter wrote %v, and only the Harness's delegated file belongs here", keys(d.files))
 	}
 	if count(d.said(), "Failed(") != 0 {
 		t.Errorf("the replay reported a failure: %v", d.said())
@@ -196,13 +195,56 @@ func TestTheDelegatedWriteGoesThroughContainedFileAccess(t *testing.T) {
 // The config names the Vendor this Session runs against, and the Model as OpenCode
 // spells it.
 func TestTheSessionConfigNamesTheVendorAndTheModel(t *testing.T) {
-	d, _ := replay(t, "llamaswap/read-frames.jsonl", swapModel)
-
-	config := d.files[configFile]
+	config := sessionConfig(SessionSpec{
+		Model:  swapModel,
+		Vendor: vendors.Endpoint{Base: "http://127.0.0.1:8080"},
+	})
 	for _, want := range []string{qualified(swapModel), "http://127.0.0.1:8080/v1", "openai-compatible"} {
 		if !strings.Contains(config, want) {
 			t.Errorf("the config says nothing about %q:\n%s", want, config)
 		}
+	}
+}
+
+func TestTheSessionConfigUsesTheVendorToken(t *testing.T) {
+	config := sessionConfig(SessionSpec{
+		Model:  swapModel,
+		Vendor: vendors.Endpoint{Base: "http://127.0.0.1:8080", Token: "secret-token"},
+	})
+
+	if !strings.Contains(config, `"apiKey": "secret-token"`) {
+		t.Errorf("the config does not carry the Vendor token:\n%s", config)
+	}
+}
+
+func TestStartDoesNotReplaceTheProjectsOpenCodeConfig(t *testing.T) {
+	s := newScript(t, "llamaswap/read-frames.jsonl")
+	d := newRecording()
+	d.files[configFile] = "the user's config"
+	var launched Launch
+
+	run, err := NewOpenCode().Start(t.Context(), SessionSpec{
+		Session: "s-1",
+		Model:   swapModel,
+		Vendor:  vendors.Endpoint{Base: "http://127.0.0.1:8080"},
+		Dir:     t.TempDir(),
+		Spawn: func(_ context.Context, launch Launch) (Pipes, error) {
+			launched = launch
+			return s.pipes, nil
+		},
+		Files: d,
+	}, d)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	s.abandon()
+	defer run.Close()
+
+	if got := d.files[configFile]; got != "the user's config" {
+		t.Errorf("Start replaced the project's %s with %q", configFile, got)
+	}
+	if len(launched.Env) != 1 || !strings.HasPrefix(launched.Env[0], "OPENCODE_CONFIG_CONTENT=") {
+		t.Errorf("launch environment = %v", launched.Env)
 	}
 }
 
@@ -377,6 +419,73 @@ func TestANativeKindWithNoEventIsDropped(t *testing.T) {
 	if said := d.said(); len(said) != 0 {
 		t.Errorf("the Daemon was told %v about frames that carry no fact", said)
 	}
+}
+
+func TestAReadFailureIsReported(t *testing.T) {
+	d := newRecording()
+	r := &acpRun{name: "opencode", out: d, stopped: make(chan struct{})}
+
+	r.read(strings.NewReader(strings.Repeat("x", frameLimit+1)))
+
+	if count(d.said(), "Failed(") != 1 {
+		t.Errorf("the read failure was not reported: %v", d.said())
+	}
+}
+
+func TestHeldToolCallsKeepAnnouncementOrder(t *testing.T) {
+	d := newRecording()
+	r := &acpRun{name: "opencode", out: d, held: map[string]sessionUpdate{}, stopped: make(chan struct{})}
+	r.hold(sessionUpdate{ToolCallID: "z-first", Title: "first", ToolKind: "execute"})
+	r.hold(sessionUpdate{ToolCallID: "a-second", Title: "second", ToolKind: "execute"})
+
+	r.mu.Lock()
+	r.announceAll()
+	r.mu.Unlock()
+
+	said := d.said()
+	if len(said) != 2 || !strings.Contains(said[0], "z-first") || !strings.Contains(said[1], "a-second") {
+		t.Errorf("Tool Calls were announced out of order: %v", said)
+	}
+}
+
+type blockingWriter struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.started)
+		<-w.release
+	})
+	return len(p), nil
+}
+
+func TestABlockedWriteDoesNotBlockClose(t *testing.T) {
+	w := &blockingWriter{started: make(chan struct{}), release: make(chan struct{})}
+	r := &acpRun{name: "opencode", in: w, stopped: make(chan struct{})}
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		r.write(request{JSONRPC: "2.0", Method: "blocked"})
+	}()
+	<-w.started
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		r.Close()
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(100 * time.Millisecond):
+		close(w.release)
+		<-writeDone
+		t.Fatal("a blocked stdin write also blocked Close")
+	}
+	close(w.release)
+	<-writeDone
 }
 
 // The Gates are declared, and read is not among them.

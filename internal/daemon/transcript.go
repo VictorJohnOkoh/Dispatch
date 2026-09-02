@@ -32,6 +32,10 @@ type transcript struct {
 	// configuration names it.
 	limit int64
 
+	// path is the file this transcript is, kept so that a closed transcript can
+	// still say where its bytes went.
+	path string
+
 	mu      sync.Mutex
 	file    *os.File
 	written int64
@@ -44,11 +48,12 @@ type transcript struct {
 // newTranscript opens the transcript for one Session in the directory the Event
 // log lives in.
 func newTranscript(dir string, id event.SessionID) (*transcript, error) {
-	f, err := os.Create(transcriptPath(dir, id))
+	path := transcriptPath(dir, id)
+	f, err := os.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: no transcript for the Session %s: %w", id, err)
 	}
-	return &transcript{limit: transcriptLimit, file: f}, nil
+	return &transcript{limit: transcriptLimit, path: path, file: f}, nil
 }
 
 func transcriptPath(dir string, id event.SessionID) string {

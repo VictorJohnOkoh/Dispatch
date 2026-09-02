@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
@@ -82,7 +83,15 @@ const (
 
 const indexHint = "Dispatch. Open /hosts/{host}/sessions/{session} to watch a Session.\n"
 
-type client struct{ hosts Hosts }
+type client struct {
+	hosts Hosts
+
+	// last is what each Host said the last time it answered, keyed by Host id. It
+	// is the only thing the Hub keeps about a Host between reads, and it is what
+	// lets a Host that stops answering keep its Sessions on screen.
+	mu   sync.Mutex
+	last map[string]answer
+}
 
 func New(hosts Hosts) http.Handler {
 	c := &client{hosts: hosts}
@@ -133,6 +142,7 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 		Rail:      rail,
 		Rows:      rows(events),
 		Events:    payloads(events),
+		Approvals: payloads(c.approvals(r.Context(), rail)),
 	}); err != nil {
 		// The header has gone and half a page with it, so there is nothing left to
 		// answer with. The operational log is the Daemon's; the Hub's is stderr.
@@ -179,6 +189,9 @@ type view struct {
 	// that shipped only the rows would have to fetch the Session again to know what
 	// it was already showing.
 	Events template.JS
+
+	// Approvals is every open question from a Session that is not on screen.
+	Approvals template.JS
 }
 
 // answering is the rail's view of one Host, so the header and the rail rows agree
@@ -198,8 +211,8 @@ func answering(rail []entry, host string) bool {
 // It is safe in a script element because encoding/json escapes <, > and & even
 // inside a payload it is passing through, so nothing a Harness writes can close
 // the tag.
-func payloads(events []protocol.Event) template.JS {
-	raw, err := json.Marshal(events)
+func payloads(value any) template.JS {
+	raw, err := json.Marshal(value)
 	if err != nil {
 		// Nothing here can fail that the page can do anything about, and an empty
 		// list is a page that folds from the stream alone.

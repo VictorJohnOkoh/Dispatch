@@ -26,7 +26,7 @@ function draw(kind, p) {
       // them "null" would read as an argument whose value is null.
       return {
         title: `Tool call: ${p.name}`,
-        detail: `${p.title} ${p.args ? JSON.stringify(p.args) : ""}`.trim(),
+        detail: `${p.title} ${p.args == null ? "" : JSON.stringify(p.args)}`.trim(),
         inset: true,
       };
     case "ApprovalRequested":

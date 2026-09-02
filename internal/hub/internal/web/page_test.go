@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,11 +16,15 @@ import (
 // pageUnder loads fold.js, render.js and page.js over the stub page, runs the
 // test's own script, and decodes what it printed.
 func pageUnder(t *testing.T, script string, into any) {
+	pageUnderSetup(t, "", script, into)
+}
+
+func pageUnderSetup(t *testing.T, setup, script string, into any) {
 	t.Helper()
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js", "page.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -27,17 +32,47 @@ func pageUnder(t *testing.T, script string, into any) {
 		program.WriteString(string(source))
 		program.WriteString("\n")
 	}
+	program.WriteString(setup)
+	program.WriteString("\n")
+	source, err := os.ReadFile("page.js")
+	if err != nil {
+		t.Fatalf("page.js: %v", err)
+	}
+	program.WriteString(string(source))
+	program.WriteString("\n")
 	// The script runs after the page's own load() has settled, because that one is
 	// asynchronous and everything a test asserts on comes after it.
 	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
 
-	cmd := exec.Command(node, "-e", program.String())
+	path := filepath.Join(t.TempDir(), "page.js")
+	if err := os.WriteFile(path, []byte(program.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, path)
 	said, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, said)
 	}
 	if err := json.Unmarshal(said, into); err != nil {
 		t.Fatalf("node said %q: %v", said, err)
+	}
+}
+
+// The first paint carries questions that are already open on other Sessions.
+// Without this, a reload can hide the only path the user has to answer one.
+func TestAQuestionAlreadyOpenAtFirstPaintRaisesAToast(t *testing.T) {
+	var got []string
+	pageUnderSetup(t, `
+document.getElementById("approvals").textContent = JSON.stringify([
+  {host: "attic", session: "s-9", kind: "ApprovalRequested",
+    payload: {toolCallId: "c1", title: "write out.txt"}},
+]);
+`, `
+console.log(JSON.stringify(dom.toasts.children.map((t) => t.textContent)));
+`, &got)
+
+	if len(got) != 1 || !strings.Contains(got[0], "s-9 on attic") || !strings.Contains(got[0], "write out.txt") {
+		t.Errorf("the first paint raised %v", got)
 	}
 }
 
@@ -479,22 +514,29 @@ raise("attic", "s-9", "c2");
 opened.send("event", {host: "attic", session: "s-9", seq: 3, kind: "SessionEnded", payload: {reason: "stopped"}});
 seen.push(dom.toasts.children.length);
 
-// A resync says what this page holds is not to be trusted, toasts included.
-raise("shed", "s-3", "c3");
+// A resync discards only questions from that Host. Every other Host on the merged
+// stream keeps its own log and its open questions.
+raise("attic", "s-9", "c3");
+raise("shed", "s-3", "c4");
 served.set("0", []);
+opened.send("resync", {host: "attic"});
+seen.push(dom.toasts.children.length);
+
+// A resync for the primary Host also leaves questions from other Hosts alone.
 opened.send("resync", {host: "desk"});
 seen.push(dom.toasts.children.length);
 
 console.log(JSON.stringify(seen));
 `, &got)
 
-	want := []string{"the Tool Call ended", "the Session ended", "a resync"}
+	want := []string{"the Tool Call ended", "the Session ended", "another Host's resync", "the primary Host's resync"}
+	left := []int{0, 0, 1, 1}
 	if len(got) != len(want) {
 		t.Fatalf("the page answered %v", got)
 	}
 	for i, why := range want {
-		if got[i] != 0 {
-			t.Errorf("%d toasts are still up after %s", got[i], why)
+		if got[i] != left[i] {
+			t.Errorf("%d toasts are up after %s, want %d", got[i], why, left[i])
 		}
 	}
 }
@@ -537,5 +579,193 @@ console.log(JSON.stringify({ready, down, after: page.get("desk").row.textContent
 	}
 	if got.After != got.Down {
 		t.Errorf("a late vendors frame rewrote a Down Host's row: %q", got.After)
+	}
+}
+
+// Down dims and stamps, live as well as on the server. A Host that goes Down while
+// this page is open would otherwise keep content that claims to be current.
+func TestALiveHostGoingDownStampsItsCard(t *testing.T) {
+	var got struct {
+		Down string `json:"down"`
+		Back string `json:"back"`
+		Told string `json:"told"`
+	}
+	hostsUnder(t, `
+opened.send("host", {host: "desk", state: "Down", cause: "unreachable"});
+const down = page.get("desk").who.textContent;
+
+// Ready again, and the card is current: nothing on it says how old it is.
+opened.send("host", {host: "desk", state: "Ready"});
+const back = page.get("desk").who.textContent;
+
+// A frame that carries the Hub's own time is stamped with that rather than with
+// when this page was drawn.
+opened.send("host", {host: "attic", state: "Down", since: "2026-09-02T08:30:00Z"});
+console.log(JSON.stringify({down, back, told: page.get("attic").who.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Down, "last answered at 2026-09-02T09:00:00Z") {
+		t.Errorf("the card that went Down reads %q, and it has to say how old it is", got.Down)
+	}
+	if strings.Contains(got.Back, "last answered at") {
+		t.Errorf("the card is current again and still reads %q", got.Back)
+	}
+	if !strings.Contains(got.Told, "last answered at 2026-09-02T08:30:00Z") {
+		t.Errorf("the card reads %q, and the Hub told it when it last heard from that Host", got.Told)
+	}
+}
+
+func TestHostFramesShowStateCauseMarkAndStaleStamp(t *testing.T) {
+	var got struct {
+		Connecting struct {
+			State string `json:"state"`
+			Mark  string `json:"mark"`
+			Stale string `json:"stale"`
+		} `json:"connecting"`
+		Down struct {
+			State string `json:"state"`
+			Cause string `json:"cause"`
+			Mark  string `json:"mark"`
+			Stale string `json:"stale"`
+		} `json:"down"`
+	}
+	pageUnder(t, `
+opened.send("host", {host: "desk", state: "Connecting"});
+const connecting = {
+  state: dom.hostStateElement.textContent,
+  mark: dom.hostMarkElement.textContent,
+  stale: dom.staleElement.textContent,
+};
+opened.send("host", {host: "desk", state: "Down", cause: "no-daemon", at: 1788345900000000});
+const down = {
+  state: dom.hostStateElement.textContent,
+  cause: dom.hostCauseElement.textContent,
+  mark: dom.hostMarkElement.textContent,
+  stale: dom.staleElement.textContent,
+};
+console.log(JSON.stringify({connecting, down}));
+`, &got)
+
+	if got.Connecting.State != "Connecting" || got.Connecting.Mark != "reconnecting" || got.Connecting.Stale != "" {
+		t.Errorf("Connecting drew %+v", got.Connecting)
+	}
+	if got.Down.State != "Down" || got.Down.Cause != "no-daemon" || got.Down.Mark != "" {
+		t.Errorf("Down drew %+v", got.Down)
+	}
+	if !strings.Contains(got.Down.Stale, "Stale") {
+		t.Errorf("Down has no visible Stale stamp: %q", got.Down.Stale)
+	}
+}
+
+func TestConnectingHostsStayAtFullStrength(t *testing.T) {
+	css, err := os.ReadFile("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(css), `body[data-host-state="Connecting"] { opacity`) ||
+		strings.Contains(string(css), `body[data-host-state="Down"], body[data-host-state="Connecting"]`) {
+		t.Fatal("Connecting is dimmed with Down")
+	}
+}
+
+func TestVendorFramesReplaceTheVisibleVendorState(t *testing.T) {
+	var got struct {
+		First  string `json:"first"`
+		Second string `json:"second"`
+	}
+	pageUnder(t, `
+opened.send("vendors", {host: "desk", vendors: [{
+  kind: "ollama", base: "http://127.0.0.1:11434", reachable: true,
+  resident: [{modelId: "qwen3", loadedContext: 8192, vram: 1024}],
+}]});
+const first = dom.vendorsElement.textContent;
+opened.send("vendors", {host: "desk", vendors: [{
+  kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: [],
+}]});
+console.log(JSON.stringify({first, second: dom.vendorsElement.textContent}));
+`, &got)
+
+	if !strings.Contains(got.First, "ollama") || !strings.Contains(got.First, "qwen3") {
+		t.Errorf("the first Vendor frame drew %q", got.First)
+	}
+	if !strings.Contains(got.Second, "ollama") || !strings.Contains(got.Second, "unreachable") {
+		t.Errorf("the changed Vendor frame drew %q", got.Second)
+	}
+	if strings.Contains(got.Second, "qwen3") {
+		t.Errorf("the changed Vendor frame kept the old resident Model: %q", got.Second)
+	}
+}
+
+func TestAFailedResyncKeepsTheTranscript(t *testing.T) {
+	var got struct {
+		Rows int    `json:"rows"`
+		Text string `json:"text"`
+	}
+	pageUnder(t, `
+served.set("0", "refused");
+opened.send("resync", {host: "desk"});
+setTimeout(() => console.log(JSON.stringify({
+  rows: dom.transcript.children.length,
+  text: dom.transcript.children[0]?.textContent ?? "",
+})), 0);
+`, &got)
+
+	if got.Rows != 1 || !strings.Contains(got.Text, "Session started") {
+		t.Errorf("a failed resync left %d rows saying %q", got.Rows, got.Text)
+	}
+}
+
+func TestAnEventThatArrivesDuringAResyncSurvivesTheCommit(t *testing.T) {
+	var got struct {
+		Rows  int    `json:"rows"`
+		State string `json:"state"`
+	}
+	pageUnder(t, `
+let answer;
+// The rail reads through the same fetch, and this test holds the transcript's
+// read open, so the rail keeps the fixture's answer.
+const rail = globalThis.fetch;
+globalThis.fetch = (url) => url.startsWith("/rail/") ? rail(url) : new Promise((resolve) => {
+  answer = () => resolve({ok: true, json: async () => ({events: []})});
+});
+opened.send("resync", {host: "desk"});
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionReady", payload: {model: "qwen3"}});
+answer();
+setTimeout(() => console.log(JSON.stringify({
+  rows: dom.transcript.children.length,
+  state: dom.stateElement.textContent,
+})), 0);
+`, &got)
+
+	if got.Rows != 1 || got.State != "Idle" {
+		t.Errorf("the resync commit left %d rows and State %q", got.Rows, got.State)
+	}
+}
+
+// The stylesheet draws Asking and Ended off one attribute, and the live update
+// has to write that same one. An update that wrote another name would leave the
+// pill's text right and its styling stuck on whatever the first paint drew.
+func TestTheLiveStateWritesTheAttributeTheStylesheetReads(t *testing.T) {
+	var got string
+	pageUnder(t, `
+const frames = [
+  {seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}},
+  {seq: 2, kind: "PromptSubmitted", payload: {text: "go"}},
+  {seq: 3, kind: "ToolCallRequested", payload: {toolCallId: "c1", name: "bash"}},
+  {seq: 4, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "run it"}},
+];
+for (const f of frames) opened.send("event", {host: "desk", session: "s-1", ...f});
+console.log(JSON.stringify(dom.stateElement.dataset.sessionState));
+`, &got)
+
+	if got != "Asking" {
+		t.Errorf("the state pill carries %q, and the stylesheet reads data-session-state", got)
+	}
+	css, err := files.ReadFile("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), `[data-session-state^="Asking"]`) {
+		t.Error("the stylesheet no longer draws Asking off data-session-state, so the page and it have parted")
 	}
 }

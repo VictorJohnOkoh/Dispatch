@@ -133,8 +133,8 @@ func TestALiveConnectionThatGoesQuietEnds(t *testing.T) {
 		client, server := net.Pipe()
 		go func() {
 			bufio.NewReader(server).ReadString('\n')
-			// A Daemon that answered and then stopped beating.
-			fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+			// A Daemon that completed its Handshake and then stopped beating.
+			fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nevent: hello\ndata: {\"protocol\":1}\n\n")
 			<-time.After(10 * time.Second)
 			server.Close()
 		}()
@@ -166,7 +166,7 @@ func TestAFlappingHostDoesNotResetTheBackoff(t *testing.T) {
 		go func() {
 			bufio.NewReader(server).ReadString('\n')
 			// Ready, and gone again at once. That is a flap.
-			fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+			fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nevent: hello\ndata: {\"protocol\":1}\n\n")
 			server.Close()
 		}()
 		return client, nil

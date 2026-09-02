@@ -82,7 +82,7 @@ const (
 // can draw the pair on a Session row: Session State comes from Events, and this
 // comes from nowhere but here.
 type HostStateFrame struct {
-	Host  string    `json:"host"`
+	Host  string    `json:"host,omitempty"`
 	State HostState `json:"state"`
 	Cause Cause     `json:"cause,omitempty"`
 }
