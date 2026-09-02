@@ -131,7 +131,7 @@ func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	}
 }
 
-func TestOpenCodeIsNotServedBeforeItsApprovalPolicyLands(t *testing.T) {
+func TestOpenCodeIsServedWithItsApprovalPolicy(t *testing.T) {
 	var lines strings.Builder
 	got, err := newHarnesses([]config.HarnessProfile{
 		{Name: "passthrough"},
@@ -140,10 +140,10 @@ func TestOpenCodeIsNotServedBeforeItsApprovalPolicyLands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "passthrough" {
+	if len(got) != 2 || got[0].Name != "passthrough" || got[1].Name != "opencode" {
 		t.Errorf("served Harnesses = %v", got)
 	}
-	if !strings.Contains(lines.String(), "harness=opencode") {
+	if lines.Len() != 0 {
 		t.Errorf("warning = %q", lines.String())
 	}
 }

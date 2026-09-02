@@ -505,6 +505,24 @@ func (r *sessions) kindOf(s *Session, id string) (event.ToolKind, bool) {
 	return 0, false
 }
 
+// ruleFor is the Approval Policy slot that applied when this Tool Call was
+// requested. A later policy change applies only to later Tool Calls.
+func (r *sessions) ruleFor(s *Session, id string) (event.Rule, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, e := range s.events {
+		if e.Kind != event.KindToolCallRequested {
+			continue
+		}
+		p, ok := e.Payload.(*event.ToolCallRequested)
+		if !ok || p.ToolCallID != id {
+			continue
+		}
+		return session.Policy(s.events[:i+1])[p.ToolKind], true
+	}
+	return "", false
+}
+
 // policy is the Approval Policy this Session holds now, folded from its own Events.
 func (r *sessions) policy(s *Session) event.Policy {
 	r.mu.Lock()

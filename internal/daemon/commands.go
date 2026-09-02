@@ -238,34 +238,37 @@ func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 		logRefused(w)
 		return
 	}
-	d.sessions.tell(s, req.ToolCallID, req.Decision)
-
-	// The flip comes after the decision, so this question was answered by the user
-	// and the new policy is what the next Tool Call of that class meets.
+	// The decision stays the user's, but the new policy is durable before the
+	// Adapter is released and can request the next Tool Call of this class.
 	if req.Always && req.Decision == event.DecisionAllowed {
-		d.flip(s, req.ToolCallID)
+		if err := d.flip(s, req.ToolCallID); err != nil {
+			logRefused(w)
+			return
+		}
 	}
+	d.sessions.tell(s, req.ToolCallID, req.Decision)
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
 // flip is "always allow": the slot this Tool Call belongs to becomes auto, and the
 // whole policy that produced goes in the log, because every value the Approval
 // Policy ever holds is an ApprovalPolicySet.
-func (d *Daemon) flip(s *Session, id string) {
+func (d *Daemon) flip(s *Session, id string) error {
 	kind, ok := d.sessions.kindOf(s, id)
 	if !ok {
-		return
+		return fmt.Errorf("daemon: no Tool Call %q to change the Approval Policy for", id)
 	}
 	policy := d.sessions.policy(s)
 	// A slot that is already auto has nothing to flip, and the policy has not
 	// changed, so writing it again would put a value in the log that nothing set.
 	if policy[kind] == event.RuleAuto {
-		return
+		return nil
 	}
 	policy[kind] = event.RuleAuto
-	d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
+	_, err := d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
 		Policy: policy, SetBy: event.SetByUser,
 	})
+	return err
 }
 
 // allow finds the Session the path names and folds it. It answers the request
