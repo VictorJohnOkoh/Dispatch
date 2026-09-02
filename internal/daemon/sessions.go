@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -113,6 +112,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		started: time.Now().UTC(),
 		cancel:  cancel,
 	}
+	s.sink = &sink{d: d, s: s}
 	// The Session joins the registry only once its first Event is in the log. A
 	// Session with no Event folds to Starting, so one added ahead of a write that
 	// failed would hold the Host's one slot for as long as the Daemon runs.
@@ -153,7 +153,7 @@ func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vend
 		Vendor:  vendor.Endpoint(),
 		Dir:     s.dir,
 		Spawn:   d.spawner(s, h),
-	}, &sink{d: d, s: s})
+	}, s.sink)
 	if err != nil {
 		d.endFailed(s, event.ErrHarnessFailed, err.Error())
 		return
@@ -180,7 +180,7 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 		return
 	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
-	d.closeCalls(s, nil)
+	s.sink.end(nil)
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
 	// A Harness that died still has a group, and on Windows that group is a handle
 	// that a child of its own may still be living inside.
@@ -202,37 +202,26 @@ func (d *Daemon) ladder(s *Session, run harness.Run) {
 			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
 		})
 	}
-	d.closeCalls(s, held)
+	s.sink.end(held)
 	if run != nil {
 		run.Close()
 	}
 	d.kill(s)
 }
 
-// closeCalls writes the ToolCallEnded every open Tool Call is owed. Every Tool
-// Call ends, so a Session that ended with one open would break that promise for
-// as long as the log exists. A call whose question was just refused ended because
-// of that refusal; any other was in flight and nothing observed its result.
-func (d *Daemon) closeCalls(s *Session, refused []string) {
-	for _, call := range d.sessions.openCalls(s) {
-		outcome := event.OutcomeUnknown
-		if slices.Contains(refused, call) {
-			outcome = event.OutcomeRefused
-		}
-		d.write(s, event.KindToolCallEnded, &event.ToolCallEnded{ToolCallID: call, Outcome: outcome})
-	}
-}
-
-// kill is the ladder's last three steps against whatever process this Session has.
-// A Session whose Harness spawns none, or one that failed before it spawned, has
-// nothing here to do.
+// kill is the ladder's last three steps against whatever process this Session has,
+// and it closes that process's transcript. A Session whose Harness spawns none, or
+// one that failed before it spawned, has neither and nothing here to do.
 func (d *Daemon) kill(s *Session) {
-	p := d.sessions.process(s)
+	p, raw := d.sessions.process(s)
 	if p == nil {
 		return
 	}
 	if err := p.stop(d.stopWait); err != nil {
 		d.log.Error("the Harness process tree may have outlived its Session", "session", s.id, "err", err)
+	}
+	if err := raw.Close(); err != nil {
+		d.log.Error("the Session's transcript is short of what the Harness said", "session", s.id, "err", err)
 	}
 }
 
@@ -372,6 +361,11 @@ type Session struct {
 	// cancel ends the launch, the Run and every call either has in flight.
 	cancel context.CancelFunc
 
+	// sink is this Session's whole view of the Daemon, which the Adapter reports
+	// through and the Session's end closes. It is made with the Session and never
+	// replaced, so it is read without the registry mutex.
+	sink *sink
+
 	// run is the live Session the Adapter handed back, which the Daemon holds
 	// because it is the Daemon that prompts and stops it. It is nil until the
 	// Harness is up, and stays nil for a launch that failed.
@@ -380,6 +374,10 @@ type Session struct {
 	// proc is the Harness process, which the Daemon owns and the Adapter never
 	// sees. It is nil for a Harness that spawns none, and passthrough is one.
 	proc *harnessProcess
+
+	// raw is where that process's bytes are kept. A Session with no process has no
+	// transcript, because a transcript records what a Harness said.
+	raw *transcript
 
 	// events is this Session's own Events, in Seq order, which is what the fold
 	// reads. Deltas are not Events and never land here.
@@ -463,16 +461,26 @@ func (r *sessions) setRun(s *Session, run harness.Run) {
 	s.run = run
 }
 
-func (r *sessions) setProcess(s *Session, p *harnessProcess) {
+// setProcess keeps the Harness process and its transcript, and reports whether the
+// Session still wants them. A stop that landed while the Harness was starting has
+// already run its kill and found no process, so the spawn takes the process back
+// rather than leaving one nobody owns.
+func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s.proc = p
+	if s.ending {
+		return false
+	}
+	s.proc, s.raw = p, raw
+	return true
 }
 
-func (r *sessions) process(s *Session) *harnessProcess {
+// process is the Harness process and the transcript its output is going to. They
+// are read together because they end together.
+func (r *sessions) process(s *Session) (*harnessProcess, *transcript) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return s.proc
+	return s.proc, s.raw
 }
 
 // record keeps one Event against the Session it belongs to, so the fold has

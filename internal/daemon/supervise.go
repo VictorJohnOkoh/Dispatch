@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -42,14 +43,27 @@ func (d *Daemon) spawner(s *Session, h *Harness) harness.Spawner {
 		if h.Exe == "" {
 			return harness.Pipes{}, fmt.Errorf("daemon: the Harness %q names no executable to spawn", h.Name)
 		}
-		// The tail is where the drain writes. It is what an Error Event quotes when
-		// the Harness dies, and the capped transcript will take it over.
-		kept := &stderrTail{}
-		p, pipes, err := spawn(h.Exe, s.dir, l, kept)
+		raw, err := newTranscript(d.transcripts, s.id)
 		if err != nil {
 			return harness.Pipes{}, err
 		}
-		d.sessions.setProcess(s, p)
+		// stderr goes to both. The tail is what an Error Event quotes when the Harness
+		// dies, and the transcript is where the whole of it is kept. The Adapter reads
+		// stdout through the transcript as well, so what it drops as output no Event
+		// Kind covers is still written down somewhere.
+		kept := &stderrTail{}
+		p, pipes, err := spawn(h.Exe, s.dir, l, io.MultiWriter(kept, raw), raw)
+		if err != nil {
+			raw.Close()
+			return harness.Pipes{}, err
+		}
+		// A stop that landed while this was starting has run its kill already and found
+		// no process. The spawn owns what it made, so it takes it back here.
+		if !d.sessions.setProcess(s, p, raw) {
+			p.stop(d.stopWait)
+			raw.Close()
+			return harness.Pipes{}, errors.New("daemon: the Session was stopped while its Harness was starting")
+		}
 		go d.watchExit(s, p, kept)
 		return pipes, nil
 	}
@@ -70,10 +84,12 @@ func (d *Daemon) watchExit(s *Session, p *harnessProcess, kept *stderrTail) {
 type harnessProcess struct {
 	cmd   *exec.Cmd
 	in    io.WriteCloser
+	out   *os.File
 	group *group
 
 	reaped  chan struct{} // closed once Wait has returned
 	drained chan struct{} // closed once stderr has reached EOF
+	read    chan struct{} // closed once the Adapter has read stdout to the end
 	status  error         // what Wait said, read only after reaped is closed
 
 	closeIn sync.Once
@@ -87,7 +103,7 @@ type harnessProcess struct {
 //
 // The Session's context is not what kills this. exec.CommandContext kills one
 // process, and step 6 of the ladder kills the group.
-func spawn(exe, dir string, l harness.Launch, stderr io.Writer) (*harnessProcess, harness.Pipes, error) {
+func spawn(exe, dir string, l harness.Launch, stderr, raw io.Writer) (*harnessProcess, harness.Pipes, error) {
 	if !filepath.IsAbs(exe) {
 		return nil, harness.Pipes{}, fmt.Errorf("daemon: the Harness path %q is not absolute", exe)
 	}
@@ -137,12 +153,45 @@ func spawn(exe, dir string, l harness.Launch, stderr io.Writer) (*harnessProcess
 	}
 
 	p := &harnessProcess{
-		cmd: cmd, in: in.write, group: g,
-		reaped: make(chan struct{}), drained: make(chan struct{}),
+		cmd: cmd, in: in.write, out: out.read, group: g,
+		reaped: make(chan struct{}), drained: make(chan struct{}), read: make(chan struct{}),
 	}
 	go p.drain(errs.read, stderr)
 	go p.reap()
-	return p, harness.Pipes{In: in.write, Out: out.read}, nil
+	return p, harness.Pipes{In: in.write, Out: p.tee(raw)}, nil
+}
+
+// tee is stdout as the Adapter reads it. Every byte the Adapter takes is copied to
+// the transcript on the way past, and read closes when the Adapter reaches the end,
+// which is what the stop waits for before it closes the file underneath it.
+//
+// io.TeeReader would do the copying and say nothing about when the copying stopped,
+// and the last thing a dying Harness said is exactly what arrives in that gap.
+func (p *harnessProcess) tee(raw io.Writer) io.Reader {
+	if raw == nil {
+		close(p.read)
+		return p.out
+	}
+	return &teed{from: p.out, into: raw, done: p.read}
+}
+
+// teed is one stdout, on its way to both the Adapter and the transcript.
+type teed struct {
+	from io.Reader
+	into io.Writer
+	done chan struct{}
+	once sync.Once
+}
+
+func (t *teed) Read(b []byte) (int, error) {
+	n, err := t.from.Read(b)
+	if n > 0 {
+		t.into.Write(b[:n])
+	}
+	if err != nil {
+		t.once.Do(func() { close(t.done) })
+	}
+	return n, err
 }
 
 // drain reads stderr for the life of the process and writes it where the Daemon
@@ -194,14 +243,25 @@ func (p *harnessProcess) stop(wait time.Duration) error {
 			p.cmd.Process.Kill()
 		}
 		<-p.reaped
-		// A descendant that outlived the kill can still hold stderr open, and a stop
-		// that waits for an EOF that is not coming is a stop that does not finish.
-		select {
-		case <-p.drained:
-		case <-time.After(wait):
-		}
+		// A descendant that outlived the kill can still hold either pipe open, and a
+		// stop that waits for an EOF that is not coming is a stop that does not finish.
+		waitFor(p.drained, wait)
+		// The caller closes the transcript next, so the Adapter's last read of stdout
+		// has to have reached it by now.
+		waitFor(p.read, wait)
+		// Nothing reads stdout after this. The read end is the Daemon's, and the
+		// Adapter it was lent to is never given a way to close it.
+		p.out.Close()
 	})
 	return p.killed
+}
+
+// waitFor is a channel with a deadline on it, which is every wait in the ladder.
+func waitFor(done <-chan struct{}, wait time.Duration) {
+	select {
+	case <-done:
+	case <-time.After(wait):
+	}
 }
 
 // failure is what an unprompted exit is written into the log as. A Harness in RPC
@@ -213,10 +273,7 @@ func (p *harnessProcess) stop(wait time.Duration) error {
 // that moment.
 func (p *harnessProcess) failure(kept *stderrTail, wait time.Duration) string {
 	<-p.reaped
-	select {
-	case <-p.drained:
-	case <-time.After(wait):
-	}
+	waitFor(p.drained, wait)
 	stderr := kept.String()
 	if p.status == nil {
 		return "the Harness exited on its own, which is a failure whatever the exit code" + tail(stderr)

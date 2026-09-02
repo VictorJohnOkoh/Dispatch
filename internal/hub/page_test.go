@@ -143,7 +143,7 @@ func hostWithATranscript(t *testing.T) (http.Handler, uint64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := daemon.New(slog.New(slog.NewTextHandler(io.Discard, nil)), events, root, nil, nil)
+	d := daemon.New(slog.New(slog.NewTextHandler(io.Discard, nil)), events, dir, root, nil, nil)
 	return hub.New([]hostset.Host{{ID: "desk"}}, pipeDialer{
 		handlers: map[hostset.HostID]http.Handler{"desk": d.Handler()},
 	}).Handler(), open.Seq

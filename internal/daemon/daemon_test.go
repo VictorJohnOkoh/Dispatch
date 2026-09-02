@@ -39,12 +39,13 @@ func (l *lines) String() string {
 // never start a Session. The log is real because Serve sweeps it at boot.
 func plain(t *testing.T, adapters []vendors.Adapter, log *slog.Logger) *Daemon {
 	t.Helper()
-	events, err := eventlog.Open(filepath.Join(t.TempDir(), "events.db"))
+	dir := t.TempDir()
+	events, err := eventlog.Open(filepath.Join(dir, "events.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { events.Close() })
-	return New(log, events, workspace.Root{}, adapters, nil)
+	return New(log, events, dir, workspace.Root{}, adapters, nil)
 }
 
 var addrLine = regexp.MustCompile(`addr=(\S+)`)

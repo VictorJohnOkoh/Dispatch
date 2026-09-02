@@ -53,7 +53,7 @@ func newHost(t *testing.T, extra ...Harness) *host {
 	chat := &chatFake{}
 	written := &lines{}
 	harnesses := append([]Harness{{Name: "passthrough", Adapter: harness.NewPassthrough(chat)}}, extra...)
-	d := New(slog.New(slog.NewTextHandler(written, nil)), events, root, []vendors.Adapter{f}, harnesses)
+	d := New(slog.New(slog.NewTextHandler(written, nil)), events, dir, root, []vendors.Adapter{f}, harnesses)
 	d.vendors.pollAll(t.Context())
 
 	return &host{Daemon: d, root: dir, logPath: path, vendor: f, chat: chat, lines: written}
