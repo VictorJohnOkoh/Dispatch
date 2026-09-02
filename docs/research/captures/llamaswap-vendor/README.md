@@ -86,9 +86,20 @@ decode that body. And a bare `GET /props` is HTTP 404 with `no model id could be
 identified`, because llama-swap fronts several Models and cannot tell which one is
 meant — the per-Model view is the only one that exists here.
 
-## What this capture does not settle
+## Why no adapter code path sets `ttl`
 
-llama-swap's config on this Host carries `ttl: 300` on every Model, and ADR 0002
-requires `ttl: 0` so that a second evictor cannot surprise a Session idle between
-prompts. That is Host setup rather than something the Daemon calls, and the
-`Load` this adapter makes does not change it.
+`ttl` is a per-Model key in llama-swap's `config.yaml` and nothing else. The
+binary takes it from a file (`-config`, `-config-dir`, `-watch-config`) and
+serves no endpoint that reads or writes it: the routes are `/v1/models`,
+`/running`, `/upstream/`, `/health`, `/metrics`, `/logs`, `/api/models/unload`,
+`/api/models/unload/:model_id` and the two profile calls. So the adapter can
+neither set `ttl: 0` at `Load` nor detect a Host that ignores the rule.
+
+This is Host setup, and this Host now meets it. Its config carried `ttl: 300` on
+all four Models when these bodies were recorded and now carries `ttl: 0`, which
+is what ADR 0002 requires so that a second evictor cannot surprise a Session idle
+between prompts. Omitting the key does the same thing, and `0` is written out so
+that a reader sees a decision rather than an absence.
+
+The bodies above are unaffected. `ttl` changes when llama-swap unloads on its
+own, not what any of these calls answer.
