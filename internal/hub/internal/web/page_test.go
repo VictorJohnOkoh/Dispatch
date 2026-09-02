@@ -344,7 +344,10 @@ for (const f of [
 console.log(JSON.stringify(seen));
 `, &got)
 
-	want := []string{"Connecting Connecting", "Down Down unreachable", "Incompatible Incompatible", "Ready Ready"}
+	// An Incompatible pill names the versions rather than the state alone, because
+	// the user fixes it by updating a machine. TestAnIncompatibleCardNamesBothVersions
+	// is where that sentence is read.
+	want := []string{"Connecting Connecting", "Down Down unreachable", "Incompatible Incompatible: this Hub speaks 1, this Host speaks another", "Ready Ready"}
 	if len(got) != len(want) {
 		t.Fatalf("the card said %v", got)
 	}

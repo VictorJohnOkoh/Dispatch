@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,11 +20,33 @@ import (
 // connection opens. It runs on the Event stream, so these drive the stream: a
 // Daemon that refuses the version, and what the Hub does with the Host afterwards.
 
+// refusals is what an old Daemon did: how many times it was dialled, and the
+// request line and version header of the last dial. One reader and one writer
+// under one mutex, because a test asserts on both after the stream has said its
+// piece.
+type refusals struct {
+	mu    sync.Mutex
+	dials int
+	asked []string
+}
+
+func (r *refusals) saw(request string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.dials++
+	r.asked = append(r.asked, request)
+}
+
+func (r *refusals) seen() (int, []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dials, append([]string(nil), r.asked...)
+}
+
 // oldDaemon answers every stream with the refusal a Daemon that cannot serve the
-// Hub's version sends, and counts the connections it was asked for.
-func oldDaemon(dials *atomic.Int32, asked *sync.Map) dialFn {
+// Hub's version sends, and records what it was asked.
+func oldDaemon(seen *refusals) dialFn {
 	return func(context.Context, hostset.HostID) (net.Conn, error) {
-		dials.Add(1)
 		client, server := net.Pipe()
 		go func() {
 			defer server.Close()
@@ -42,7 +63,7 @@ func oldDaemon(dials *atomic.Int32, asked *sync.Map) dialFn {
 					request += " " + protocol.VersionHeader + ": " + strings.TrimSpace(value)
 				}
 			}
-			asked.Store(request, true)
+			seen.saw(request)
 			body := `{"reason":"protocol","detail":"this Daemon does not speak protocol 1","speaks":[2]}`
 			fmt.Fprintf(server, "HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
 		}()
@@ -54,8 +75,8 @@ func oldDaemon(dials *atomic.Int32, asked *sync.Map) dialFn {
 // retries one: a version mismatch cannot fix itself, so retrying would hammer a
 // Host that can never come Ready.
 func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.T) {
-	var dials atomic.Int32
-	h := quick([]Host{{ID: "desk"}}, oldDaemon(&dials, &sync.Map{}))
+	var seen refusals
+	h := quick([]Host{{ID: "desk"}}, oldDaemon(&seen))
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
 
@@ -80,10 +101,10 @@ func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.
 
 	// The backoff curve on this Hub is 5ms, so a Host still being retried would
 	// have dialled many times over.
-	after := dials.Load()
+	after, _ := seen.seen()
 	time.Sleep(200 * time.Millisecond)
-	if grew := dials.Load() - after; grew != 0 {
-		t.Errorf("an Incompatible Host was dialled %d more times, and the Hub never retries one", grew)
+	if now, _ := seen.seen(); now != after {
+		t.Errorf("an Incompatible Host was dialled %d more times, and the Hub never retries one", now-after)
 	}
 }
 
@@ -91,18 +112,14 @@ func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.
 // it. The stream is the connection presence is measured on, so a second thing to
 // open would be a second thing to keep alive and get wrong.
 func TestTheHandshakeRunsOnTheEventStream(t *testing.T) {
-	var asked sync.Map
-	h := quick([]Host{{ID: "desk"}}, oldDaemon(&atomic.Int32{}, &asked))
+	var seen refusals
+	h := quick([]Host{{ID: "desk"}}, oldDaemon(&seen))
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
 
 	watch(t, srv.URL, func(f protocol.HostStateFrame) bool { return f.State == protocol.Incompatible })
 
-	var requests []string
-	asked.Range(func(key, _ any) bool {
-		requests = append(requests, key.(string))
-		return true
-	})
+	_, requests := seen.seen()
 	if len(requests) != 1 {
 		t.Fatalf("the Hub asked this Host %v", requests)
 	}
@@ -121,7 +138,7 @@ func TestTheHandshakeRunsOnTheEventStream(t *testing.T) {
 // stream that ended would read to the Client as one that finished, and the browser
 // would reconnect at once and keep doing it.
 func TestAnIncompatibleHostDoesNotEndTheMergedStream(t *testing.T) {
-	h := quick([]Host{{ID: "desk"}}, oldDaemon(&atomic.Int32{}, &sync.Map{}))
+	h := quick([]Host{{ID: "desk"}}, oldDaemon(&refusals{}))
 	h.keepalive = 20 * time.Millisecond
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
@@ -156,7 +173,7 @@ func TestAnIncompatibleHostDoesNotEndTheMergedStream(t *testing.T) {
 // One Host being Incompatible does not stop another. The merged stream is the only
 // thing the Client has.
 func TestAnIncompatibleHostLeavesTheOthersWorking(t *testing.T) {
-	old := oldDaemon(&atomic.Int32{}, &sync.Map{})
+	old := oldDaemon(&refusals{})
 	h := quick([]Host{{ID: "desk"}, {ID: "attic"}}, dialFn(func(ctx context.Context, id hostset.HostID) (net.Conn, error) {
 		if id == "desk" {
 			return old(ctx, id)
@@ -183,7 +200,9 @@ func liveDaemon(context.Context, hostset.HostID) (net.Conn, error) {
 		defer server.Close()
 		bufio.NewReader(server).ReadString('\n')
 		fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nevent: hello\ndata: {\"protocol\":1}\n\n")
-		for range time.Tick(10 * time.Millisecond) {
+		beat := time.NewTicker(10 * time.Millisecond)
+		defer beat.Stop()
+		for range beat.C {
 			if _, err := fmt.Fprint(server, protocol.Keepalive); err != nil {
 				return
 			}

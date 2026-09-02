@@ -270,7 +270,9 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 	// what it said was that it speaks another version.
 	if resp.StatusCode == protocol.StatusUpgradeRequired {
 		var refusal protocol.Refusal
-		json.NewDecoder(io.LimitReader(resp.Body, refusalLimit)).Decode(&refusal)
+		// A refusal this Hub cannot read leaves Speaks empty, and the card names the
+		// half it does know. The status is the answer; the versions are the detail.
+		_ = json.NewDecoder(io.LimitReader(resp.Body, refusalLimit)).Decode(&refusal)
 		r.says(ctx, protocol.HostStateFrame{State: protocol.Incompatible, Speaks: refusal.Speaks}, out)
 		return 0
 	}

@@ -14,10 +14,12 @@ You need a Host that already runs a Daemon over SSH. `docs/install.md` puts one 
 bash scripts/handshake-builds.sh
 ```
 
-It writes `build/handshake/`: `dispatch-daemon` from the tree as it stands, `dispatch-hub` from a
-copy with `internal/protocol/protocol.go`'s `Version` raised by one, and a `record.txt` naming the
-commit and the two versions. Keep the `record.txt` of a run you report. Everything else is
-reproducible from it.
+It writes `build/handshake/`: `dispatch-daemon` from the commit as it stands, `dispatch-hub` from
+the same commit with `internal/protocol/protocol.go`'s `Version` raised by one, and a `record.txt`
+naming the commit and the two versions. Both binaries come from the commit and not from your working
+tree, so the commit is the whole record: the same two builds come back from it.
+
+Paste the `record.txt` line into the table at the end when you report a run.
 
 The Hub is the new build because that is the way skew happens: a machine you update is the one you
 are sitting at, and the Host across the room is the one still serving last month's version.
@@ -54,6 +56,8 @@ page: an `Incompatible` Host is never retried on its own, so the reload is what 
 
 ## Runs
 
+One row per run. The commit is what makes the two builds again.
+
 | date | commit | Daemon | Hub | result |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| 2026-09-02 | 88a4410 | protocol 1 | protocol 2 | built, not yet run against a Host |

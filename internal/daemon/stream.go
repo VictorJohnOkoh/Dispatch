@@ -154,8 +154,7 @@ func (d *Daemon) speaks(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	// The Hub marks this Host Incompatible and never dials it again, so this line
-	// is the only evidence the check ran: one of them and no more is the Hub having
-	// stopped rather than the Handshake having passed.
+	// is the only evidence the check ran.
 	d.log.Info("the Handshake was refused", "asked", asked, "speaks", protocol.ServedVersions)
 	refuse(w, protocol.StatusUpgradeRequired, protocol.Refusal{
 		Reason: protocol.ReasonProtocol,

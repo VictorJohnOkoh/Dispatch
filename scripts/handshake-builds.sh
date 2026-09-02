@@ -22,22 +22,29 @@ asked=$((served + 1))
 
 mkdir -p "$out"
 
-# The old Daemon: this tree, unchanged. It serves {served}.
-(cd "$root" && go build -o "$out/dispatch-daemon" ./cmd/dispatch)
-
-# The new Hub: the same tree with the version raised, so it requires a version
-# the Daemon above cannot serve. The copy is thrown away; only the binary is kept.
+# Both binaries come from the commit rather than from the working tree, so the
+# record below is enough to make them again. The copies are thrown away.
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 git -C "$root" archive HEAD | tar -x -C "$work"
+
+# The old Daemon: the commit, unchanged.
+(cd "$work" && go build -o "$out/dispatch-daemon" ./cmd/dispatch)
+
+# The new Hub: the same commit with the version raised, so it requires one the
+# Daemon above cannot serve.
 sed -i "s/^const Version = $served\$/const Version = $asked/" "$work/internal/protocol/protocol.go"
+if ! grep -q "^const Version = $asked\$" "$work/internal/protocol/protocol.go"; then
+  echo "the version was not raised, so both builds would speak $served" >&2
+  exit 1
+fi
 (cd "$work" && go build -o "$out/dispatch-hub" ./cmd/dispatch)
 
 cat > "$out/record.txt" <<RECORD
 Behaviour 12, the Handshake. Built $(date -u +%Y-%m-%dT%H:%M:%SZ) from $commit.
 
-dispatch-daemon  protocol $served, this tree unchanged. Runs on the Host.
-dispatch-hub     protocol $asked, the same tree with internal/protocol/protocol.go
+dispatch-daemon  protocol $served, the commit unchanged. Runs on the Host.
+dispatch-hub     protocol $asked, the same commit with internal/protocol/protocol.go
                  raised by one. Runs on the Client machine.
 
 Expect: the Host reads Incompatible and it is never retried.
