@@ -46,10 +46,12 @@ type script struct {
 	abandoned bool              // the test is over, so an unplayed frame is not a failure
 }
 
-// newScript reads one capture and hands back the two pipes a Spawner would.
+// newScript reads one capture and hands back the two pipes a Spawner would. The
+// capture is named from docs/research/captures, because the refusal was recorded
+// in a directory of its own.
 func newScript(t *testing.T, capture string) *script {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "research", "captures", "opencode", capture))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "research", "captures", capture))
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}

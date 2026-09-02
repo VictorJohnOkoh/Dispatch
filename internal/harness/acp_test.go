@@ -22,6 +22,10 @@ import (
 // this file is that.
 const swapModel = "qwen3.5-9b"
 
+// The Model the refusal capture ran on. A different Vendor and a later day than
+// the llama-swap runs, so it is named rather than shared.
+const rejectModel = "qwen3.5:9b"
+
 const configFile = "opencode.json"
 
 // recording is the Daemon as a test sees it. Every Sink call lands in one list, in
@@ -99,8 +103,16 @@ func (d *recording) WriteTextFile(path, content string) error {
 // was told.
 func replay(t *testing.T, capture, model string) (*recording, *script) {
 	t.Helper()
+	return replayDeciding(t, capture, model, event.DecisionAllowed)
+}
+
+// replayDeciding is replay with the Daemon's answer to a gate chosen, because the
+// refusal capture was recorded against a Daemon that said no.
+func replayDeciding(t *testing.T, capture, model string, decision event.Decision) (*recording, *script) {
+	t.Helper()
 	s := newScript(t, capture)
 	d := newRecording()
+	d.decide = decision
 
 	run, err := NewOpenCode().Start(t.Context(), SessionSpec{
 		Session: "s-1",
@@ -132,7 +144,7 @@ func replay(t *testing.T, capture, model string) (*recording, *script) {
 // The read run, which is where OpenCode's read exemption shows: two reads, both
 // ending, and the Daemon never asked about either.
 func TestOpenCodeNeverAsksAboutReads(t *testing.T) {
-	d, _ := replay(t, "llamaswap/read-frames.jsonl", swapModel)
+	d, _ := replay(t, "opencode/llamaswap/read-frames.jsonl", swapModel)
 
 	if len(d.asked) != 0 {
 		t.Errorf("the Daemon was asked about %v, and a read is never gated", d.asked)
@@ -147,7 +159,7 @@ func TestOpenCodeNeverAsksAboutReads(t *testing.T) {
 // network. Reasoning, AssistantMessage, ToolCallRequested, ToolCallEnded and
 // PromptCompleted.
 func TestTheFiveHarnessKindsComeOutOfTheCapture(t *testing.T) {
-	d, _ := replay(t, "llamaswap/execute-frames.jsonl", swapModel)
+	d, _ := replay(t, "opencode/llamaswap/execute-frames.jsonl", swapModel)
 
 	said := d.said()
 	for _, kind := range []string{"Reasoning(", "Message(", "ToolCallRequested(", "ToolCallEnded(", "Completed("} {
@@ -164,7 +176,7 @@ func TestTheFiveHarnessKindsComeOutOfTheCapture(t *testing.T) {
 // reported in_progress would show a tool as having run before the human was asked.
 // The Daemon hears the request, then the question, and nothing in between.
 func TestACallIsNotReportedAsRunningBeforeItsQuestion(t *testing.T) {
-	d, _ := replay(t, "llamaswap/execute-frames.jsonl", swapModel)
+	d, _ := replay(t, "opencode/llamaswap/execute-frames.jsonl", swapModel)
 
 	said := d.said()
 	requested, asked := indexOf(said, "ToolCallRequested("), indexOf(said, "Approve(")
@@ -182,7 +194,7 @@ func TestACallIsNotReportedAsRunningBeforeItsQuestion(t *testing.T) {
 // file access, which is the second lever on a write that the permission gate
 // already passed.
 func TestTheDelegatedWriteGoesThroughContainedFileAccess(t *testing.T) {
-	d, _ := replay(t, "llamaswap/edit-frames.jsonl", swapModel)
+	d, _ := replay(t, "opencode/llamaswap/edit-frames.jsonl", swapModel)
 
 	if len(d.files) != 1 {
 		t.Fatalf("the Adapter wrote %v, and only the Harness's delegated file belongs here", keys(d.files))
@@ -218,7 +230,7 @@ func TestTheSessionConfigUsesTheVendorToken(t *testing.T) {
 }
 
 func TestStartDoesNotReplaceTheProjectsOpenCodeConfig(t *testing.T) {
-	s := newScript(t, "llamaswap/read-frames.jsonl")
+	s := newScript(t, "opencode/llamaswap/read-frames.jsonl")
 	d := newRecording()
 	d.files[configFile] = "the user's config"
 	var launched Launch
@@ -252,7 +264,7 @@ func TestStartDoesNotReplaceTheProjectsOpenCodeConfig(t *testing.T) {
 // given. The 2026-08-27 captures were answered with a hosted Model nobody asked
 // for, and that Session must never exist.
 func TestAModelNobodyAskedForIsNotASession(t *testing.T) {
-	s := newScript(t, "ollama/read-frames.jsonl")
+	s := newScript(t, "opencode/ollama/read-frames.jsonl")
 	d := newRecording()
 
 	_, err := NewOpenCode().Start(t.Context(), SessionSpec{
@@ -351,7 +363,7 @@ func TestAGateWithNoRejectOptionIsCancelled(t *testing.T) {
 func TestTheAdapterReportsNothingTheRawTranscriptDoesNotHold(t *testing.T) {
 	for _, label := range []string{"read", "edit", "execute"} {
 		t.Run(label, func(t *testing.T) {
-			d, _ := replay(t, "llamaswap/"+label+"-frames.jsonl", swapModel)
+			d, _ := replay(t, "opencode/llamaswap/"+label+"-frames.jsonl", swapModel)
 			raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "research", "captures",
 				"opencode", "llamaswap", label+"-raw.log"))
 			if err != nil {
@@ -378,9 +390,9 @@ func TestTheAdapterReportsNothingTheRawTranscriptDoesNotHold(t *testing.T) {
 // do, so the announcement is held until that frame arrives.
 func TestAToolCallCarriesWhatItIsAboutToDo(t *testing.T) {
 	for _, c := range []struct{ capture, name, says string }{
-		{"llamaswap/read-frames.jsonl", "read", "notes.txt"},
-		{"llamaswap/edit-frames.jsonl", "write", "banana"},
-		{"llamaswap/execute-frames.jsonl", "bash", "echo capstone-probe"},
+		{"opencode/llamaswap/read-frames.jsonl", "read", "notes.txt"},
+		{"opencode/llamaswap/edit-frames.jsonl", "write", "banana"},
+		{"opencode/llamaswap/execute-frames.jsonl", "bash", "echo capstone-probe"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d, _ := replay(t, c.capture, swapModel)
@@ -535,4 +547,57 @@ func keys(files map[string]string) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+// The refusal, replayed from the bytes a real OpenCode wrote when it was told no.
+// Issue #46 asked what reject_once does, because every earlier capture answered
+// allow and the answer was an assumption. It is not one now.
+//
+// OpenCode moves the call to failed, ends the turn on end_turn, and exits 0. So a
+// refusal is an ordinary end to a Prompt, and the Adapter needs nothing special
+// for one.
+func TestARealRefusalEndsTheToolCallAndTheTurn(t *testing.T) {
+	d, _ := replayDeciding(t, "opencode-reject/ollama/reject-frames.jsonl", rejectModel, event.DecisionRefused)
+
+	said := d.said()
+	want := []string{"ToolCallRequested(", "Approve(", "ToolCallEnded(", "Completed("}
+	at := 0
+	for _, call := range said {
+		if at < len(want) && strings.HasPrefix(call, want[at]) {
+			at++
+		}
+	}
+	if at != len(want) {
+		t.Errorf("a refused Prompt said %v, and it has to say %v in that order", said, want)
+	}
+
+	// failed is what OpenCode reports for a call the Daemon refused, and error is
+	// what the Adapter is allowed to say about it. refused is the Daemon's own word.
+	for _, call := range said {
+		if strings.HasPrefix(call, "ToolCallEnded(") && !strings.Contains(call, string(event.OutcomeError)) {
+			t.Errorf("the refused call ended as %s", call)
+		}
+	}
+	if last := said[len(said)-1]; !strings.HasPrefix(last, "Completed(end_turn") {
+		t.Errorf("a refused Prompt ended on %s, and OpenCode ended the turn", last)
+	}
+}
+
+// The refusal capture is the second proof of the in_progress rule, and the one
+// that matters most: OpenCode moved this call to in_progress and then never ran
+// it. An Adapter that reported in_progress would have shown a write that the
+// human refused and the disk never received.
+func TestTheRefusedCallWasNeverReportedAsRunning(t *testing.T) {
+	d, _ := replayDeciding(t, "opencode-reject/ollama/reject-frames.jsonl", rejectModel, event.DecisionRefused)
+
+	said := d.said()
+	requested, asked := indexOf(said, "ToolCallRequested("), indexOf(said, "Approve(")
+	if requested < 0 || asked < 0 {
+		t.Fatalf("this replay has no gated Tool Call in it: %v", said)
+	}
+	for _, call := range said[requested+1 : asked] {
+		if strings.HasPrefix(call, "ToolCall") {
+			t.Errorf("%s came between the request and the question: %v", call, said)
+		}
+	}
 }
