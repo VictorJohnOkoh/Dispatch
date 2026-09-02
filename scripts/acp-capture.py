@@ -46,6 +46,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Returns the first option with one of these kinds, in the order given.
+def _first_of_kind(options: list[dict[str, Any]], kinds: tuple[str, ...]) -> dict[str, Any] | None:
+    for kind in kinds:
+        for opt in options:
+            if opt.get("kind") == kind:
+                return opt
+    return None
+
+
 class AcpCapture:
     """One ACP conversation, recorded.
 
@@ -79,6 +88,7 @@ class AcpCapture:
         self.update_kinds: Counter[str] = Counter()
         self.agent_methods: Counter[str] = Counter()
         self.permission_requests: list[dict[str, Any]] = []
+        self.permission_answers: list[dict[str, Any]] = []
         self.stop_reason: str | None = None
         self.usage: Any = None
         self.session_id: str | None = None
@@ -196,24 +206,28 @@ class AcpCapture:
             self.permission_requests.append(params)
             options = params.get("options") or []
             choice = None
+            # Prefer a one-shot option over a blanket one so the capture shows the
+            # gate firing per call rather than being disabled. "deny" answers
+            # cancelled and picks nothing, which is a different answer from reject
+            # and tells us nothing about the reject option.
             if self.args.permission == "allow":
-                # Prefer a one-shot allow over a blanket one so the capture
-                # shows the gate firing per call rather than being disabled.
-                for want in ("allow_once", "allow_always"):
-                    for opt in options:
-                        if opt.get("kind") == want:
-                            choice = opt
-                            break
-                    if choice:
-                        break
+                choice = _first_of_kind(options, ("allow_once", "allow_always"))
                 if choice is None and options:
                     choice = options[0]
+            elif self.args.permission == "reject":
+                # reject_always is not a fallback. It is a blanket refusal, and it
+                # would answer a different question from the one being asked.
+                choice = _first_of_kind(options, ("reject_once",))
+                if choice is None:
+                    print("  ! no reject_once offered — cancelling. That is the finding.")
 
             if choice is not None:
-                print(f"  . permission requested -> allowing ({choice.get('name')})")
+                self.permission_answers.append(choice)
+                print(f"  . permission requested -> {choice.get('kind')} ({choice.get('name')})")
                 self._respond(rid, {"outcome": {"outcome": "selected", "optionId": choice["optionId"]}})
             else:
-                print("  . permission requested -> denying")
+                self.permission_answers.append({"kind": "cancelled"})
+                print("  . permission requested -> cancelled")
                 self._respond(rid, {"outcome": {"outcome": "cancelled"}})
 
             if self.args.close_stdin_on_permission and not self._stdin_closed:
@@ -449,6 +463,7 @@ class AcpCapture:
             "agent_methods": dict(self.agent_methods),
             "permission_request_count": len(self.permission_requests),
             "permission_requests": self.permission_requests,
+            "permission_answers": self.permission_answers,
         }
         with open(self.summary_path, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(summary, fh, indent=2, ensure_ascii=False)
@@ -481,8 +496,10 @@ def main() -> int:
                    help="seconds to wait for session/prompt (default 600 — Hermes' terminal "
                         "sandbox setup alone can take minutes on a cold first tool call)")
     p.add_argument("--handshake-timeout", type=float, default=60.0, help="seconds for initialize and session/new")
-    p.add_argument("--permission", choices=["allow", "deny"], default="allow",
-                   help="how to answer session/request_permission (default allow)")
+    p.add_argument("--permission", choices=["allow", "deny", "reject"], default="allow",
+                   help="how to answer session/request_permission: allow selects allow_once, "
+                        "reject selects reject_once, deny selects nothing and answers cancelled "
+                        "(default allow)")
     p.add_argument("--fs", action="store_true", default=True, help="advertise fs client capability (default on)")
     p.add_argument("--no-fs", dest="fs", action="store_false", help="do not advertise fs capability")
     p.add_argument("--terminal", action="store_true", default=False,

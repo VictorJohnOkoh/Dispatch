@@ -1,0 +1,13 @@
+=== OpenCode ACP on a Host: 2026-09-02T20:12:06+01:00 ===
+Issue:  #46   ADR: 0006   permission answered with reject_once
+Client: MINGW64_NT-10.0-26200 -PC 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys
+Host:   Victor@ZenitoBurrito:22
+Vendor: ollama at http://127.0.0.1:11434
+Model:  qwen3.5:9b
+OpenCode: 1.18.25
+
+Session working directory: /c/Users/Victor/capstone-opencode/work
+Harness spawn path: C:/Users/Victor/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe
+Shell-only paths:   none
+Config discovery: working-directory config is read; per-Session config holds
+run reject: exit 0

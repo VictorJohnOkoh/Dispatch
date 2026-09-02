@@ -10,6 +10,12 @@
 #   bash scripts/capture-opencode-host.sh --check    preflight only, changes nothing
 #   bash scripts/capture-opencode-host.sh            preflight, then the real run
 #   bash scripts/capture-opencode-host.sh --vendor llamaswap    that Vendor or nothing
+#   bash scripts/capture-opencode-host.sh --reject   answer one gate with reject_once
+#
+# --reject is issue #46, not #16. It runs one edit and refuses it, to record what
+# OpenCode does with reject_once. A refused Tool Call changes the counts, so this
+# mode lands under docs/research/captures/opencode-reject/ and does not count the
+# gates.
 #
 # --vendor names the Vendor the run must use. If it is not serving, the run stops.
 # A capture filed under the Vendor it asked for rather than the one that answered
@@ -74,12 +80,14 @@ confirm() {
 # ── Config ────────────────────────────────────────────────────────────────
 
 MODE="run"
+PERMISSION="allow"
 VENDOR_PICK=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check)  MODE="check" ;;
+    --reject) PERMISSION="reject" ;;
     --vendor) VENDOR_PICK="${2:-}"; shift ;;
-    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^# every remote command below is POSIX\.$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) warn "unknown argument: $1"; exit 2 ;;
   esac
   shift
@@ -87,6 +95,7 @@ done
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 LANDING="$REPO_ROOT/docs/research/captures/opencode"
+[[ "$PERMISSION" == "reject" ]] && LANDING="$REPO_ROOT/docs/research/captures/opencode-reject"
 CONF="$HOME/.opencode-host.env"
 KEY="$HOME/.ssh/id_ed25519_capstone_host"
 
@@ -498,7 +507,11 @@ MANIFEST="$LANDING/manifest.txt"
 mf() { printf '%s\n' "$1" >> "$MANIFEST"; }
 
 mf "=== OpenCode ACP on a Host: $(date -Iseconds) ==="
-mf "Issue:  #16   ADR: 0003"
+if [[ "$PERMISSION" == "reject" ]]; then
+  mf "Issue:  #46   ADR: 0006   permission answered with reject_once"
+else
+  mf "Issue:  #16   ADR: 0003"
+fi
 mf "Client: $(uname -a 2>/dev/null || echo unknown)"
 mf "Host:   $HOST_USER@$HOST_ADDR:$SSH_PORT"
 mf "Vendor: $VENDOR_KIND at $VENDOR_URL"
@@ -670,7 +683,7 @@ printf '\n'
 # answer that can be checked. --permission allow keeps the gate firing per call
 # rather than disabling it, which is what gate 2 counts.
 run_capture() {
-  local label="$1" prompt="$2" rc=0
+  local label="$1" prompt="$2" policy="${3:-allow}" rc=0
   printf '  %s%s%s  %s\n' "$BOLD" "$label" "$RESET" "$prompt"
   # Relative paths, because acp-capture.py is native Python and $REMOTE_WORK is
   # what Git Bash's pwd returns. Windows Python reads /c/Users/... as C:\c\Users
@@ -682,7 +695,7 @@ run_capture() {
     --cwd . \
     --outdir ../out \
     --label '$label' \
-    --permission allow \
+    --permission $policy \
     --timeout 300 \
     --prompt '$prompt' 2>&1" || rc=$?
   if (( rc == 0 )); then
@@ -695,12 +708,19 @@ run_capture() {
   return 0
 }
 
-run_capture "read" \
-  "Read the file notes.txt in this directory and reply with only the single word it contains."
-run_capture "edit" \
-  "Create a file called out.txt in this directory whose entire contents are the word banana."
-run_capture "execute" \
-  "Run the shell command: echo capstone-probe. Then reply with exactly what it printed."
+if [[ "$PERMISSION" == "reject" ]]; then
+  # edit is the class to refuse, because the disk says whether the refusal held.
+  run_capture "reject" \
+    "Create a file called refused.txt in this directory whose entire contents are the word banana." \
+    reject
+else
+  run_capture "read" \
+    "Read the file notes.txt in this directory and reply with only the single word it contains."
+  run_capture "edit" \
+    "Create a file called out.txt in this directory whose entire contents are the word banana."
+  run_capture "execute" \
+    "Run the shell command: echo capstone-probe. Then reply with exactly what it printed."
+fi
 
 # ── Land the artefacts ────────────────────────────────────────────────────
 
@@ -723,12 +743,28 @@ else
   note "  on the Host at $REMOTE_ABS/out."
 fi
 
-# What the Session actually did on disk, which the frames alone cannot show.
-rsh "ls -la $REMOTE_WORK 2>&1; echo '--- out.txt ---'; cat $REMOTE_WORK/out.txt 2>&1" \
+# What the Session actually did on disk, which the frames alone cannot show. In
+# reject mode refused.txt is the answer: absent means the refusal held.
+rsh "ls -la $REMOTE_WORK 2>&1; echo '--- out.txt ---'; cat $REMOTE_WORK/out.txt 2>&1; echo '--- refused.txt ---'; cat $REMOTE_WORK/refused.txt 2>&1" \
   > "$LANDING/workdir-after.txt" 2>/dev/null
 say "workdir listing -> workdir-after.txt"
 
 # ── Gates ─────────────────────────────────────────────────────────────────
+
+if [[ "$PERMISSION" == "reject" ]]; then
+  head2 "What the refusal did"
+  say "A refused Tool Call changes the counts, so the gates are not counted here."
+  printf '\n'
+  say "Read these three, in this order:"
+  note "  $LANDING/reject-summary.json   permission_answers, stop_reason, agent exit"
+  note "  $LANDING/reject-frames.jsonl   what OpenCode said after the reject"
+  note "  $LANDING/workdir-after.txt     refused.txt: absent means the refusal held"
+  printf '\n'
+  say "Then write it down in docs/research/captures/opencode-reject/README.md"
+  say "and answer #46."
+  printf '\n'
+  exit $(( FAILED > 0 ))
+fi
 
 head2 "The three gates"
 
