@@ -201,10 +201,14 @@ func (d *Daemon) ladder(s *Session, run harness.Run) {
 			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
 		})
 	}
-	s.sink.end(held)
+	// Step 3 is the goodbye and the fence both. Each Adapter joins its own reader
+	// before Close returns, so everything the Harness said is in the log by the
+	// time the ledger folds what is still open, and a Session that is Starting has
+	// no Run and leans on the Sink for the same thing.
 	if run != nil {
 		run.Close()
 	}
+	s.sink.end(held)
 	d.kill(s)
 }
 
