@@ -333,8 +333,10 @@ func TestAQuestionFromAnotherSessionRaisesAToast(t *testing.T) {
 // Two questions, from two Sessions on two Hosts, at once.
 opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
   payload: {toolCallId: "c1", title: "rm -rf build/"}});
+// The same tool call id, from another Host. A tool call id is unique inside one
+// Session and nowhere else.
 opened.send("event", {host: "shed", session: "s-3", seq: 9, kind: "ApprovalRequested",
-  payload: {toolCallId: "c2", title: "write out.txt"}});
+  payload: {toolCallId: "c1", title: "write out.txt"}});
 
 const toasts = dom.toasts.children.map((t) => t.textContent);
 const where = dom.toasts.children.map((t) => t.querySelector(".where").href);
@@ -405,5 +407,94 @@ setTimeout(() => {
 	}
 	if got.Rows < 2 {
 		t.Errorf("the question was not drawn in the transcript either: %d rows", got.Rows)
+	}
+}
+
+// A decision that did not land leaves the toast up and the button usable. The
+// question is open until an Event says otherwise, and a toast that went quiet
+// would be the user believing they had answered.
+func TestADecisionThatDoesNotLandLeavesTheToastUsable(t *testing.T) {
+	var got struct {
+		Toasts   int    `json:"toasts"`
+		Disabled bool   `json:"disabled"`
+		Why      string `json:"why"`
+		Tries    int    `json:"tries"`
+	}
+	pageUnder(t, `
+postAnswer = {ok: false, status: 502};
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+
+const toast = dom.toasts.children[0];
+const allow = toast.children.find((c) => c.dataset.decision === "allowed");
+allow.onclick();
+
+setTimeout(() => {
+  const after = {
+    toasts: dom.toasts.children.length,
+    disabled: allow.disabled === true,
+    why: toast.querySelector(".why") ? toast.querySelector(".why").textContent : "",
+  };
+  // And a second try, which the button has to still allow.
+  postAnswer = {ok: true, status: 202};
+  allow.onclick();
+  setTimeout(() => console.log(JSON.stringify({...after, tries: posted.length})), 0);
+}, 0);
+`, &got)
+
+	if got.Toasts != 1 {
+		t.Fatalf("%d toasts are up, and the question was never answered", got.Toasts)
+	}
+	if got.Disabled {
+		t.Error("the button is still disabled, so the question cannot be answered again")
+	}
+	if !strings.Contains(got.Why, "502") {
+		t.Errorf("the toast says %q, and it has to say what happened", got.Why)
+	}
+	if got.Tries != 2 {
+		t.Errorf("the decision was sent %d times, and it was answered twice", got.Tries)
+	}
+}
+
+// Every way a question ends takes its toast down. A toast left on screen for a
+// question nobody can answer any more is worse than no toast: the user acts on it
+// and nothing happens.
+func TestAToastGoesWhateverEndedItsQuestion(t *testing.T) {
+	var got []int
+	pageUnder(t, `
+const seen = [];
+function raise(host, session, id) {
+  opened.send("event", {host, session, seq: 1, kind: "ApprovalRequested", payload: {toolCallId: id, title: "t"}});
+}
+
+// The Tool Call ended without a decision, which is the Daemon's own synthesis
+// when a Prompt completes with the call still open.
+raise("attic", "s-9", "c1");
+opened.send("event", {host: "attic", session: "s-9", seq: 2, kind: "ToolCallEnded",
+  payload: {toolCallId: "c1", outcome: "unknown"}});
+seen.push(dom.toasts.children.length);
+
+// The Session ended under the question.
+raise("attic", "s-9", "c2");
+opened.send("event", {host: "attic", session: "s-9", seq: 3, kind: "SessionEnded", payload: {reason: "stopped"}});
+seen.push(dom.toasts.children.length);
+
+// A resync says what this page holds is not to be trusted, toasts included.
+raise("shed", "s-3", "c3");
+served.set("0", []);
+opened.send("resync", {host: "desk"});
+seen.push(dom.toasts.children.length);
+
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := []string{"the Tool Call ended", "the Session ended", "a resync"}
+	if len(got) != len(want) {
+		t.Fatalf("the page answered %v", got)
+	}
+	for i, why := range want {
+		if got[i] != 0 {
+			t.Errorf("%d toasts are still up after %s", got[i], why)
+		}
 	}
 }

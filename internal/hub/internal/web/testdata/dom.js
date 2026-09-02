@@ -83,7 +83,9 @@ globalThis.posted = [];
 globalThis.fetch = async (url, options) => {
   if (options?.method === "POST") {
     posted.push({ url, body: options.body });
-    return { ok: true, json: async () => ({}) };
+    const answer = globalThis.postAnswer ?? { ok: true, status: 202 };
+    if (answer === "unreachable") throw new Error("no route to that Host");
+    return { ...answer, json: async () => ({}) };
   }
   fetched.push(url);
   if (url.startsWith("/rail/")) {

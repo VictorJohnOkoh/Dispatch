@@ -83,22 +83,45 @@ stream.addEventListener("event", (frame) => {
 // on screen, so a question from any other Session has no other way to reach the
 // user. Whatever ever replaces it has to keep that job.
 const toasts = document.getElementById("toasts");
+
+// asking is the questions on screen, keyed by the Host, the Session and the tool
+// call id together. A tool call id is the Harness's own and is unique inside one
+// Session, so two Hosts can both mint call_1: keyed on the id alone, the second
+// question would be dropped as a duplicate and one Host's decision would take the
+// other Host's toast down.
 const asking = new Map();
 
-// ask raises a toast for a question from a Session that is not on screen, and
-// takes one down when its question is answered. Two questions from two Hosts are
-// two toasts: one that replaced the other would lose the first silently, which is
-// the whole failure this exists to prevent.
-function ask(f) {
-  if (f.kind === "ApprovalDecided") {
-    answered(f.payload?.toolCallId);
-    return;
-  }
-  if (f.kind !== "ApprovalRequested") return;
+function key(f, id) {
+  return `${f.host}/${f.session}/${id ?? f.payload?.toolCallId}`;
+}
 
+// ask is every Event from a Session that is not on screen. A question raises a
+// toast, and everything that ends a question takes it down: the decision, the
+// Tool Call ending whatever the outcome, and the Session ending under it.
+//
+// Two questions from two Hosts are two toasts. One that replaced the other would
+// lose the first silently, which is the failure this exists to prevent.
+function ask(f) {
+  switch (f.kind) {
+    case "ApprovalRequested":
+      raise(f);
+      return;
+    case "ApprovalDecided":
+    case "ToolCallEnded":
+      takeDown(key(f));
+      return;
+    case "SessionEnded":
+      // A Session that ended answers nothing else. Its Daemon writes the decision
+      // and the end first, so this is the case where those never arrived.
+      for (const [at, toast] of asking) {
+        if (toast.dataset.host === f.host && toast.dataset.session === f.session) takeDown(at);
+      }
+  }
+}
+
+function raise(f) {
   const id = f.payload?.toolCallId;
-  if (!id || asking.has(id)) return;
-  const at = `/hosts/${encodeURIComponent(f.host)}/sessions/${encodeURIComponent(f.session)}`;
+  if (!id || asking.has(key(f, id))) return;
 
   const toast = document.createElement("div");
   toast.className = "toast";
@@ -107,45 +130,63 @@ function ask(f) {
   toast.dataset.session = f.session;
 
   // The Host and the Session, because a question with no machine on it is a
-  // question the user cannot place.
+  // question the user cannot place. The link is what makes that Session primary.
   const where = document.createElement("a");
   where.className = "where";
-  where.href = at;
+  where.href = `/hosts/${encodeURIComponent(f.host)}/sessions/${encodeURIComponent(f.session)}`;
   where.textContent = `${f.session} on ${f.host}`;
   toast.append(where, node("p", "title", f.payload?.title ?? "a Tool Call is waiting"));
 
   toast.append(
-    decide(f, id, "allowed", "Allow"),
-    decide(f, id, "refused", "Refuse"),
+    answerButton(f.host, f.session, id, "allowed", "Allow"),
+    answerButton(f.host, f.session, id, "refused", "Refuse"),
   );
-  asking.set(id, toast);
+  asking.set(key(f, id), toast);
   toasts.append(toast);
 }
 
-// decide is one answer, sent to the Host that asked. The toast stays up until the
-// Daemon's own ApprovalDecided comes back on the stream: a command is an
+// answerButton is one answer, sent to the Host that asked. The toast stays up
+// until that Daemon's own Event comes back on the stream: a command is an
 // intention, and what it changed arrives as an Event.
-function decide(f, id, decision, label) {
+function answerButton(host, session, id, decision, label) {
   const button = document.createElement("button");
   button.dataset.decision = decision;
   button.textContent = label;
-  button.onclick = () => {
+  button.onclick = async () => {
     button.disabled = true;
-    fetch(`/v1/hosts/${encodeURIComponent(f.host)}/sessions/${encodeURIComponent(f.session)}/approvals`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolCallId: id, decision }),
-    }).catch(() => {
-      button.disabled = false;
-    });
+    // A decision that did not land leaves the toast up and the button usable. The
+    // question is still open until an Event says otherwise, and a toast that went
+    // quiet would be the user believing they had answered.
+    try {
+      const resp = await fetch(`/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolCallId: id, decision }),
+      });
+      if (resp.ok) return;
+      said(button, `${label} again: this Host answered ${resp.status}`);
+    } catch {
+      said(button, `${label} again: this Host could not be reached`);
+    }
+    button.disabled = false;
   };
   return button;
 }
 
-function answered(id) {
-  const toast = asking.get(id);
+// said puts what went wrong on the toast the button is in, replacing whatever it
+// said before, so two failed tries do not read as two problems.
+function said(button, why) {
+  const toast = button.parentElement;
   if (!toast) return;
-  asking.delete(id);
+  const line = toast.querySelector(".why") ?? node("p", "why", "");
+  line.textContent = why;
+  if (!line.parentElement) toast.append(line);
+}
+
+function takeDown(at) {
+  const toast = asking.get(at);
+  if (!toast) return;
+  asking.delete(at);
   toast.remove();
 }
 
@@ -294,6 +335,10 @@ stream.addEventListener("resync", (frame) => {
   events.clear();
   order.length = 0;
   list.replaceChildren();
+  // The toasts go with the rest of what this page holds. A resync says what it
+  // has is not to be trusted, and a question that is still open raises its toast
+  // again when the stream replays it.
+  for (const at of [...asking.keys()]) takeDown(at);
   load(generation);
 });
 
