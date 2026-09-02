@@ -30,6 +30,11 @@ const (
 // lastWords is what the stub that leaves on its own writes to stderr first.
 const lastWords = "the Harness fell over"
 
+// partingWords is what the stub says on stdout once stdin has closed. Those bytes
+// travel while the Session is already ending, which is the moment a transcript
+// closed too early loses them.
+const partingWords = "the Harness said one last thing"
+
 // stderrFlood is more than any pipe buffer on either platform, so a stub that
 // writes it finishes only if somebody is draining the other end.
 const stderrFlood = 1 << 20
@@ -71,6 +76,11 @@ func stub(role string) {
 		os.Stderr.Write(bytes.Repeat([]byte("e"), stderrFlood))
 		fmt.Println("drained")
 		io.Copy(io.Discard, os.Stdin)
+	case "parting":
+		// Says one last thing on stdout after stdin closes, which is the ladder's
+		// step 4, and then leaves.
+		io.Copy(io.Discard, os.Stdin)
+		fmt.Println(partingWords)
 	case "quit":
 		// Leaves on its own, which no Harness in RPC or ACP mode does, and says why
 		// on stderr, which is the only evidence there ever is.

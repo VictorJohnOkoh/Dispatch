@@ -211,6 +211,63 @@ func TestAlwaysAllowFlipsTheSlotAndWritesThePolicy(t *testing.T) {
 	}
 }
 
+func TestAlwaysAllowWritesThePolicyBeforeItReleasesTheAdapter(t *testing.T) {
+	h, id, out := gated(t, gateStart)
+	answered := asks(out, "c1", event.ToolExecute)
+	h.waitState(t, id, "Asking")
+
+	frames, stop := h.events.Subscribe()
+	defer stop()
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		for frame := range frames {
+			if frame.Event == nil || frame.Event.Kind != event.KindApprovalDecided {
+				continue
+			}
+			h.writing.Lock()
+			close(locked)
+			<-release
+			h.writing.Unlock()
+			return
+		}
+	}()
+
+	response := make(chan int, 1)
+	go func() {
+		w := h.post(t, "/v1/sessions/"+string(id)+"/approvals",
+			`{"toolCallId":"c1","decision":"allowed","always":true}`)
+		response <- w.Code
+	}()
+	select {
+	case <-locked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the policy write was not reached")
+	}
+
+	received := false
+	policyWasOld := false
+	select {
+	case <-answered:
+		received = true
+		policies := h.policies(t)
+		policyWasOld = policies[len(policies)-1].Policy[event.ToolExecute] != event.RuleAuto
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if !received {
+		if decision := answer(t, answered); decision != event.DecisionAllowed {
+			t.Errorf("Approve = %q", decision)
+		}
+	}
+	if code := <-response; code != protocol.StatusAccepted {
+		t.Errorf("approval status = %d", code)
+	}
+	if policyWasOld {
+		t.Error("Approve returned before the policy was written")
+	}
+}
+
 // A change applies to Tool Calls requested after it, never to a question already
 // open.
 func TestAPolicyChangeDoesNotAnswerAQuestionAlreadyOpen(t *testing.T) {
@@ -231,6 +288,27 @@ func TestAPolicyChangeDoesNotAnswerAQuestionAlreadyOpen(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
+	h.command(t, id, "approvals", `{"toolCallId":"c1","decision":"allowed"}`)
+	answer(t, answered)
+}
+
+func TestAPolicyChangeDoesNotAffectACallRequestedBeforeIt(t *testing.T) {
+	h, id, out := gated(t, gateStart)
+	out.ToolCallRequested("c1", "bash", event.ToolExecute, "echo hello", nil)
+
+	h.command(t, id, "policy", `{"policy":{"read":"auto","edit":"wait","execute":"auto","fetch":"auto","other":"auto"}}`)
+	answered := make(chan event.Decision, 1)
+	go func() {
+		decision, _ := out.Approve(context.Background(), "c1", "echo hello", "echo hello")
+		answered <- decision
+	}()
+	h.waitState(t, id, "Asking")
+
+	select {
+	case decision := <-answered:
+		t.Fatalf("the later policy answered the earlier Tool Call: %q", decision)
+	case <-time.After(50 * time.Millisecond):
+	}
 	h.command(t, id, "approvals", `{"toolCallId":"c1","decision":"allowed"}`)
 	answer(t, answered)
 }
@@ -280,6 +358,60 @@ func TestAStopReleasesAHarnessWaitingOnAnAnswer(t *testing.T) {
 	h.payload(t, id, event.KindApprovalDecided, &decided)
 	if decided.By != event.BySessionStopped {
 		t.Errorf("the decision was made by %q", decided.By)
+	}
+}
+
+func TestAnInterruptCannotPassQuestionRegistration(t *testing.T) {
+	h, id, out := gated(t, gateStart)
+	h.command(t, id, "prompts", promptBody)
+	out.ToolCallRequested("c1", "bash", event.ToolExecute, "echo hello", nil)
+	s, _, _ := h.sessions.find(id)
+
+	h.writing.Lock()
+	answered := make(chan event.Decision, 1)
+	go func() {
+		decision, _ := out.Approve(context.Background(), "c1", "echo hello", "echo hello")
+		answered <- decision
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		h.sessions.mu.Lock()
+		_, registered := s.asking["c1"]
+		h.sessions.mu.Unlock()
+		if registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			h.writing.Unlock()
+			t.Fatal("the question was not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	interrupted := make(chan int, 1)
+	go func() {
+		w := h.post(t, "/v1/sessions/"+string(id)+"/interrupt", "")
+		interrupted <- w.Code
+	}()
+	early := false
+	select {
+	case <-interrupted:
+		early = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	h.writing.Unlock()
+
+	if early {
+		h.waitState(t, id, "Asking")
+		h.command(t, id, "approvals", `{"toolCallId":"c1","decision":"refused"}`)
+	} else if code := <-interrupted; code != protocol.StatusAccepted {
+		t.Errorf("interrupt status = %d", code)
+	}
+	if decision := answer(t, answered); decision != event.DecisionRefused {
+		t.Errorf("Approve = %q", decision)
+	}
+	if early {
+		t.Error("interrupt returned while question registration was incomplete")
 	}
 }
 

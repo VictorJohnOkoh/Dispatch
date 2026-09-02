@@ -83,14 +83,17 @@ type Daemon struct {
 	// two Prompts arriving together cannot both read an Idle Session.
 	commanding sync.Mutex
 
-	// writing keeps a Session's recorded Events in the order the log gave them
-	// Sequence Numbers, which is the order the fold reads them in.
-	writing sync.Mutex
-
-	// closing makes the ledger's fold and the ends it writes one step. ADR 0010 has
-	// the ledger holding no lock, on the grounds that the Sink is one goroutine, and
-	// that is true of one of its two triggers and not of the other.
+	// closing is the ledger's lock, and it makes the fold of what is still open and
+	// the ends it decided on one step. The Daemon's own refusals meet the two
+	// triggers here, because a refusal is written by whoever decided it.
 	closing sync.Mutex
+
+	// writing keeps a Session's recorded Events in the order the log gave them
+	// Sequence Numbers, which is the order the fold reads them in. A read of the
+	// Session list holds it too: the log sends an Event before the Session has
+	// recorded it, so a Client that answers that Event by asking for the list
+	// would otherwise be told a state the Event has already moved on from.
+	writing sync.RWMutex
 
 	// base is the context every Session hangs off, which is Serve's. A handler
 	// exercised without Serve gets the background one this starts as.

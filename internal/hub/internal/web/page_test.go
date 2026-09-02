@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,11 +16,15 @@ import (
 // pageUnder loads fold.js, render.js and page.js over the stub page, runs the
 // test's own script, and decodes what it printed.
 func pageUnder(t *testing.T, script string, into any) {
+	pageUnderSetup(t, "", script, into)
+}
+
+func pageUnderSetup(t *testing.T, setup, script string, into any) {
 	t.Helper()
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js", "page.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -27,17 +32,47 @@ func pageUnder(t *testing.T, script string, into any) {
 		program.WriteString(string(source))
 		program.WriteString("\n")
 	}
+	program.WriteString(setup)
+	program.WriteString("\n")
+	source, err := os.ReadFile("page.js")
+	if err != nil {
+		t.Fatalf("page.js: %v", err)
+	}
+	program.WriteString(string(source))
+	program.WriteString("\n")
 	// The script runs after the page's own load() has settled, because that one is
 	// asynchronous and everything a test asserts on comes after it.
 	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
 
-	cmd := exec.Command(node, "-e", program.String())
+	path := filepath.Join(t.TempDir(), "page.js")
+	if err := os.WriteFile(path, []byte(program.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, path)
 	said, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, said)
 	}
 	if err := json.Unmarshal(said, into); err != nil {
 		t.Fatalf("node said %q: %v", said, err)
+	}
+}
+
+// The first paint carries questions that are already open on other Sessions.
+// Without this, a reload can hide the only path the user has to answer one.
+func TestAQuestionAlreadyOpenAtFirstPaintRaisesAToast(t *testing.T) {
+	var got []string
+	pageUnderSetup(t, `
+document.getElementById("approvals").textContent = JSON.stringify([
+  {host: "attic", session: "s-9", kind: "ApprovalRequested",
+    payload: {toolCallId: "c1", title: "write out.txt"}},
+]);
+`, `
+console.log(JSON.stringify(dom.toasts.children.map((t) => t.textContent)));
+`, &got)
+
+	if len(got) != 1 || !strings.Contains(got[0], "s-9 on attic") || !strings.Contains(got[0], "write out.txt") {
+		t.Errorf("the first paint raised %v", got)
 	}
 }
 
@@ -479,22 +514,29 @@ raise("attic", "s-9", "c2");
 opened.send("event", {host: "attic", session: "s-9", seq: 3, kind: "SessionEnded", payload: {reason: "stopped"}});
 seen.push(dom.toasts.children.length);
 
-// A resync says what this page holds is not to be trusted, toasts included.
-raise("shed", "s-3", "c3");
+// A resync discards only questions from that Host. Every other Host on the merged
+// stream keeps its own log and its open questions.
+raise("attic", "s-9", "c3");
+raise("shed", "s-3", "c4");
 served.set("0", []);
+opened.send("resync", {host: "attic"});
+seen.push(dom.toasts.children.length);
+
+// A resync for the primary Host also leaves questions from other Hosts alone.
 opened.send("resync", {host: "desk"});
 seen.push(dom.toasts.children.length);
 
 console.log(JSON.stringify(seen));
 `, &got)
 
-	want := []string{"the Tool Call ended", "the Session ended", "a resync"}
+	want := []string{"the Tool Call ended", "the Session ended", "another Host's resync", "the primary Host's resync"}
+	left := []int{0, 0, 1, 1}
 	if len(got) != len(want) {
 		t.Fatalf("the page answered %v", got)
 	}
 	for i, why := range want {
-		if got[i] != 0 {
-			t.Errorf("%d toasts are still up after %s", got[i], why)
+		if got[i] != left[i] {
+			t.Errorf("%d toasts are up after %s, want %d", got[i], why, left[i])
 		}
 	}
 }

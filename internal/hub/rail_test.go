@@ -36,6 +36,29 @@ func railHost(sessions ...string) http.Handler {
 	return mux
 }
 
+func askingHost() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc(protocol.ListSessions, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"sessions": []any{map[string]any{
+				"id": "s-9", "harness": "opencode", "model": "qwen3.5-9b",
+				"cwd": "/home/victor/s-9", "state": "Asking",
+			}},
+			"cursor": 1,
+		})
+	})
+	mux.HandleFunc(protocol.SessionEvents, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"events": []any{map[string]any{
+				"seq": 1, "session": "s-9", "at": 1, "kind": "ApprovalRequested",
+				"payload": map[string]any{"toolCallId": "c1", "title": "write out.txt"},
+			}},
+			"cursor": 1,
+		})
+	})
+	return mux
+}
+
 // silent is a Host that answers nothing, which is what the Client has to draw
 // rather than hide.
 func silent() http.Handler {
@@ -80,6 +103,21 @@ func TestTheRailHoldsEverySessionOnEveryHost(t *testing.T) {
 	// And the one being drawn is marked as the one being drawn.
 	if !strings.Contains(body, `class="rrow on"`) {
 		t.Error("nothing in the rail is marked as the Session on screen")
+	}
+}
+
+// A question that was open before the page loaded must reach the browser. The
+// toast is the only path to an off-screen Session in Asking.
+func TestTheFirstPaintCarriesOpenQuestionsFromOtherSessions(t *testing.T) {
+	body := railPage(t, map[hostset.HostID]http.Handler{
+		"desk":  railHost("s-1 Working"),
+		"attic": askingHost(),
+	}, "/hosts/desk/sessions/s-1")
+
+	for _, want := range []string{`id="approvals"`, `"host":"attic"`, `"session":"s-9"`, `"title":"write out.txt"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the first paint does not carry %q", want)
+		}
 	}
 }
 

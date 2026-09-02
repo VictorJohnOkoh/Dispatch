@@ -20,13 +20,25 @@ function byHost(selector, id) {
   return found;
 }
 
-// The stream resumes where the page was drawn, so the Hosts view is sent what
-// happens next rather than every Event every Host has ever written.
+// What the Hub stamped the page with: the Cursor it was drawn at, and when. The
+// stream resumes from the Cursor, so the Hosts view is sent what happens next
+// rather than every Event every Host has ever written.
+const drawnPage = document.querySelectorAll("[data-cursor]")[0];
+
 const stream = new EventSource("/v1/events?from=" + encodeURIComponent(at()));
 
 function at() {
-  const cursor = document.querySelectorAll("[data-cursor]")[0];
-  return cursor ? cursor.dataset.cursor : "";
+  return drawnPage ? drawnPage.dataset.cursor : "";
+}
+
+// trueAt is when each card's content was last true, which is what a Stale stamp
+// carries. Both times it can hold come from the Hub: the page was drawn at one,
+// and a host frame says when the Hub last heard from that Host. The browser's own
+// clock is never one of them, because it is not the clock the other stamps on the
+// page were made on.
+const trueAt = new Map();
+for (const [host, card] of cards) {
+  if (card.dataset.hostState === "Ready" && drawnPage) trueAt.set(host, drawnPage.dataset.drawn);
 }
 
 stream.addEventListener("vendors", (frame) => {

@@ -160,11 +160,18 @@ func (v *Vendors) Polled() <-chan struct{} { return v.polled }
 // on this Host did. It reads the poll's cache, so a Session start refuses an
 // unknown Model without a call on the request path, and a Vendor that is not
 // answering serves nothing.
-func (v *Vendors) serving(model string) vendors.Adapter {
+//
+// A Model id is unique only inside one Vendor, so base names which Vendor the
+// caller means. An empty base takes the first Vendor that lists the Model, which
+// is what a caller that read a catalogue with one Vendor in it wants.
+func (v *Vendors) serving(base, model string) vendors.Adapter {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	for i, b := range v.beats {
+		if base != "" && v.adapters[i].Endpoint().Base != base {
+			continue
+		}
 		for _, m := range b.models {
 			if m.ID == model {
 				return v.adapters[i]
