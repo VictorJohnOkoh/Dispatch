@@ -20,10 +20,15 @@ three options — `allow_once` as `once`, `allow_always` as `always`, and
 own id, so it does not depend on that spelling.
 
 **A refusal is an ordinary end to a Prompt.** OpenCode moved the call to
-`failed`, ended the turn with `stopReason: "end_turn"`, and exited 0. It did not
-retry, did not error, and did not ask a second time. The Adapter needs no special
-path for a refusal, and `internal/harness/acp_test.go` replays these frames to
-say so.
+`failed`, ended the turn with `stopReason: "end_turn"`, and exited 0. The Prompt
+did not error, did not retry, and did not ask a second time. The Adapter needs no
+special path for a refusal, and `internal/harness/acp_test.go` replays these
+frames to say so.
+
+**The failed call carries a reason.** Its `content` and its `rawOutput.error` both
+say `The user rejected permission to use this specific tool call.` The Adapter
+already passes that text to `ToolCallEnded`, so the Client is told why the call
+ended and does not have to guess from the outcome.
 
 **The refusal held.** `refused.txt` is absent from `workdir-after.txt`. The
 delegated write never arrived, so nothing reached the disk.
@@ -34,10 +39,10 @@ delegated write never arrived, so nothing reached the disk.
 an Adapter that reported `in_progress` would have drawn a write that the human
 refused and the disk never received.
 
-**A refused turn carries no message.** The run produced 19
-`agent_thought_chunk`s and no `agent_message_chunk` at all. So a Client that waits
-for text after a refusal waits forever, and `Completed` is the only thing that
-ends the turn.
+**This refused turn carried no message.** The run produced 19
+`agent_thought_chunk`s and no `agent_message_chunk` at all. One run says nothing
+about every run, but it is enough to show that a Client which waits for text
+before it ends a turn can wait forever. `Completed` is what ends a turn.
 
 ## The frames
 
@@ -61,5 +66,7 @@ ends the turn.
   so the capture sends only that. What a blanket refusal does is still unknown.
 - **One class.** The edit was refused. An execute refusal is not captured, and
   `read` has no gate to refuse.
+- **The empty message is one run.** No `agent_message_chunk` arrived here. Whether
+  a refused turn always ends without text needs more than one Model to say.
 - These bytes prove what OpenCode 1.18.25 said in September 2026 and nothing about
   a later version. Re-capturing is a recurring task.

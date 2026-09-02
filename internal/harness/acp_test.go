@@ -587,6 +587,11 @@ func TestARealRefusalEndsTheToolCallAndTheTurn(t *testing.T) {
 // that matters most: OpenCode moved this call to in_progress and then never ran
 // it. An Adapter that reported in_progress would have shown a write that the
 // human refused and the disk never received.
+//
+// The Sink has no way to say running, so the order alone cannot catch that. What
+// catches it is the path and the content: the announcement carries them, and only
+// the in_progress frame ever held them. The pending frame before it has an empty
+// rawInput, so an Adapter that announced on that one would name nothing.
 func TestTheRefusedCallWasNeverReportedAsRunning(t *testing.T) {
 	d, _ := replayDeciding(t, "opencode-reject/ollama/reject-frames.jsonl", rejectModel, event.DecisionRefused)
 
@@ -598,6 +603,11 @@ func TestTheRefusedCallWasNeverReportedAsRunning(t *testing.T) {
 	for _, call := range said[requested+1 : asked] {
 		if strings.HasPrefix(call, "ToolCall") {
 			t.Errorf("%s came between the request and the question: %v", call, said)
+		}
+	}
+	for _, want := range []string{"refused.txt", "banana"} {
+		if !strings.Contains(said[requested], want) {
+			t.Errorf("the announcement does not say %q, so it was made before the arguments arrived: %s", want, said[requested])
 		}
 	}
 }
