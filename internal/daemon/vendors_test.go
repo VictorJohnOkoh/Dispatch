@@ -305,3 +305,23 @@ func TestWatchClosesOnTheNextBeat(t *testing.T) {
 		t.Error("Watch handed back the beat that already closed")
 	}
 }
+
+// A Model id is unique only inside one Vendor. Two Vendors on one Host can both
+// answer to the same id, and the start says which one it means.
+func TestAStartNamingAVendorGetsThatVendorAndNotTheFirst(t *testing.T) {
+	first := ollamaFake()
+	second := ollamaFake()
+	second.endpoint = vendors.Endpoint{Kind: vendors.LMStudio, Base: "http://127.0.0.1:1234"}
+	v := newVendors([]vendors.Adapter{first, second}, quiet())
+	v.pollAll(t.Context())
+
+	if got := v.serving(second.endpoint.Base, "qwen3:8b"); got != vendors.Adapter(second) {
+		t.Errorf("a start naming the second Vendor got %v", got)
+	}
+	if got := v.serving("", "qwen3:8b"); got != vendors.Adapter(first) {
+		t.Errorf("a start naming no Vendor got %v, want the first that lists the Model", got)
+	}
+	if got := v.serving("http://127.0.0.1:9999", "qwen3:8b"); got != nil {
+		t.Errorf("a start naming a Vendor this Host does not have got %v", got)
+	}
+}

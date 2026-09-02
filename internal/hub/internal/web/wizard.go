@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,6 +35,12 @@ type wizard struct {
 	Model   string
 	Harness string
 
+	// Vendor is the Base of the Vendor serving the chosen Model. A Model id is
+	// unique only inside one Vendor, so the Model step answers with both and the
+	// start names both. Without it the Host picks among the Vendors that answer to
+	// that id, and the user does not get to say which.
+	Vendor string
+
 	Hosts     []hostChoice
 	Models    []modelChoice
 	Harnesses []harnessChoice
@@ -62,8 +69,13 @@ type hostChoice struct {
 }
 
 type modelChoice struct {
-	ID     string
+	ID string
+
+	// Vendor is what the user reads, and Base is what the link carries. Two Vendors
+	// of the same Kind can serve the same Model id, and only the Base tells them
+	// apart.
 	Vendor string
+	Base   string
 	// Capabilities are the Vendor's three-valued answers, drawn as answers. Unknown
 	// is one, and a Session on an Unknown Model runs anyway.
 	Capabilities []string
@@ -91,6 +103,7 @@ func (c *client) newSession(w http.ResponseWriter, r *http.Request) {
 	view := wizard{
 		Host:     ask.Get("host"),
 		Model:    ask.Get("model"),
+		Vendor:   ask.Get("vendor"),
 		Harness:  ask.Get("harness"),
 		Dir:      ask.Get("dir"),
 		Refusal:  ask.Get("refusal"),
@@ -116,9 +129,14 @@ func (c *client) newSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // stepFor is the first step with no answer, so a wizard that is sent back to with
-// three answers draws the fourth.
+// three answers draws the fourth. The Model step is answered by the Model and its
+// Vendor together, because an id on its own does not name a Model.
 func stepFor(v wizard) string {
-	answered := map[string]string{"host": v.Host, "model": v.Model, "harness": v.Harness}
+	model := v.Model
+	if v.Vendor == "" {
+		model = ""
+	}
+	answered := map[string]string{"host": v.Host, "model": model, "harness": v.Harness}
 	for _, step := range steps {
 		if answered[step] == "" {
 			return step
@@ -149,6 +167,7 @@ func (c *client) modelChoices(ctx context.Context, host string) []modelChoice {
 	var body struct {
 		Vendors []struct {
 			Kind   string `json:"kind"`
+			Base   string `json:"base"`
 			Models []struct {
 				ID   string `json:"id"`
 				Caps struct {
@@ -167,7 +186,7 @@ func (c *client) modelChoices(ctx context.Context, host string) []modelChoice {
 	var out []modelChoice
 	for _, v := range body.Vendors {
 		for _, m := range v.Models {
-			out = append(out, modelChoice{ID: m.ID, Vendor: v.Kind, Capabilities: []string{
+			out = append(out, modelChoice{ID: m.ID, Vendor: v.Kind, Base: v.Base, Capabilities: []string{
 				capability("chat", m.Caps.Chat),
 				capability("tools", m.Caps.Tools),
 				capability("reasoning", m.Caps.Reasoning),
@@ -305,6 +324,7 @@ func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
 	body, err := json.Marshal(map[string]any{
 		"harness": r.FormValue("harness"),
 		"model":   r.FormValue("model"),
+		"vendor":  r.FormValue("vendor"),
 		"dir":     r.FormValue("dir"),
 		"policy":  chosenPolicy(r.Form),
 	})
@@ -319,12 +339,13 @@ func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	answer := readAnswer(resp)
 
 	if resp.StatusCode == protocol.StatusStarted {
 		var started struct {
 			Session string `json:"session"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&started) == nil && started.Session != "" {
+		if json.Unmarshal(answer, &started) == nil && started.Session != "" {
 			http.Redirect(w, r, sessionAt(host, started.Session), http.StatusSeeOther)
 			return
 		}
@@ -333,9 +354,32 @@ func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
 	// Every other answer is the Host saying no, and the wizard is where the user
 	// reads it. The refusal names the Session holding the slot and never a queue
 	// position, because there is no queue.
+	http.Redirect(w, r, backTo(r.Form, refusalIn(resp.StatusCode, answer)), http.StatusSeeOther)
+}
+
+// readAnswer is one command answer, whole and bounded. It is read before it is
+// looked at, because the same body is a refusal when the start was not one.
+func readAnswer(resp *http.Response) []byte {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, answerLimit))
+	return body
+}
+
+const answerLimit = 8 << 10
+
+// refusalIn is the Host saying no, read from whatever shape the no arrived in. A
+// Daemon refuses in JSON. A Host the Hub could not reach at all never got that
+// far, and the Hub writes that failure as plain text, so a refusal decoded only as
+// JSON would leave the user with a wizard that says nothing about why the start
+// did not happen.
+func refusalIn(status int, answer []byte) protocol.Refusal {
 	var refusal protocol.Refusal
-	json.NewDecoder(resp.Body).Decode(&refusal)
-	http.Redirect(w, r, backTo(r.Form, refusal), http.StatusSeeOther)
+	if json.Unmarshal(answer, &refusal) == nil && (refusal.Detail != "" || refusal.Reason != "") {
+		return refusal
+	}
+	if text := strings.TrimSpace(string(answer)); text != "" {
+		return protocol.Refusal{Detail: text}
+	}
+	return protocol.Refusal{Detail: fmt.Sprintf("this Host answered %d and said no more", status)}
 }
 
 // stop ends one Session and answers why it could not, or "" when it did. The
@@ -350,12 +394,11 @@ func (c *client) stop(ctx context.Context, host, id string) string {
 		return ""
 	}
 
-	var refusal protocol.Refusal
-	json.NewDecoder(resp.Body).Decode(&refusal)
-	if refusal.Detail != "" {
-		return id + " was not stopped: " + refusal.Detail
+	refusal := refusalIn(resp.StatusCode, readAnswer(resp))
+	if refusal.Detail == "" {
+		refusal.Detail = string(refusal.Reason)
 	}
-	return fmt.Sprintf("%s was not stopped, and this Host answered %d", id, resp.StatusCode)
+	return id + " was not stopped: " + refusal.Detail
 }
 
 // sameOrigin says whether an Origin header names the host this request came in
@@ -388,6 +431,7 @@ func backTo(form url.Values, refusal protocol.Refusal) string {
 	ask := url.Values{
 		"host":    {form.Get("host")},
 		"model":   {form.Get("model")},
+		"vendor":  {form.Get("vendor")},
 		"harness": {form.Get("harness")},
 		"dir":     {form.Get("dir")},
 		"refusal": {refusal.Detail},
