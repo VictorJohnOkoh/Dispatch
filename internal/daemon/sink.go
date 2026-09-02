@@ -89,7 +89,11 @@ func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
 	})
 }
 
+// Completed ends the Prompt, and is the first of the ledger's two triggers. A
+// Tool Call the Harness announced and never reported a result for ends unknown
+// here, before the boundary the Client reads as the end of the work.
 func (k *sink) Completed(stop event.StopReason, u event.Usage) {
+	k.d.closeCalls(k.s, nil)
 	k.d.write(k.s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: stop, Usage: u})
 }
 

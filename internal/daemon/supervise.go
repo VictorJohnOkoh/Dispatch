@@ -42,14 +42,23 @@ func (d *Daemon) spawner(s *Session, h *Harness) harness.Spawner {
 		if h.Exe == "" {
 			return harness.Pipes{}, fmt.Errorf("daemon: the Harness %q names no executable to spawn", h.Name)
 		}
-		// The tail is where the drain writes. It is what an Error Event quotes when
-		// the Harness dies, and the capped transcript will take it over.
-		kept := &stderrTail{}
-		p, pipes, err := spawn(h.Exe, s.dir, l, kept)
+		raw, err := newTranscript(d.transcripts, s.id)
 		if err != nil {
 			return harness.Pipes{}, err
 		}
-		d.sessions.setProcess(s, p)
+		// stderr goes to both. The tail is what an Error Event quotes when the Harness
+		// dies, and the transcript is where the whole of it is kept.
+		kept := &stderrTail{}
+		p, pipes, err := spawn(h.Exe, s.dir, l, io.MultiWriter(kept, raw))
+		if err != nil {
+			raw.Close()
+			return harness.Pipes{}, err
+		}
+		// The Adapter reads stdout through the transcript, so what it drops as output
+		// no Event Kind covers is still written down somewhere.
+		pipes.Out = io.TeeReader(pipes.Out, raw)
+
+		d.sessions.setProcess(s, p, raw)
 		go d.watchExit(s, p, kept)
 		return pipes, nil
 	}
