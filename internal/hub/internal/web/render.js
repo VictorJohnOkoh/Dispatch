@@ -18,7 +18,7 @@ function draw(kind, p) {
     case "PromptSubmitted":
       return { title: "Prompt", text: p.text };
     case "Reasoning":
-      return { title: "Reasoning", text: p.text, appendable: true };
+      return { title: "Reasoning", text: p.text, appendable: true, inset: true };
     case "AssistantMessage":
       return { title: "Assistant", text: p.text, appendable: true };
     case "ToolCallRequested":
@@ -27,13 +27,19 @@ function draw(kind, p) {
       return {
         title: `Tool call: ${p.name}`,
         detail: `${p.title} ${p.args == null ? "" : JSON.stringify(p.args)}`.trim(),
+        inset: true,
       };
     case "ApprovalRequested":
-      return { title: `Approval requested: ${p.title}`, detail: p.detail };
+      return { title: `Approval requested: ${p.title}`, detail: p.detail, inset: true, tone: "asking" };
     case "ApprovalDecided":
-      return { title: `Approval ${p.decision}`, detail: `decided by ${p.by}` };
+      return {
+        title: `Approval ${p.decision}`,
+        detail: `decided by ${p.by}`,
+        inset: true,
+        tone: p.decision === "refused" ? "bad" : "",
+      };
     case "ToolCallEnded":
-      return { title: `Tool call ${p.outcome}`, text: p.content };
+      return { title: `Tool call ${p.outcome}`, text: p.content, inset: true, tone: tone(p.outcome) };
     case "PromptCompleted":
       return {
         title: `Prompt completed: ${p.stopReason}`,
@@ -52,6 +58,15 @@ function draw(kind, p) {
     default:
       return { title: kind, detail: JSON.stringify(p) };
   }
+}
+
+// tone is the colour one Tool Call's end carries, and it is render.go's tone().
+// Unknown is grey rather than red, because nobody reporting a result is not the
+// same as a failure.
+function tone(outcome) {
+  if (outcome === "ok") return "ok";
+  if (outcome === "unknown") return "unknown";
+  return "bad";
 }
 
 // policyLine spells all five slots, because the Approval Policy is always all five

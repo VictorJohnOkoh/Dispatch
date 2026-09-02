@@ -7,6 +7,29 @@
 <link rel="stylesheet" href="/page.css">
 </head>
 <body data-host-state="Connecting">
+<nav class="rail">
+  <h1>Dispatch</h1>
+  <div id="rail">
+  {{- range .Rail}}
+  {{- if .Session}}
+  <a class="rrow{{if .On}} on{{end}}{{if not .Answering}} stale{{end}}"
+     href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}"
+     data-session-row="{{.Session}}" data-host="{{.Host}}">
+    <b>{{.Cwd}}</b>
+    <span class="meta">{{.Host}}</span>
+    <span class="pill" data-session-state="{{.SessionState}}">{{.SessionState}}</span>
+    <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
+  </a>
+  {{- else}}
+  <p class="rrow empty{{if not .Answering}} stale{{end}}" data-host="{{.Host}}">
+    <span class="meta">{{.Host}}</span>
+    <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
+  </p>
+  {{- end}}
+  {{- end}}
+  </div>
+</nav>
+<main class="desk">
 <header>
   <h1>{{.Session}}</h1>
   <p class="host">
@@ -15,7 +38,10 @@
     <span class="mark" id="host-mark">connecting</span>
     <time id="stale"></time>
   </p>
-  <p class="state" id="state" data-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</p>
+  <p class="pair">
+    <span class="pill" id="state" data-session-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</span>
+    <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
+  </p>
   <section class="vendors" aria-labelledby="vendors-title">
     <h2 id="vendors-title">Vendors</h2>
     <ul id="vendors"></ul>
@@ -23,7 +49,7 @@
 </header>
 <ol id="transcript" data-host="{{.Host}}" data-session="{{.Session}}" data-cursor="{{.Cursor}}">
 {{- range .Rows}}
-  <li class="row" data-seq="{{.Seq}}" data-kind="{{.Kind}}">
+  <li class="row{{if .Inset}} inset{{end}}" data-seq="{{.Seq}}" data-kind="{{.Kind}}"{{if .Tone}} data-tone="{{.Tone}}"{{end}}>
     <p class="title">{{.Title}}</p>
     {{- if or .Text .Appendable}}
     <pre class="text">{{.Text}}</pre>
@@ -34,6 +60,7 @@
   </li>
 {{- end}}
 </ol>
+</main>
 <script type="application/json" id="events">{{.Events}}</script>
 <script src="/fold.js"></script>
 <script src="/render.js"></script>

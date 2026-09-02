@@ -103,9 +103,11 @@ embedded.textContent = JSON.stringify([
 ]);
 
 const stateElement = new El("p");
-stateElement.dataset.state = "Starting";
+stateElement.dataset.sessionState = "Starting";
 stateElement.textContent = "Starting";
 
+// The rail's rows, which page.js redraws whole.
+const railNav = new El("div");
 const hostStateElement = new El("span");
 const hostCauseElement = new El("span");
 const hostMarkElement = new El("span");
@@ -119,6 +121,7 @@ globalThis.document = {
     transcript,
     state: stateElement,
     events: embedded,
+    rail: railNav,
     "host-state": hostStateElement,
     "host-cause": hostCauseElement,
     "host-mark": hostMarkElement,
@@ -153,6 +156,9 @@ globalThis.served = new Map();
 globalThis.fetched = [];
 globalThis.fetch = async (url) => {
   fetched.push(url);
+  if (url.startsWith("/rail/")) {
+    return { ok: true, json: async () => ({ rail: globalThis.railAnswer ?? [] }) };
+  }
   const after = new URL(url, "http://hub").searchParams.get("after") ?? "0";
   const page = served.get(after);
   if (page === undefined) return { ok: true, json: async () => ({ events: [] }) };
@@ -169,6 +175,7 @@ globalThis.dom = {
   staleElement,
   vendorsElement,
   embedded,
+  rail: railNav,
   body,
   row,
 };

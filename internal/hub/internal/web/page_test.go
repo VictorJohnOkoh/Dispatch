@@ -184,6 +184,45 @@ console.log(JSON.stringify({kind: row.dataset.kind, title: row.querySelector(".t
 	}
 }
 
+// An Event for a Session this page is not drawing is still news: it is a rail row
+// that has changed. The rail is redrawn from the Hub, because the browser holds no
+// history for a Session it is not drawing and a fold over the tail of one would be
+// a guess.
+func TestAnEventOnAnotherHostRedrawsTheRail(t *testing.T) {
+	var got struct {
+		Rows    []string `json:"rows"`
+		Fetched []string `json:"fetched"`
+	}
+	pageUnder(t, `
+railAnswer = [
+  {Host: "desk", Session: "s-1", Cwd: "/w", SessionState: "Working", Answering: true, On: true},
+  {Host: "attic", Session: "s-9", Cwd: "/other", SessionState: "Asking", Answering: true},
+  {Host: "shed", Answering: false},
+];
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested", payload: {toolCallId: "c1"}});
+setTimeout(() => {
+  console.log(JSON.stringify({
+    rows: dom.rail.children.map((r) => r.textContent),
+    fetched: fetched.filter((u) => u.startsWith("/rail/")),
+  }));
+}, 0);
+`, &got)
+
+	if len(got.Fetched) == 0 {
+		t.Fatal("an Event on another Host redrew nothing")
+	}
+	if len(got.Rows) != 3 {
+		t.Fatalf("the rail holds %v", got.Rows)
+	}
+	if !strings.Contains(got.Rows[1], "Asking") || !strings.Contains(got.Rows[1], "/other") {
+		t.Errorf("the other Host's Session reads %q", got.Rows[1])
+	}
+	// The pair, on a row for a Session this page is not drawing.
+	if !strings.Contains(got.Rows[2], "not answering") {
+		t.Errorf("the Host that is not answering reads %q", got.Rows[2])
+	}
+}
+
 func TestHostFramesShowStateCauseMarkAndStaleStamp(t *testing.T) {
 	var got struct {
 		Connecting struct {
@@ -291,7 +330,10 @@ func TestAnEventThatArrivesDuringAResyncSurvivesTheCommit(t *testing.T) {
 	}
 	pageUnder(t, `
 let answer;
-globalThis.fetch = () => new Promise((resolve) => {
+// The rail reads through the same fetch, and this test holds the transcript's
+// read open, so the rail keeps the fixture's answer.
+const rail = globalThis.fetch;
+globalThis.fetch = (url) => url.startsWith("/rail/") ? rail(url) : new Promise((resolve) => {
   answer = () => resolve({ok: true, json: async () => ({events: []})});
 });
 opened.send("resync", {host: "desk"});
@@ -305,5 +347,33 @@ setTimeout(() => console.log(JSON.stringify({
 
 	if got.Rows != 1 || got.State != "Idle" {
 		t.Errorf("the resync commit left %d rows and State %q", got.Rows, got.State)
+	}
+}
+
+// The stylesheet draws Asking and Ended off one attribute, and the live update
+// has to write that same one. An update that wrote another name would leave the
+// pill's text right and its styling stuck on whatever the first paint drew.
+func TestTheLiveStateWritesTheAttributeTheStylesheetReads(t *testing.T) {
+	var got string
+	pageUnder(t, `
+const frames = [
+  {seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}},
+  {seq: 2, kind: "PromptSubmitted", payload: {text: "go"}},
+  {seq: 3, kind: "ToolCallRequested", payload: {toolCallId: "c1", name: "bash"}},
+  {seq: 4, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "run it"}},
+];
+for (const f of frames) opened.send("event", {host: "desk", session: "s-1", ...f});
+console.log(JSON.stringify(dom.stateElement.dataset.sessionState));
+`, &got)
+
+	if got != "Asking" {
+		t.Errorf("the state pill carries %q, and the stylesheet reads data-session-state", got)
+	}
+	css, err := files.ReadFile("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), `[data-session-state^="Asking"]`) {
+		t.Error("the stylesheet no longer draws Asking off data-session-state, so the page and it have parted")
 	}
 }

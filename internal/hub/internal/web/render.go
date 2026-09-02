@@ -21,7 +21,29 @@ type row struct {
 	Text       string
 	Detail     string
 	Appendable bool
+
+	// Inset is a row that belongs to the Prompt above it rather than to the
+	// Session: a Tool Call, its question, its answer and its end.
+	//
+	// It is the second and last level. ToolCallRequested carries no parent id, so
+	// no Client can draw a Tool Call inside another one without inventing a
+	// relation no Event states, and this flag has no third value to invent it with.
+	Inset bool
+
+	// Tone colours the row's edge. It is empty on everything but a Tool Call that
+	// ended, which is the one place the outcome is worth a colour.
+	Tone string
 }
+
+// The tones a Tool Call ends in. Unknown is grey and not red: it means nobody
+// reported a result, which is the Harness going quiet rather than a failure, and
+// there is nothing for the user to do about it.
+const (
+	toneOK      = "ok"
+	toneBad     = "bad"
+	toneUnknown = "unknown"
+	toneAsking  = "asking"
+)
 
 // rows draws the whole transcript. An Event that cannot be decoded at all is
 // dropped rather than failing the page, because one bad row must not cost the
@@ -83,21 +105,29 @@ func draw(e event.Event) row {
 	case *event.Reasoning:
 		r.Title = "Reasoning"
 		r.Text, r.Appendable = p.Text, true
+		r.Inset = true
 	case *event.AssistantMessage:
 		r.Title = "Assistant"
 		r.Text, r.Appendable = p.Text, true
 	case *event.ToolCallRequested:
 		r.Title = "Tool call: " + p.Name
 		r.Detail = strings.TrimSpace(p.Title + " " + args(p.Args))
+		r.Inset = true
 	case *event.ApprovalRequested:
 		r.Title = "Approval requested: " + p.Title
 		r.Detail = p.Detail
+		r.Inset, r.Tone = true, toneAsking
 	case *event.ApprovalDecided:
 		r.Title = "Approval " + string(p.Decision)
 		r.Detail = "decided by " + string(p.By)
+		r.Inset = true
+		if p.Decision == event.DecisionRefused {
+			r.Tone = toneBad
+		}
 	case *event.ToolCallEnded:
 		r.Title = "Tool call " + string(p.Outcome)
 		r.Text = p.Content
+		r.Inset, r.Tone = true, tone(p.Outcome)
 	case *event.PromptCompleted:
 		r.Title = "Prompt completed: " + string(p.StopReason)
 		r.Detail = fmt.Sprintf("%d in, %d out, %d total", p.Usage.Input, p.Usage.Output, p.Usage.Total)
@@ -110,6 +140,19 @@ func draw(e event.Event) row {
 		r.Detail = compact(p)
 	}
 	return r
+}
+
+// tone is the colour one Tool Call's end carries. Unknown is grey rather than
+// red, because nobody reporting a result is not the same as a failure.
+func tone(outcome event.Outcome) string {
+	switch outcome {
+	case event.OutcomeOK:
+		return toneOK
+	case event.OutcomeUnknown:
+		return toneUnknown
+	default:
+		return toneBad
+	}
 }
 
 // compact spells a raw payload the way render.js spells it. The Hub forwards what

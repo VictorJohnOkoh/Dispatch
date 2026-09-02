@@ -264,6 +264,13 @@ func (d *Daemon) kill(s *Session) {
 // The Cursor beside them is where the log stood when they were read, so a Client
 // that opens the stream there loses nothing that fell in between.
 func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
+	// The read waits for the write in flight. A Client asks for this list because
+	// an Event told it something changed, and the log sends an Event before the
+	// Session it belongs to has recorded it, so a read that did not wait could
+	// answer with the state from before the Event and stay wrong until the next.
+	d.writing.RLock()
+	defer d.writing.RUnlock()
+
 	// The Cursor is read first. One read behind the data replays what the answer
 	// already carried, which costs a redrawn row; one read ahead of it drops what
 	// landed in between, which is the loss this Cursor exists to prevent.
