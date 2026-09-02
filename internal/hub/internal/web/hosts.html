@@ -18,8 +18,8 @@
   <header>
     <b>{{.Host}}</b>
     <span class="pill host" data-host-state="{{.State}}">{{.State}}{{if .Cause}} {{.Cause}}{{end}}</span>
-    {{- if .Seen}}
-    <span class="stamp">as of {{.Seen}}</span>
+    {{- if .Asked}}
+    <span class="stamp">asked at {{.Asked}}, and it did not answer</span>
     {{- end}}
   </header>
 

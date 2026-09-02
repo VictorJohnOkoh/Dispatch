@@ -46,8 +46,10 @@ func TestTheHostsViewListsEveryHostAndStartsNothing(t *testing.T) {
 	}
 }
 
-// A Host is never hidden for being unreachable, and its Sessions keep their
-// last-known state beside it rather than disappearing.
+// A Host is never hidden for being unreachable. Its Sessions keeping their
+// last-known state beside it is the half this build owes: the rail reads a Host's
+// Sessions live, so a Host that says nothing contributes none, and the Hub has
+// nowhere to keep what it last said until it tracks presence.
 func TestAHostThatIsNotAnsweringKeepsItsCardAndItsSessions(t *testing.T) {
 	body := machines(t)
 
@@ -55,8 +57,10 @@ func TestAHostThatIsNotAnsweringKeepsItsCardAndItsSessions(t *testing.T) {
 	if !strings.Contains(attic, `data-host-state="Down"`) {
 		t.Errorf("the Host that said nothing is drawn as %q", attic)
 	}
-	// Down dims and stamps, and the stamp is when the content was true.
-	if !strings.Contains(attic, "as of ") {
+	// Down dims and stamps. The stamp is when this Hub asked and got nothing, which
+	// is what it can say: it remembers nothing about a Host between reads, so there
+	// is no earlier content and no earlier time to put on one.
+	if !strings.Contains(attic, "asked at ") {
 		t.Error("a Down Host carries no stamp, so the page claims to be current")
 	}
 
@@ -64,7 +68,7 @@ func TestAHostThatIsNotAnsweringKeepsItsCardAndItsSessions(t *testing.T) {
 	if !strings.Contains(desk, `data-host-state="Ready"`) {
 		t.Errorf("the Host that answered is drawn as %q", desk)
 	}
-	if strings.Contains(desk, "as of ") {
+	if strings.Contains(desk, "asked at ") {
 		t.Error("a Host that is answering is stamped, and its content is current")
 	}
 	if !strings.Contains(desk, "s-1") || !strings.Contains(desk, `data-session-state="Working"`) {

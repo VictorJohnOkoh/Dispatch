@@ -31,10 +31,15 @@ type card struct {
 	// rather than guessing.
 	Cause string
 
-	// Seen is when this card's content was last true, stamped on a Host that is not
-	// answering. Stale is last-known content with the time it was true on it, and a
-	// card with no stamp would be a card claiming to be current.
-	Seen string
+	// Asked is when this Hub last put the question to this Host, stamped on a card
+	// whose Host did not answer it.
+	//
+	// It is deliberately not the time the content was true, which is what Stale
+	// asks for. The Hub remembers nothing about a Host between reads, so a Down
+	// Host has no last-known content to keep and no earlier time to stamp on it.
+	// What this card can say honestly is when it asked and got nothing, and the
+	// Hub's own presence tracking is what will let it say the other.
+	Asked string
 
 	// Sessions is this Host's, last known. They keep their state beside a Host that
 	// is not answering rather than disappearing, because a Session on a machine
@@ -79,12 +84,12 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 			view.Cards[i].Sessions = append(view.Cards[i].Sessions, e)
 		}
 	}
-	// The stamp is now, because now is when this page read them. A Host that is not
-	// answering carries it and one that is does not, which is what Stale means.
-	stamp := time.Now().UTC().Format(time.RFC3339)
+	// A Host that answered needs no stamp: what is on its card is current. One that
+	// did not carries the time it was asked.
+	asked := time.Now().UTC().Format(time.RFC3339)
 	for i := range view.Cards {
 		if view.Cards[i].State != stateReady {
-			view.Cards[i].Seen = stamp
+			view.Cards[i].Asked = asked
 		}
 	}
 
