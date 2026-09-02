@@ -498,3 +498,44 @@ console.log(JSON.stringify(seen));
 		}
 	}
 }
+
+// Precedence: Host State, then the HTTP status, then an Event, then the
+// operational log. A user looking at a Down Host is not also told that its Vendor
+// stopped answering, because that is what a machine nobody can reach looks like.
+func TestADownHostDoesNotAlsoRaiseItsVendorsFailure(t *testing.T) {
+	var got struct {
+		Ready string `json:"ready"`
+		Down  string `json:"down"`
+		After string `json:"after"`
+	}
+	hostsUnder(t, `
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3.5-9b"}]},
+]});
+const ready = page.get("desk").row.textContent;
+
+// The Host goes. Its Vendor row says the Host is not answering, and not that its
+// Vendor is: one failure reaches the user, and it is the one furthest up.
+opened.send("host", {host: "desk", state: "Down", cause: "unreachable"});
+const down = page.get("desk").row.textContent;
+
+// A vendors frame that was already in flight when the Host went changes nothing.
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: []},
+]});
+console.log(JSON.stringify({ready, down, after: page.get("desk").row.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Ready, "qwen3.5-9b") {
+		t.Fatalf("the row read %q while the Host was answering", got.Ready)
+	}
+	if !strings.Contains(got.Down, "this Host is not answering") {
+		t.Errorf("a Down Host's Vendor row reads %q", got.Down)
+	}
+	if strings.Contains(got.Down, "not answering") && strings.Count(got.Down, "not answering") != 1 {
+		t.Errorf("the row says it twice: %q", got.Down)
+	}
+	if got.After != got.Down {
+		t.Errorf("a late vendors frame rewrote a Down Host's row: %q", got.After)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,9 +42,20 @@ func TestMergedStreamSendsKeepaliveWhileHostsAreIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	line, err := bufio.NewReader(resp.Body).ReadString('\n')
-	if err != nil || line != ": keepalive\n" {
-		t.Fatalf("first idle-stream line = %q, %v", line, err)
+	// The Host State comes first, because a Client that has not been told what a
+	// Host is has nothing to draw. What follows it on an idle stream is the beat.
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("the idle stream ended: %v", err)
+		}
+		if line == ": keepalive\n" {
+			return
+		}
+		if !strings.HasPrefix(line, "event: host") && !strings.HasPrefix(line, "data:") && line != "\n" {
+			t.Fatalf("an idle stream said %q", line)
+		}
 	}
 }
 

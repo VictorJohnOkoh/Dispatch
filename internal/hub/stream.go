@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,10 +25,18 @@ const (
 	firstDelay = time.Second
 	maxDelay   = time.Minute
 
-	// steadyFor is how long one connection must last before the curve starts over.
-	// A shorter one is a flap, and a flap that reset the curve would let a
-	// flapping Host redial at full speed forever.
+	// steadyFor is how long one connection must have been Ready before the curve
+	// starts over. A shorter one is a flap, and a flap that reset the curve would
+	// let a flapping Host redial at full speed forever.
 	steadyFor = time.Minute
+)
+
+// The curve, for a test to read rather than to restate. A test that wrote the
+// numbers out again would pass while the code held different ones.
+const (
+	FirstDelay = firstDelay
+	MaxDelay   = maxDelay
+	SteadyFor  = steadyFor
 )
 
 type daemonFrame struct {
@@ -133,6 +142,12 @@ type hostReader struct {
 	// could not name the log it came from. The Client learns that from the resync
 	// that follows the Hello.
 	unknownLog bool
+
+	// state is what this Hub last told the Client about this Host. It is held only
+	// to keep from saying the same thing twice: Host State is derived from the
+	// connection below, never stored, and this is one connection's memory of what
+	// it has already said.
+	state protocol.HostState
 }
 
 // run reads this Host until the Client leaves. It retries forever, so a Host the
@@ -140,9 +155,14 @@ type hostReader struct {
 func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 	delay := firstDelay
 	for ctx.Err() == nil {
-		start := time.Now()
+		r.says(ctx, protocol.Connecting, "", out)
+		ready := time.Now()
 		r.once(ctx, out)
-		if time.Since(start) >= steadyFor {
+
+		// The curve starts over only after a connection that was Ready for a whole
+		// minute. A shorter one is a flap, and a flap that reset the curve would let
+		// a flapping Host redial at full speed forever.
+		if r.state == protocol.Ready && time.Since(ready) >= steadyFor {
 			delay = firstDelay
 		}
 		if !sleep(ctx, jitter(delay)) {
@@ -152,10 +172,29 @@ func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 	}
 }
 
+// says tells the Client what this Host is, unless it has said so already. The
+// frame is the Hub's own: it cannot be an Event, because every Event carries a
+// Session id and a Host that is down has no Session to carry one.
+func (r *hostReader) says(ctx context.Context, state protocol.HostState, why protocol.Cause, out chan<- daemonFrame) bool {
+	if r.state == state {
+		return true
+	}
+	r.state = state
+	body, _ := json.Marshal(protocol.HostStateFrame{Host: string(r.id), State: state, Cause: why})
+	select {
+	case out <- daemonFrame{host: r.id, name: string(protocol.FrameHost), data: body}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // once holds one connection to this Host's Daemon and reads it until it ends.
 func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) {
 	conn, err := r.hub.dialer.Dial(ctx, r.id)
 	if err != nil {
+		// Nothing answered at all, which is a machine that is not there.
+		r.says(ctx, protocol.Down, protocol.Unreachable, out)
 		return
 	}
 	defer conn.Close()
@@ -176,15 +215,50 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) {
 		req.Header.Set(protocol.LogHeader, logID)
 	}
 	if err := req.Write(conn); err != nil {
+		r.says(ctx, protocol.Down, protocol.NoDaemon, out)
 		return
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
+		// The tunnel opened and nothing was behind it, which is a different problem
+		// for the user: the machine is there and its Daemon is not.
+		r.says(ctx, protocol.Down, protocol.NoDaemon, out)
 		return
 	}
 	defer resp.Body.Close()
-	r.read(ctx, resp.Body, out)
+	if resp.StatusCode != http.StatusOK {
+		r.says(ctx, protocol.Down, protocol.NoDaemon, out)
+		return
+	}
+
+	// The stream is live, so the Host is Ready. Presence is connection liveness and
+	// nothing else: there is no health check and no ping endpoint.
+	if !r.says(ctx, protocol.Ready, "", out) {
+		return
+	}
+	r.read(ctx, timed(ctx, conn, resp.Body), out)
+
+	// The connection ended. Whether that is a machine that went away or a Daemon
+	// that stopped is not knowable from here, so the next dial says which.
+	r.says(ctx, protocol.Connecting, "", out)
 }
+
+// timed makes a read that stops arriving fail rather than hang. The Daemon beats
+// every KeepaliveInterval, so a connection that says nothing for StaleAfter is one
+// the Client must be told about: a stream that is open and silent looks exactly
+// like a stream that is working.
+//
+// Every line pushes the deadline out, and a keepalive comment is a line.
+func timed(ctx context.Context, conn net.Conn, body io.Reader) io.Reader {
+	return readerFunc(func(p []byte) (int, error) {
+		conn.SetReadDeadline(time.Now().Add(protocol.StaleAfter))
+		return body.Read(p)
+	})
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
 
 // read splits SSE into Frames. It parses no body but the Hello's, so an Event Kind
 // this build has never heard of still reaches the Client.

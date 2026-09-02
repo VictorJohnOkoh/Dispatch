@@ -47,6 +47,52 @@ const (
 	FrameHost Frame = "host"
 )
 
+// HostState is the Hub's view of one Host, and the only place that view exists.
+// It is derived from the liveness of the Hub's Event stream to that Host and it is
+// never stored.
+type HostState string
+
+const (
+	// Connecting is a Host the Hub is reaching for. It absorbs a blink: a Client
+	// keeps its content at full strength here, because the connection is usually
+	// back before the wait that makes it Down.
+	Connecting HostState = "Connecting"
+
+	// Ready is a Host whose Event stream is live. Nothing else makes a Host Ready:
+	// there is no health check and no ping endpoint.
+	Ready HostState = "Ready"
+
+	// Down is a Host that is not answering, and it always carries a cause.
+	Down HostState = "Down"
+
+	// Incompatible is a Host that failed the Handshake. The Hub never retries one.
+	Incompatible HostState = "Incompatible"
+)
+
+// Cause is why a Host is Down, and the two are different problems for the user:
+// one is a machine that is not there and the other is a machine that is.
+type Cause string
+
+const (
+	Unreachable Cause = "unreachable" // nothing answered at all
+	NoDaemon    Cause = "no-daemon"   // the tunnel opened and nothing was behind it
+)
+
+// HostStateFrame is the body of a host frame. It is the whole reason the Client
+// can draw the pair on a Session row: Session State comes from Events, and this
+// comes from nowhere but here.
+type HostStateFrame struct {
+	Host  string    `json:"host"`
+	State HostState `json:"state"`
+	Cause Cause     `json:"cause,omitempty"`
+}
+
+// StaleAfter is how long the Hub waits on a live connection before it calls the
+// Host Down. The Daemon beats every KeepaliveInterval, so this is two beats and a
+// half: long enough that one late beat is not a failure, short enough that a
+// pulled cable reaches the user while they are still looking at the screen.
+const StaleAfter = 25 * time.Second
+
 // OriginatedByHub reports whether the Hub makes this Frame rather than forwarding
 // it. Only FrameHost is. Everything else the Hub reads, stamps with a Host and
 // writes out without parsing, which is what lets an Event Kind it has never heard
