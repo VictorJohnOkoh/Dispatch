@@ -769,3 +769,43 @@ console.log(JSON.stringify(dom.stateElement.dataset.sessionState));
 		t.Error("the stylesheet no longer draws Asking off data-session-state, so the page and it have parted")
 	}
 }
+
+// The Host half of the pair is the Host State itself. It used to be a pill the
+// server drew once and nothing ever wrote again, so a Session on a Host that went
+// Down kept a pill reading "answering".
+func TestTheHostPillFollowsTheHostFrame(t *testing.T) {
+	var got struct {
+		Down string `json:"down"`
+		Back string `json:"back"`
+	}
+	pageUnder(t, `
+opened.send("host", {host: "desk", state: "Down", cause: "no-daemon"});
+const down = dom.hostStateElement.dataset.hostState;
+opened.send("host", {host: "desk", state: "Ready"});
+console.log(JSON.stringify({down, back: dom.hostStateElement.dataset.hostState}));
+`, &got)
+
+	if got.Down != "Down" || got.Back != "Ready" {
+		t.Errorf("the pill read %q then %q", got.Down, got.Back)
+	}
+}
+
+// Nothing on the Session page says how the Host is except the pair's Host half,
+// which the stream writes. A second, frozen answer is a second answer that is wrong.
+func TestTheSessionHeaderCarriesNoFrozenHostPill(t *testing.T) {
+	markup, err := os.ReadFile("page.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, desk, found := strings.Cut(string(markup), `<main class="desk">`)
+	if !found {
+		t.Fatal("page.html has no desk")
+	}
+	header, _, found := strings.Cut(desk, "</header>")
+	if !found {
+		t.Fatal("page.html has no header")
+	}
+	if strings.Contains(header, "data-host-answering") {
+		t.Error("the header still draws a Host pill the stream never writes")
+	}
+}

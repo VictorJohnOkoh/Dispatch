@@ -402,6 +402,7 @@ stream.addEventListener("host", (frame) => {
   document.body.dataset.hostState = f.state;
   document.body.dataset.hostCause = f.cause ?? "";
   hostStateLine.textContent = f.state;
+  hostStateLine.dataset.hostState = f.state;
   hostCauseLine.textContent = f.cause ?? "";
   hostMark.textContent = f.state === "Connecting" ? "reconnecting" : "";
   if (f.state === "Down") {

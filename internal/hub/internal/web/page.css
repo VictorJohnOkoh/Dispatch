@@ -138,6 +138,7 @@ body { max-width: none; }
 
 .pill[data-session-state^="Asking"] { border-color: #b8860b; font-weight: 600; }
 .pill[data-session-state^="Ended"] { opacity: 0.6; }
+.pill.host[data-host-state="Down"], .pill.host[data-host-state="Incompatible"] { border-color: #c05050; }
 .pill.host[data-host-answering="false"] { border-color: #c05050; }
 
 /* A Tool Call, its question, its answer and its end belong to the Prompt above

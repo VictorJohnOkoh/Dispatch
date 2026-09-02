@@ -45,7 +45,12 @@ stateElement.textContent = "Starting";
 
 // The rail's rows, which page.js redraws whole.
 const railNav = new El("div");
+// The Host half of the pair, as page.html leaves it: a pill that already carries a
+// state, so a page.js that only wrote the text would still read as Connecting.
 const hostStateElement = new El("span");
+hostStateElement.className = "pill host";
+hostStateElement.dataset.hostState = "Connecting";
+hostStateElement.textContent = "Connecting";
 const hostCauseElement = new El("span");
 const hostMarkElement = new El("span");
 const staleElement = new El("span");
