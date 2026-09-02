@@ -9,7 +9,7 @@ import (
 )
 
 // page.js is the wiring, and this drives it under node against a page small
-// enough to read: testdata/dom.js is the surface page.js actually touches. What
+// enough to read: el.js is the element and dom.js the page page.js touches. What
 // runs here is the file the browser is served, not a copy of it.
 
 // pageUnder loads fold.js, render.js and page.js over the stub page, runs the
@@ -19,7 +19,7 @@ func pageUnder(t *testing.T, script string, into any) {
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/dom.js", "fold.js", "render.js", "page.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js", "page.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -230,14 +230,10 @@ func hostsUnder(t *testing.T, script string, into any) {
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/dom.js", "testdata/machines.js", "hosts.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/machines.js", "hosts.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
-		}
-		// dom.js is the element and the pipes; its own page is not wanted here.
-		if name == "testdata/dom.js" {
-			source = []byte(strings.SplitN(string(source), "// row is one row", 2)[0])
 		}
 		program.WriteString(string(source))
 		program.WriteString("\n")
@@ -267,7 +263,7 @@ func TestAnUnreachableVendorEmptiesItsRow(t *testing.T) {
 opened.send("vendors", {host: "desk", vendors: [
   {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3.5-9b"}]},
 ]});
-const filled = cards.get("desk").row.textContent;
+const filled = page.get("desk").row.textContent;
 
 // The same Vendor, now not answering. What it was holding goes with it.
 opened.send("vendors", {host: "desk", vendors: [
@@ -275,8 +271,8 @@ opened.send("vendors", {host: "desk", vendors: [
 ]});
 console.log(JSON.stringify({
   filled,
-  emptied: cards.get("desk").row.textContent,
-  other: cards.get("attic").row.textContent,
+  emptied: page.get("desk").row.textContent,
+  other: page.get("attic").row.textContent,
 }));
 `, &got)
 
@@ -308,7 +304,7 @@ for (const f of [
   {host: "desk", state: "Ready"},
 ]) {
   opened.send("host", f);
-  seen.push(cards.get("desk").section.dataset.hostState + " " + cards.get("desk").pill.textContent);
+  seen.push(page.get("desk").section.dataset.hostState + " " + page.get("desk").pill.textContent);
 }
 console.log(JSON.stringify(seen));
 `, &got)

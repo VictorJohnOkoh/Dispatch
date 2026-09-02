@@ -17,7 +17,11 @@ h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
 
 /* A Host that is not answering dims its page and keeps showing what it last knew,
    because a Host is never hidden for being unreachable. */
-body[data-host-state="Down"], body[data-host-state="Connecting"] { opacity: 0.6; }
+/* Only Down dims. Connecting is a Host the Hub is still reaching, and the blink
+   is usually over before the wait that makes it Down, so its content stays at
+   full strength and its edge carries the mark. */
+body[data-host-state="Down"] { opacity: 0.6; }
+body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
 
 #transcript { list-style: none; margin: 0; padding: 0; }
 
@@ -90,9 +94,9 @@ body[data-host-state="Down"], body[data-host-state="Connecting"] { opacity: 0.6;
 /* Down dims and stamps: this machine is gone, and what is on screen is the last
    thing it said. Connecting keeps its content at full strength and marks its
    edge, because the blink is usually over before it becomes Down. */
-[data-host-state="Down"] { opacity: 0.55; }
-[data-host-state="Connecting"] { box-shadow: inset 2px 0 0 #b8860b; }
-[data-host-state="Incompatible"] { box-shadow: inset 2px 0 0 #8b5cf6; }
+.card[data-host-state="Down"] { opacity: 0.55; }
+.card[data-host-state="Connecting"] { box-shadow: inset 2px 0 0 #b8860b; }
+.card[data-host-state="Incompatible"] { box-shadow: inset 2px 0 0 #8b5cf6; }
 .stamp { font-size: 0.75rem; border: 1px dashed rgba(184, 134, 11, 0.7); border-radius: 4px; padding: 0 0.4rem; }
 .vendors [data-reachable="false"] { opacity: 0.7; }
 

@@ -45,6 +45,11 @@ type entry struct {
 
 	// On marks the Session the page is drawing in full.
 	On bool
+
+	// At is where this Host's log stood when it answered. A page that opens the
+	// merged stream from here is sent what happens next rather than every Event
+	// this Host has ever written.
+	At protocol.Cursor
 }
 
 // sessionRow is one row of a Daemon's GET /v1/sessions, read for the rail.
@@ -113,7 +118,8 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 	}
 
 	var body struct {
-		Sessions []sessionRow `json:"sessions"`
+		Sessions []sessionRow    `json:"sessions"`
+		Cursor   protocol.Cursor `json:"cursor"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return quiet
@@ -127,13 +133,13 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 		}
 		out = append(out, entry{
 			Host: host, Session: s.ID, Cwd: s.Cwd, Harness: s.Harness, Model: s.Model,
-			SessionState: state, Answering: true,
+			SessionState: state, Answering: true, At: body.Cursor,
 		})
 	}
 	// A Host that answered with nothing is a Host with no Sessions, and it keeps
 	// its row. A Host is never hidden, and neither is an empty one.
 	if len(out) == 0 {
-		return []entry{{Host: host, Answering: true}}
+		return []entry{{Host: host, Answering: true, At: body.Cursor}}
 	}
 	return out
 }

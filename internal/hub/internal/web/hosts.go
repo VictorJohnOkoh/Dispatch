@@ -3,6 +3,8 @@ package web
 import (
 	"net/http"
 	"time"
+
+	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
 // The Hosts view shows machines. It is read only: starting a Session is the
@@ -19,11 +21,9 @@ const hostsRoute = "GET /hosts"
 type card struct {
 	Host string
 
-	// State is the Host State, and the Hub reports two of its four today: a Host
-	// that answered is Ready and one that did not is Down. Connecting and
-	// Incompatible arrive with the Hub's own presence tracking, and the card draws
-	// all four already, because what they look like is this view's decision and not
-	// that one's.
+	// State is the Host State. The Hub reports two of the four today, from one read:
+	// a Host that answered is Ready and one that did not is Down. The card draws all
+	// four, because what each looks like is this view's to decide.
 	State string
 
 	// Cause is why a Down Host is down, which is unreachable or no-daemon. The Hub
@@ -56,9 +56,11 @@ const (
 	stateIncompatible = "Incompatible"
 )
 
-// hostsView is the page.
+// hostsView is the page. Cursor is where every answering Host's log stood when
+// this page was drawn, so the stream it opens is sent what happens next.
 type hostsView struct {
-	Cards []card
+	Cards  []card
+	Cursor string
 }
 
 // machinesPage draws every configured Host, in the order the config named them,
@@ -72,6 +74,7 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 		at[host] = i
 	}
 
+	drawn := protocol.MergedCursor{}
 	for _, e := range c.rail(r.Context(), "", "") {
 		i, ok := at[e.Host]
 		if !ok {
@@ -79,6 +82,7 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 		}
 		if e.Answering {
 			view.Cards[i].State = stateReady
+			drawn[e.Host] = e.At
 		}
 		if e.Session != "" {
 			view.Cards[i].Sessions = append(view.Cards[i].Sessions, e)
@@ -92,9 +96,8 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 			view.Cards[i].Asked = asked
 		}
 	}
+	view.Cursor = drawn.String()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := machines.Execute(w, view); err != nil {
-		return
-	}
+	machines.Execute(w, view)
 }

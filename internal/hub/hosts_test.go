@@ -50,7 +50,7 @@ func TestTheHostsViewListsEveryHostAndStartsNothing(t *testing.T) {
 // last-known state beside it is the half this build owes: the rail reads a Host's
 // Sessions live, so a Host that says nothing contributes none, and the Hub has
 // nowhere to keep what it last said until it tracks presence.
-func TestAHostThatIsNotAnsweringKeepsItsCardAndItsSessions(t *testing.T) {
+func TestAHostThatIsNotAnsweringKeepsItsCardAndSaysSo(t *testing.T) {
 	body := machines(t)
 
 	attic := section(t, body, "attic")
@@ -81,14 +81,28 @@ func TestAHostThatIsNotAnsweringKeepsItsCardAndItsSessions(t *testing.T) {
 func TestTheVendorRowWaitsForTheStream(t *testing.T) {
 	body := machines(t)
 
-	for _, host := range []string{"desk", "attic"} {
-		card := section(t, body, host)
-		if !strings.Contains(card, `data-vendors="`+host+`"`) {
-			t.Errorf("%s has no Vendor row", host)
-		}
-		if !strings.Contains(card, "waiting for this Host's Vendors") {
-			t.Errorf("%s draws a Vendor row the server made up", host)
-		}
+	desk := section(t, body, "desk")
+	if !strings.Contains(desk, `data-vendors="desk"`) || !strings.Contains(desk, "waiting for this Host's Vendors") {
+		t.Errorf("the answering Host draws a Vendor row the server made up: %s", desk)
+	}
+
+	// A Host that is not answering sends no frame, so its row would wait forever.
+	// It says what it is instead.
+	attic := section(t, body, "attic")
+	if !strings.Contains(attic, "not answering, so what it serves is not known") {
+		t.Errorf("the Host that said nothing waits forever for a frame it will not send: %s", attic)
+	}
+
+	// The page carries the Cursor every answering Host's log stood at, so the
+	// stream it opens is sent what happens next rather than the whole log.
+	if !strings.Contains(body, `data-cursor="desk=`) {
+		t.Error("the page opens its stream from nowhere, and a Host would replay its log into it")
+	}
+
+	// The page carries the Cursor every answering Host's log stood at, so the
+	// stream it opens is sent what happens next rather than the whole log.
+	if !strings.Contains(body, `data-cursor="desk=`) {
+		t.Error("the page opens its stream from nowhere, and a Host would replay its log into it")
 	}
 }
 

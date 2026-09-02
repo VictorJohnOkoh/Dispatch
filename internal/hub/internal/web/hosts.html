@@ -6,7 +6,7 @@
 <title>Hosts</title>
 <link rel="stylesheet" href="/page.css">
 </head>
-<body>
+<body data-cursor="{{.Cursor}}">
 <main class="machines">
 <header>
   <h1>Hosts</h1>
@@ -28,7 +28,11 @@
          rather than letting a remembered list outlive the Vendor that served
          it, so it starts empty and the stream fills it. */}}
   <ul class="vendors" data-vendors="{{.Host}}">
+    {{- if eq .State "Ready"}}
     <li class="meta waiting">waiting for this Host's Vendors</li>
+    {{- else}}
+    <li class="meta">this Host is not answering, so what it serves is not known</li>
+    {{- end}}
   </ul>
 
   <ul class="sessions">

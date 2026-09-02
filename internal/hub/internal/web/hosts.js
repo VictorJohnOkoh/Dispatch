@@ -7,11 +7,31 @@
 // same frame carries whether the Vendor answered, so a Vendor that stops
 // answering empties its row rather than leaving a remembered list behind.
 
-const stream = new EventSource("/v1/events");
+// The page's cards and their Vendor rows, read once from the page by the two
+// selectors this file holds. Neither is built from a Host id: a selector made
+// from data is a selector an id can break, and one that throws stops every frame
+// after it.
+const rows = byHost("[data-vendors]", (el) => el.dataset.vendors);
+const cards = byHost("[data-host]", (el) => el.dataset.host);
+
+function byHost(selector, id) {
+  const found = new Map();
+  for (const el of document.querySelectorAll(selector)) found.set(id(el), el);
+  return found;
+}
+
+// The stream resumes where the page was drawn, so the Hosts view is sent what
+// happens next rather than every Event every Host has ever written.
+const stream = new EventSource("/v1/events?from=" + encodeURIComponent(at()));
+
+function at() {
+  const cursor = document.querySelectorAll("[data-cursor]")[0];
+  return cursor ? cursor.dataset.cursor : "";
+}
 
 stream.addEventListener("vendors", (frame) => {
   const f = JSON.parse(frame.data);
-  const row = document.querySelector(`[data-vendors="${cssEscape(f.host)}"]`);
+  const row = rows.get(f.host);
   if (!row) return;
 
   const drawn = [];
@@ -36,12 +56,15 @@ stream.addEventListener("vendors", (frame) => {
   row.replaceChildren(...drawn);
 });
 
-// A host frame is the Hub's own, and the only Frame it originates. Connecting
-// keeps its content at full strength with a mark, because the blink is usually
-// over before it becomes Down; only Down dims and stamps.
+// A host frame is the Hub's own, and the only Frame it originates. Nothing sends
+// one yet: the Hub starts reporting Host State when it tracks presence, and what
+// each of the four looks like is this view's to decide before then.
+//
+// Connecting keeps its content at full strength with a mark, because the blink is
+// usually over before it becomes Down. Only Down dims and stamps.
 stream.addEventListener("host", (frame) => {
   const f = JSON.parse(frame.data);
-  const card = document.querySelector(`[data-host="${cssEscape(f.host)}"]`);
+  const card = cards.get(f.host);
   if (!card) return;
   card.dataset.hostState = f.state;
   const pill = card.querySelector(".pill");
@@ -56,10 +79,4 @@ function node(tag, className, text) {
   el.className = className;
   el.textContent = text ?? "";
   return el;
-}
-
-// cssEscape keeps a Host id out of the selector's grammar. Host ids are narrow,
-// and a selector built from one is still a selector built from data.
-function cssEscape(value) {
-  return String(value).replace(/["\\]/g, "\\$&");
 }

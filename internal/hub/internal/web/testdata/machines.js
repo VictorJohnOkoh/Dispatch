@@ -1,7 +1,7 @@
-// Enough of a browser to run hosts.js, and one card per Host the way hosts.html
-// leaves them. The El class comes from dom.js, which is loaded first.
+// The Hosts view as hosts.html leaves it, over the element in el.js: one card per
+// configured Host, each with the Vendor row the server never fills.
 
-const cards = new Map();
+const drawn = new Map();
 
 function makeCard(host) {
   const section = new El("section");
@@ -18,14 +18,14 @@ function makeCard(host) {
   const row = new El("ul");
   row.className = "vendors";
   row.dataset.vendors = host;
-  row.append(node2("li", "meta waiting", "waiting for this Host's Vendors"));
+  row.append(part("li", "meta waiting", "waiting for this Host's Vendors"));
   section.append(row);
 
-  cards.set(host, { section, pill, row });
+  drawn.set(host, { section, pill, row });
   return section;
 }
 
-function node2(tag, className, text) {
+function part(tag, className, text) {
   const el = new El(tag);
   el.className = className;
   el.textContent = text;
@@ -35,14 +35,13 @@ function node2(tag, className, text) {
 makeCard("desk");
 makeCard("attic");
 
-// querySelector answers the two attribute selectors hosts.js builds.
+// querySelectorAll answers the two constant selectors hosts.js reads its page
+// with. Neither is built from data, so neither can be broken by an id.
 globalThis.document = {
-  querySelector: (selector) => {
-    const vendors = selector.match(/^\[data-vendors="(.*)"\]$/);
-    if (vendors) return cards.get(vendors[1])?.row ?? null;
-    const host = selector.match(/^\[data-host="(.*)"\]$/);
-    if (host) return cards.get(host[1])?.section ?? null;
-    return null;
+  querySelectorAll: (selector) => {
+    if (selector === "[data-vendors]") return [...drawn.values()].map((c) => c.row);
+    if (selector === "[data-host]") return [...drawn.values()].map((c) => c.section);
+    return [];
   },
   createElement: (tag) => new El(tag),
 };
@@ -62,4 +61,6 @@ class EventSource {
   }
 }
 globalThis.EventSource = EventSource;
-globalThis.cards = cards;
+// The test reads the page through this. It is not called cards, because hosts.js
+// declares one of its own and the two would shadow.
+globalThis.page = drawn;
