@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,5 +74,32 @@ func TestDrawSpellsPayloadsAsPageJSSpellsThem(t *testing.T) {
 				t.Errorf("detail %q, want %q", drawn[0].Detail, tt.detail)
 			}
 		})
+	}
+}
+
+// The page carries its Events in a script element, so a Harness that wrote
+// </script> into a message must not be able to close it. encoding/json escapes
+// <, > and & even inside a payload it is passing through, and this is the test
+// that says so rather than the comment.
+func TestTheEmbeddedEventsCannotCloseTheScriptTag(t *testing.T) {
+	said := string(payloads([]protocol.Event{{
+		Seq: 1, Session: "s-1", Kind: "AssistantMessage",
+		Payload: json.RawMessage(`{"text":"</script><img src=x onerror=alert(1)>","complete":true}`),
+	}}))
+
+	if strings.Contains(said, "</script") || strings.Contains(said, "<img") {
+		t.Fatalf("the page would carry %s", said)
+	}
+	// And it is still the same JSON once a browser has parsed it.
+	var back []struct {
+		Payload struct {
+			Text string `json:"text"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(said), &back); err != nil {
+		t.Fatalf("the browser could not read it: %v", err)
+	}
+	if back[0].Payload.Text != `</script><img src=x onerror=alert(1)>` {
+		t.Errorf("the text came back as %q", back[0].Payload.Text)
 	}
 }

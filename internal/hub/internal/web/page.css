@@ -9,7 +9,7 @@ body {
 
 header { border-bottom: 1px solid currentColor; margin-bottom: 1rem; }
 h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
-.host { margin: 0.2rem 0 0.2rem; opacity: 0.7; }
+.host { margin: 0.2rem 0; opacity: 0.7; }
 
 /* The Session's State, folded in the browser and updated on every Event. */
 .state { margin: 0 0 0.8rem; font-weight: 600; }

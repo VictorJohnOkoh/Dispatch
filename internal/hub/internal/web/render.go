@@ -42,8 +42,10 @@ func rows(events []protocol.Event) []row {
 // were drawn from. An Event that cannot be decoded is skipped, exactly as the
 // rows skip it, so the two halves of the page describe the same list.
 //
-// The browser folds the same Events again with fold.js, and keeps folding as more
-// arrive. This is the pair the shared fixture keeps honest.
+// The browser folds the same Events again with fold.js and keeps folding as more
+// arrive. The two functions are the pair the shared fixture keeps honest; what it
+// cannot check is this skip, because an Event this Hub cannot decode is one the
+// browser folds from its raw payload anyway.
 func fold(events []protocol.Event) (session.State, event.EndReason) {
 	decoded := make([]event.Event, 0, len(events))
 	for _, e := range events {

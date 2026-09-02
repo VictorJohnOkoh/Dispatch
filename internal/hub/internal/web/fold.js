@@ -3,26 +3,39 @@
 //
 // This is the only duplicated logic in the design. The two are kept honest by one
 // file, internal/session/testdata/fold.json, which they are both tested against.
-// A case added there is a case both have to answer, and a Kind added there that
-// FOLD_KINDS does not name fails the JS test on its own.
 
-// FOLD_KINDS is every Event Kind this fold reads. It is declared rather than
-// implied by the switch, so a fixture that gains a Kind nobody here handles is a
-// failure rather than a silent pass: every Kind not in this list changes nothing,
-// and that has to be a decision somebody made.
-const FOLD_KINDS = [
-  "SessionEnded",
-  "SessionReady",
-  "PromptSubmitted",
-  "PromptCompleted",
-  "ApprovalRequested",
-  "ApprovalDecided",
-  "ToolCallRequested",
-  "ToolCallEnded",
-];
+// FOLD_RULES is what each Kind does to the fold, one entry per Kind that does
+// anything. It is a table rather than a switch so that the Kinds this fold handles
+// can be read off it: a test asks Object.keys for them, and a Kind that is named
+// but does nothing cannot hide in it.
+const FOLD_RULES = {
+  SessionReady: (v) => {
+    v.ready = true;
+  },
+  PromptSubmitted: (v) => {
+    v.prompting = true;
+  },
+  PromptCompleted: (v) => {
+    v.prompting = false;
+  },
+  ApprovalRequested: (v, p) => v.held.push(p.toolCallId),
+  ApprovalDecided: (v, p) => {
+    v.held = v.held.filter((id) => id !== p.toolCallId);
+  },
+  ToolCallRequested: (v, p) => v.calls.push(p.toolCallId),
+  ToolCallEnded: (v, p) => {
+    v.calls = v.calls.filter((id) => id !== p.toolCallId);
+  },
+  // SessionEnded is terminal and last, so it stops the fold rather than changing
+  // it. Nothing after it is read and nothing is left open.
+  SessionEnded: (v, p) => {
+    v.ended = p.reason ?? "";
+  },
+};
 
-// FOLD_IGNORES is every other Kind, named for the same reason: a Kind that
-// changes no state is a thing this fold was told about and decided to pass over.
+// FOLD_IGNORES is every Kind that changes no state. It is written out rather than
+// implied, because a Kind that changes nothing is a decision somebody made, and a
+// Kind in neither list is one nobody has looked at.
 const FOLD_IGNORES = [
   "SessionStarted",
   "ApprovalPolicySet",
@@ -40,44 +53,18 @@ const FOLD_IGNORES = [
 // A list with no SessionStarted folds to Starting, which is what the Session will
 // be the moment its first Event lands.
 function foldSession(events) {
-  let ready = false;
-  let prompting = false;
-  let held = [];
-  let calls = [];
+  const view = { ready: false, prompting: false, held: [], calls: [], ended: null };
 
   for (const e of events) {
-    const p = e.payload ?? {};
-    switch (e.kind) {
-      case "SessionEnded":
-        // Terminal and last. Nothing after it is read, and nothing is left open.
-        return { state: "Ended", reason: p.reason ?? "", held: [], calls: [] };
-      case "SessionReady":
-        ready = true;
-        break;
-      case "PromptSubmitted":
-        prompting = true;
-        break;
-      case "PromptCompleted":
-        prompting = false;
-        break;
-      case "ApprovalRequested":
-        held.push(p.toolCallId);
-        break;
-      case "ApprovalDecided":
-        held = held.filter((id) => id !== p.toolCallId);
-        break;
-      case "ToolCallRequested":
-        calls.push(p.toolCallId);
-        break;
-      case "ToolCallEnded":
-        calls = calls.filter((id) => id !== p.toolCallId);
-        break;
-    }
+    const rule = FOLD_RULES[e.kind];
+    if (!rule) continue;
+    rule(view, e.payload ?? {});
+    if (view.ended !== null) return { state: "Ended", reason: view.ended, held: [], calls: [] };
   }
 
   let state = "Starting";
-  if (held.length > 0) state = "Asking";
-  else if (prompting) state = "Working";
-  else if (ready) state = "Idle";
-  return { state, reason: "", held, calls };
+  if (view.held.length > 0) state = "Asking";
+  else if (view.prompting) state = "Working";
+  else if (view.ready) state = "Idle";
+  return { state, reason: "", held: view.held, calls: view.calls };
 }

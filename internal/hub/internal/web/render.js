@@ -57,8 +57,9 @@ function policyLine(policy) {
   return ["read", "edit", "execute", "fetch", "other"].map((k) => `${k} ${policy[k]}`).join(", ");
 }
 
-// deltaText is one Delta applied to the text a row already holds. It answers the
-// text the row should hold now, and how much of it the next Delta will count on.
+// deltaText is one Delta applied to the text a row already holds. It answers
+// either the whole text the row should hold now or the text to append to it, and
+// how long the row is once that is done, which is what the next Delta counts on.
 //
 // A Delta says how much text stood before it. One that carries on from exactly
 // that much appends, which is every Delta of a message that nothing went wrong
@@ -68,6 +69,9 @@ function policyLine(policy) {
 // one repairs itself at the end whatever else happened.
 function deltaText(current, held, d) {
   if (d.final) return { text: d.text, held: d.text.length };
-  if (d.n === held) return { text: current + d.text, held: d.n + d.text.length, appended: true };
-  return { text: current.slice(0, d.n) + d.text, held: d.n + d.text.length };
+  // The whole string is not built here, because building it is the copy this
+  // answer exists to avoid: the caller appends the new text and nothing else.
+  if (d.n === held) return { append: d.text, held: held + d.text.length };
+  const text = current.slice(0, d.n) + d.text;
+  return { text, held: text.length };
 }

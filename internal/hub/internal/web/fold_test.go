@@ -83,9 +83,10 @@ func TestTheJSFoldAgreesWithSessionFold(t *testing.T) {
 	}
 }
 
-// Every Kind the file uses is one the JS fold was told about, either as a Kind it
-// reads or as one it passes over on purpose. A fixture that gains a Kind nobody
-// handled would otherwise pass by doing nothing.
+// Every Kind the file uses is one the JS fold was told about, either as a rule it
+// applies or as one it passes over on purpose. The rules are read off the table
+// the fold dispatches on, so a Kind cannot be named as handled without a rule
+// that handles it.
 func TestTheJSFoldNamesEveryKindTheFixtureUses(t *testing.T) {
 	node := findNode(t)
 
@@ -129,7 +130,7 @@ console.log(JSON.stringify(out));
 `
 
 // kindsDriver prints the Kinds the fold was told about.
-const kindsDriver = `console.log(JSON.stringify({reads: FOLD_KINDS, ignores: FOLD_IGNORES}));`
+const kindsDriver = `console.log(JSON.stringify({reads: Object.keys(FOLD_RULES), ignores: FOLD_IGNORES}));`
 
 // run evaluates fold.js and then one driver under node, and decodes what it
 // printed. fold.js is loaded as source rather than imported, because the browser

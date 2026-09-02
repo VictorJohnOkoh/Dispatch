@@ -60,12 +60,15 @@ const frames = [
 const seen = [];
 for (const f of frames) {
   opened.send("event", {host: "desk", session: "s-1", ...f});
-  seen.push(dom.stateLine.textContent);
+  seen.push(dom.stateElement.textContent);
 }
 console.log(JSON.stringify(seen));
 `, &got)
 
 	want := []string{"Starting", "Idle", "Working", "Working", "Asking", "Working", "Working", "Idle", "Ended stopped"}
+	if len(got) != len(want) {
+		t.Fatalf("the page answered %d states and %d frames were sent: %v", len(got), len(want), got)
+	}
 	for i, state := range want {
 		if got[i] != state {
 			t.Errorf("after frame %d the page says %q, want %q. The whole run was %v", i+1, got[i], state, got)
@@ -77,21 +80,31 @@ console.log(JSON.stringify(seen));
 // the final Delta carries the whole text and replaces rather than appends.
 func TestADroppedDeltaRepairsItselfOnTheFinalOne(t *testing.T) {
 	var got struct {
+		Whole   string `json:"whole"`
 		Dropped string `json:"dropped"`
 		Final   string `json:"final"`
 	}
+	// The final Delta's n is the whole length, which is what the Hub sends. A test
+	// that sent 0 there would pass with the final rule deleted, because slicing to
+	// nothing repairs the text by accident.
 	pageUnder(t, `
+function say(seq) { return dom.transcript.querySelector(".text").textContent; }
 opened.send("event", {host: "desk", session: "s-1", seq: 1, kind: "AssistantMessage", payload: {text: "", complete: false}});
 opened.send("delta", {host: "desk", seq: 1, n: 0, text: "the "});
-// This one never arrives: the page misses "quick " entirely.
-opened.send("delta", {host: "desk", seq: 1, n: 10, text: "brown fox"});
-const dropped = dom.transcript.querySelector(".text").textContent;
-opened.send("delta", {host: "desk", seq: 1, n: 0, text: "the quick brown fox", final: true});
-console.log(JSON.stringify({dropped, final: dom.transcript.querySelector(".text").textContent}));
+opened.send("delta", {host: "desk", seq: 1, n: 4, text: "quick "});
+const whole = say();
+// This one never arrives: the page misses "brown " entirely.
+opened.send("delta", {host: "desk", seq: 1, n: 16, text: "fox"});
+const dropped = say();
+opened.send("delta", {host: "desk", seq: 1, n: 19, text: "the quick brown fox", final: true});
+console.log(JSON.stringify({whole, dropped, final: say()}));
 `, &got)
 
-	// The page could not know what it missed, so it holds a repaired-from-where
-	// version until the end.
+	if got.Whole != "the quick " {
+		t.Errorf("the Deltas that arrived left %q", got.Whole)
+	}
+	// The page could not know what it missed, so it holds something wrong until
+	// the end. That is the state the final Delta has to repair.
 	if got.Dropped == "the quick brown fox" {
 		t.Errorf("the page holds %q and it never saw the middle of it", got.Dropped)
 	}
@@ -105,32 +118,36 @@ console.log(JSON.stringify({dropped, final: dom.transcript.querySelector(".text"
 func TestAResyncDiscardsAndRefetchesThatHost(t *testing.T) {
 	var got struct {
 		Rows    int      `json:"rows"`
+		Before  int      `json:"before"`
 		Fetched []string `json:"fetched"`
 		Open    bool     `json:"open"`
 		State   string   `json:"state"`
 	}
 	pageUnder(t, `
-opened.send("event", {host: "desk", session: "s-1", seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}});
-opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionReady", payload: {model: "m"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "PromptSubmitted", payload: {text: "go"}});
 
 // A resync for another Host changes nothing here.
 opened.send("resync", {host: "attic"});
 const before = dom.transcript.children.length;
 
-// The refetch answers with the one Event the log now holds.
-served.push({events: [{seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}}]});
+// The refetch answers with what the log now holds, which is one Event.
+served.set("0", [{seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}}]);
+served.set("1", []);
 opened.send("resync", {host: "desk"});
 setTimeout(() => {
   console.log(JSON.stringify({
     rows: dom.transcript.children.length,
+    before,
     fetched,
     open: opened.listeners.size > 0,
-    state: dom.stateLine.textContent,
-    before,
+    state: dom.stateElement.textContent,
   }));
 }, 0);
 `, &got)
 
+	if got.Before != 2 {
+		t.Errorf("a resync for another Host left %d rows, and this page had two", got.Before)
+	}
 	if got.Rows != 1 {
 		t.Errorf("the page holds %d rows, and the refetch answered with one", got.Rows)
 	}
