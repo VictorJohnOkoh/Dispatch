@@ -9,7 +9,7 @@ import (
 )
 
 // page.js is the wiring, and this drives it under node against a page small
-// enough to read: testdata/dom.js is the surface page.js actually touches. What
+// enough to read: el.js is the element and dom.js the page page.js touches. What
 // runs here is the file the browser is served, not a copy of it.
 
 // pageUnder loads fold.js, render.js and page.js over the stub page, runs the
@@ -19,7 +19,7 @@ func pageUnder(t *testing.T, script string, into any) {
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/dom.js", "fold.js", "render.js", "page.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js", "page.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -220,6 +220,136 @@ setTimeout(() => {
 	// The pair, on a row for a Session this page is not drawing.
 	if !strings.Contains(got.Rows[2], "not answering") {
 		t.Errorf("the Host that is not answering reads %q", got.Rows[2])
+	}
+}
+
+// hostsUnder drives hosts.js over a page of cards. dom.js supplies the element,
+// and machines.js the cards, so what runs is the file the browser is served.
+func hostsUnder(t *testing.T, script string, into any) {
+	t.Helper()
+	node := findNode(t)
+
+	var program strings.Builder
+	for _, name := range []string{"testdata/el.js", "testdata/machines.js", "hosts.js"} {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		program.WriteString(string(source))
+		program.WriteString("\n")
+	}
+	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
+
+	cmd := exec.Command(node, "-e", program.String())
+	said, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, said)
+	}
+	if err := json.Unmarshal(said, into); err != nil {
+		t.Fatalf("node said %q: %v", said, err)
+	}
+}
+
+// The Vendor row comes from the vendors frame, and an unreachable Vendor empties
+// it. A remembered list that outlived the Vendor that served it is the one thing
+// the push exists to prevent.
+func TestAnUnreachableVendorEmptiesItsRow(t *testing.T) {
+	var got struct {
+		Filled  string `json:"filled"`
+		Emptied string `json:"emptied"`
+		Other   string `json:"other"`
+	}
+	hostsUnder(t, `
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3.5-9b"}]},
+]});
+const filled = page.get("desk").row.textContent;
+
+// The same Vendor, now not answering. What it was holding goes with it.
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: []},
+]});
+console.log(JSON.stringify({
+  filled,
+  emptied: page.get("desk").row.textContent,
+  other: page.get("attic").row.textContent,
+}));
+`, &got)
+
+	if !strings.Contains(got.Filled, "qwen3.5-9b") {
+		t.Errorf("the row read %q after the frame that filled it", got.Filled)
+	}
+	if strings.Contains(got.Emptied, "qwen3.5-9b") {
+		t.Errorf("the row still holds %q after the Vendor stopped answering", got.Emptied)
+	}
+	if !strings.Contains(got.Emptied, "not answering") {
+		t.Errorf("the row reads %q, and it has to say why it is empty", got.Emptied)
+	}
+	// A frame for one Host touches one Host.
+	if !strings.Contains(got.Other, "waiting") {
+		t.Errorf("another Host's row was rewritten: %q", got.Other)
+	}
+}
+
+// Connecting keeps its content at full strength and marks its edge; only Down
+// dims and stamps. That is the difference between reconnecting and gone.
+func TestAHostStateFrameMovesTheCard(t *testing.T) {
+	var got []string
+	hostsUnder(t, `
+const seen = [];
+for (const f of [
+  {host: "desk", state: "Connecting"},
+  {host: "desk", state: "Down", cause: "unreachable"},
+  {host: "desk", state: "Incompatible"},
+  {host: "desk", state: "Ready"},
+]) {
+  opened.send("host", f);
+  seen.push(page.get("desk").section.dataset.hostState + " " + page.get("desk").pill.textContent);
+}
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := []string{"Connecting Connecting", "Down Down unreachable", "Incompatible Incompatible", "Ready Ready"}
+	if len(got) != len(want) {
+		t.Fatalf("the card said %v", got)
+	}
+	for i, state := range want {
+		if got[i] != state {
+			t.Errorf("frame %d left the card %q, want %q", i+1, got[i], state)
+		}
+	}
+}
+
+// Down dims and stamps, live as well as on the server. A Host that goes Down while
+// this page is open would otherwise keep content that claims to be current.
+func TestALiveHostGoingDownStampsItsCard(t *testing.T) {
+	var got struct {
+		Down string `json:"down"`
+		Back string `json:"back"`
+		Told string `json:"told"`
+	}
+	hostsUnder(t, `
+opened.send("host", {host: "desk", state: "Down", cause: "unreachable"});
+const down = page.get("desk").who.textContent;
+
+// Ready again, and the card is current: nothing on it says how old it is.
+opened.send("host", {host: "desk", state: "Ready"});
+const back = page.get("desk").who.textContent;
+
+// A frame that carries the Hub's own time is stamped with that rather than with
+// when this page was drawn.
+opened.send("host", {host: "attic", state: "Down", since: "2026-09-02T08:30:00Z"});
+console.log(JSON.stringify({down, back, told: page.get("attic").who.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Down, "last answered at 2026-09-02T09:00:00Z") {
+		t.Errorf("the card that went Down reads %q, and it has to say how old it is", got.Down)
+	}
+	if strings.Contains(got.Back, "last answered at") {
+		t.Errorf("the card is current again and still reads %q", got.Back)
+	}
+	if !strings.Contains(got.Told, "last answered at 2026-09-02T08:30:00Z") {
+		t.Errorf("the card reads %q, and the Hub told it when it last heard from that Host", got.Told)
 	}
 }
 

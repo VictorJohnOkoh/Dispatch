@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hosts</title>
+<link rel="stylesheet" href="/page.css">
+</head>
+<body data-cursor="{{.Cursor}}" data-drawn="{{.Drawn}}">
+<main class="machines">
+<header>
+  <h1>Hosts</h1>
+  <p class="meta">This view shows machines. Starting a Session is the wizard's, at <a href="/new">New Session</a>.</p>
+</header>
+
+{{- range .Cards}}
+<section class="card" data-host="{{.Host}}" data-host-state="{{.State}}">
+  <header class="who">
+    <b>{{.Host}}</b>
+    <span class="pill host" data-host-state="{{.State}}">{{.State}}{{if .Cause}} {{.Cause}}{{end}}</span>
+    {{- if .Since}}
+    <span class="stamp">last answered at {{.Since}}</span>
+    {{- else if .Asked}}
+    <span class="stamp">asked at {{.Asked}}, and it did not answer</span>
+    {{- end}}
+  </header>
+
+  {{- /* The Vendor row is filled from the vendors frame, which carries
+         reachability beside the resident list. An unreachable Vendor empties it
+         rather than letting a remembered list outlive the Vendor that served
+         it, so it starts empty and the stream fills it. */}}
+  <ul class="vendors" data-vendors="{{.Host}}">
+    {{- if eq .State "Ready"}}
+    <li class="meta waiting">waiting for this Host's Vendors</li>
+    {{- else}}
+    <li class="meta">this Host is not answering, so what it serves is not known</li>
+    {{- end}}
+  </ul>
+
+  <ul class="sessions">
+    {{- range .Sessions}}
+    <li>
+      <a href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}">{{.Cwd}}</a>
+      <span class="pill" data-session-state="{{.SessionState}}">{{.SessionState}}</span>
+    </li>
+    {{- else}}
+    <li class="meta">no Sessions</li>
+    {{- end}}
+  </ul>
+</section>
+{{- end}}
+
+<p><a href="/">Back to Dispatch</a></p>
+</main>
+<script src="/hosts.js"></script>
+</body>
+</html>

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
@@ -40,7 +41,7 @@ type Hosts interface {
 	Post(ctx context.Context, host, path string, body []byte) (*http.Response, error)
 }
 
-//go:embed page.html start.html page.css page.js fold.js render.js
+//go:embed page.html start.html hosts.html page.css page.js fold.js render.js hosts.js
 var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
@@ -52,6 +53,9 @@ var files embed.FS
 var funcs = template.FuncMap{"pathEscape": url.PathEscape}
 
 var page = template.Must(template.New("page.html").Funcs(funcs).ParseFS(files, "page.html"))
+
+// machines is the Hosts view. It shows machines and starts nothing.
+var machines = template.Must(template.New("hosts.html").Funcs(funcs).ParseFS(files, "hosts.html"))
 
 // start is the wizard. It is a page of its own rather than a dialog on the
 // Session page, because it is four steps and each one has an address.
@@ -79,19 +83,29 @@ const (
 
 const indexHint = "Dispatch. Open /hosts/{host}/sessions/{session} to watch a Session.\n"
 
-type client struct{ hosts Hosts }
+type client struct {
+	hosts Hosts
+
+	// last is what each Host said the last time it answered, keyed by Host id. It
+	// is the only thing the Hub keeps about a Host between reads, and it is what
+	// lets a Host that stops answering keep its Sessions on screen.
+	mu   sync.Mutex
+	last map[string]answer
+}
 
 func New(hosts Hosts) http.Handler {
 	c := &client{hosts: hosts}
 	mux := http.NewServeMux()
 	mux.HandleFunc(sessionPage, c.session)
 	mux.HandleFunc(railRoute, c.railJSON)
+	mux.HandleFunc(hostsRoute, c.machinesPage)
 	mux.HandleFunc(newRoute, c.newSession)
 	mux.HandleFunc(startRoute, c.startSession)
 	mux.HandleFunc("GET /page.css", asset("page.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /page.js", asset("page.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /hosts.js", asset("hosts.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, indexHint)
