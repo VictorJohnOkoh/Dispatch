@@ -145,6 +145,13 @@ function raise(f) {
   toasts.append(toast);
 }
 
+// Questions can already be open when this page loads. They are read before the
+// stream starts delivering new facts, and raise uses the same deduplication for
+// both paths.
+for (const question of JSON.parse(document.getElementById("approvals").textContent || "[]")) {
+  raise(question);
+}
+
 // answerButton is one answer, sent to the Host that asked. The toast stays up
 // until that Daemon's own Event comes back on the stream: a command is an
 // intention, and what it changed arrives as an Event.
@@ -328,6 +335,12 @@ stream.addEventListener("delta", (frame) => {
 // through it.
 stream.addEventListener("resync", (frame) => {
   const f = JSON.parse(frame.data);
+  // A Resync invalidates only one Host's log. Questions from every other Host
+  // still describe facts that remain valid.
+  const changed = f.host ?? host;
+  for (const [at, toast] of asking) {
+    if (toast.dataset.host === changed) takeDown(at);
+  }
   if (f.host && f.host !== host) return;
   generation++;
   rows.clear();
@@ -335,10 +348,6 @@ stream.addEventListener("resync", (frame) => {
   events.clear();
   order.length = 0;
   list.replaceChildren();
-  // The toasts go with the rest of what this page holds. A resync says what it
-  // has is not to be trusted, and a question that is still open raises its toast
-  // again when the stream replays it.
-  for (const at of [...asking.keys()]) takeDown(at);
   load(generation);
 });
 

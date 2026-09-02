@@ -97,6 +97,72 @@ func (c *client) rail(ctx context.Context, host, id string) []entry {
 	return all
 }
 
+// approvals reads only Sessions that say they are Asking. The Session list can
+// identify them, but the Events carry the tool call id and title a toast needs.
+func (c *client) approvals(ctx context.Context, rail []entry) []protocol.HostFrame {
+	found := make([][]protocol.HostFrame, len(rail))
+
+	var reading sync.WaitGroup
+	for i, e := range rail {
+		if e.On || !e.Answering || e.SessionState != "Asking" {
+			continue
+		}
+		reading.Go(func() {
+			ctx, done := context.WithTimeout(ctx, hostWait)
+			defer done()
+			events, _, err := c.transcript(ctx, e.Host, e.Session)
+			if err != nil {
+				return
+			}
+			for _, question := range openApprovals(events) {
+				found[i] = append(found[i], protocol.HostFrame{Event: question, Host: e.Host})
+			}
+		})
+	}
+	reading.Wait()
+
+	all := make([]protocol.HostFrame, 0)
+	for _, some := range found {
+		all = append(all, some...)
+	}
+	return all
+}
+
+// openApprovals returns the questions that no later Event ended.
+func openApprovals(events []protocol.Event) []protocol.Event {
+	open := make(map[string]protocol.Event)
+	var order []string
+	for _, e := range events {
+		var payload struct {
+			ToolCallID string `json:"toolCallId"`
+		}
+		switch e.Kind {
+		case string(event.KindApprovalRequested):
+			if json.Unmarshal(e.Payload, &payload) != nil || payload.ToolCallID == "" {
+				continue
+			}
+			if _, exists := open[payload.ToolCallID]; !exists {
+				order = append(order, payload.ToolCallID)
+			}
+			open[payload.ToolCallID] = e
+		case string(event.KindApprovalDecided), string(event.KindToolCallEnded):
+			if json.Unmarshal(e.Payload, &payload) == nil {
+				delete(open, payload.ToolCallID)
+			}
+		case string(event.KindSessionEnded):
+			return nil
+		}
+	}
+
+	questions := make([]protocol.Event, 0, len(open))
+	for _, id := range order {
+		if question, exists := open[id]; exists {
+			questions = append(questions, question)
+		}
+	}
+	return questions
+}
+
 // sessionsOn reads one Host's Sessions. A Host that refused, or that could not be
 // reached at all, answers with one entry saying so, because the rail's job is to
 // show every machine the user has and not only the ones that are working.

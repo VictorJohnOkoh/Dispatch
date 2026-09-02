@@ -49,10 +49,14 @@ const railNav = new El("div");
 // The toast rack, empty until a question from another Session raises one.
 const toastRack = new El("div");
 
+// Questions that were open when page.html was drawn.
+const approvals = new El("script");
+approvals.textContent = "[]";
+
 const body = new El("body");
 
 globalThis.document = {
-  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, rail: railNav, toasts: toastRack })[id] ?? null,
+  getElementById: (id) => ({ transcript, state: stateElement, events: embedded, approvals, rail: railNav, toasts: toastRack })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
 };
