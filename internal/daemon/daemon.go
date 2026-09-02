@@ -34,7 +34,13 @@ const shutdownGrace = 5 * time.Second
 // Harness is one Harness this Host serves, under the name daemon.json gave it.
 // That name is what a Session start asks for.
 type Harness struct {
-	Name    string
+	Name string
+
+	// Exe is the program the Daemon spawns for this Harness, as the Host config
+	// wrote it. It is empty for a Harness that spawns no process, which is
+	// passthrough alone.
+	Exe string
+
 	Adapter harness.Adapter
 }
 
@@ -54,6 +60,10 @@ type Daemon struct {
 	// keepalive is the beat every Event stream writes its comment on. It is a field
 	// only so a test may shorten it.
 	keepalive time.Duration
+
+	// stopWait is the ladder's fixed short wait before the kill. It is a field only
+	// so a test may shorten it, and no configuration names it.
+	stopWait time.Duration
 
 	sessions sessions
 
@@ -84,16 +94,17 @@ func New(log *slog.Logger, events *eventlog.Log, root workspace.Root, adapters [
 		harnesses: harnesses,
 		admit:     admission.SingleSession{},
 		keepalive: protocol.KeepaliveInterval,
+		stopWait:  stopWait,
 		base:      context.Background(),
 	}
 }
 
-// harness is the Adapter this Host serves under that name, or nil. It is a scan
+// harness is the Harness this Host serves under that name, or nil. It is a scan
 // over three entries at most, which is cheaper to read than an index.
-func (d *Daemon) harness(name string) harness.Adapter {
-	for _, h := range d.harnesses {
+func (d *Daemon) harness(name string) *Harness {
+	for i, h := range d.harnesses {
 		if h.Name == name {
-			return h.Adapter
+			return &d.harnesses[i]
 		}
 	}
 	return nil
