@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Session</title>
+<link rel="stylesheet" href="/page.css">
+</head>
+<body>
+<main class="wizard">
+<header>
+  <h1>New Session</h1>
+  <ol class="steps">
+    <li{{if eq .Step "host"}} class="on"{{end}}>Host</li>
+    <li{{if eq .Step "model"}} class="on"{{end}}>Model</li>
+    <li{{if eq .Step "harness"}} class="on"{{end}}>Harness</li>
+    <li{{if eq .Step "policy"}} class="on"{{end}}>Approval policy</li>
+  </ol>
+  <p class="chosen">
+    {{- if .Host}}<span class="pill">{{.Host}}</span>{{end}}
+    {{- if .Model}}<span class="pill">{{.Model}}</span>{{end}}
+    {{- if .Harness}}<span class="pill">{{.Harness}}</span>{{end}}
+  </p>
+</header>
+
+{{if .Refusal}}
+<section class="refusal">
+  <p>{{.Refusal}}</p>
+  {{- range .Blocking}}
+  <form method="post" action="/start">
+    <input type="hidden" name="host" value="{{$.Host}}">
+    <input type="hidden" name="model" value="{{$.Model}}">
+    <input type="hidden" name="harness" value="{{$.Harness}}">
+    <input type="hidden" name="stopFirst" value="{{.}}">
+    <button type="submit">Stop {{.}} and start this one</button>
+  </form>
+  {{- end}}
+</section>
+{{end}}
+
+{{if eq .Step "host"}}
+<ul class="choices">
+  {{- range .Hosts}}
+  <li>
+    {{- if .Ready}}
+    <a href="/new?host={{.Host | pathEscape}}">{{.Host}}</a>
+    {{- else}}
+    <span class="off">{{.Host}}</span>
+    <span class="pill host" data-host-answering="false">not answering</span>
+    {{- end}}
+  </li>
+  {{- end}}
+</ul>
+
+{{else if eq .Step "model"}}
+<ul class="choices">
+  {{- range .Models}}
+  <li>
+    <a href="/new?host={{$.Host | pathEscape}}&amp;model={{.ID | pathEscape}}">{{.ID}}</a>
+    <span class="meta">{{.Vendor}}</span>
+    {{- range .Capabilities}}
+    <span class="pill cap">{{.}}</span>
+    {{- end}}
+  </li>
+  {{- end}}
+</ul>
+
+{{else if eq .Step "harness"}}
+<ul class="choices">
+  {{- range .Harnesses}}
+  <li>
+    <a href="/new?host={{$.Host | pathEscape}}&amp;model={{$.Model | pathEscape}}&amp;harness={{.Name | pathEscape}}">{{.Name}}</a>
+    {{- if .Tools}}
+    {{- range .Gates}}<span class="pill">gates {{.}}</span>{{end}}
+    {{- else}}
+    <span class="pill">no tools, so no Approval Policy</span>
+    {{- end}}
+  </li>
+  {{- end}}
+</ul>
+
+{{else}}
+<form method="post" action="/start" class="policy">
+  <input type="hidden" name="host" value="{{.Host}}">
+  <input type="hidden" name="model" value="{{.Model}}">
+  <input type="hidden" name="harness" value="{{.Harness}}">
+  <label>Working directory <input name="dir" value="" placeholder="the Workspace Root"></label>
+  {{- if .Slots}}
+  <ul class="choices">
+    {{- range $slot := .Slots}}
+    <li>
+      <span class="kind">{{$slot.Kind}}</span>
+      {{- if $slot.Gated}}
+      <select name="policy.{{$slot.Kind}}">
+        {{- range $slot.Choose}}
+        <option value="{{.}}"{{if eq . $slot.Rule}} selected{{end}}>{{.}}</option>
+        {{- end}}
+      </select>
+      {{- else}}
+      <input type="hidden" name="policy.{{$slot.Kind}}" value="auto">
+      <span class="pill" data-gate="none">auto, and this Harness has no Gate for it</span>
+      {{- end}}
+    </li>
+    {{- end}}
+  </ul>
+  {{- else}}
+  <p class="meta">This Harness runs no tools, so it has no Approval Policy at all.</p>
+  {{- end}}
+  <button type="submit">Start</button>
+</form>
+{{end}}
+
+<p><a href="/">Back to Dispatch</a></p>
+</main>
+</body>
+</html>

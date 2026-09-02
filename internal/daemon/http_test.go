@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,5 +85,40 @@ func TestPprofAnswersOnTheDaemonsListener(t *testing.T) {
 func TestModelsIsTheRouteProtocolNames(t *testing.T) {
 	if protocol.ListModels != "GET /v1/models" {
 		t.Fatalf("ListModels = %q", protocol.ListModels)
+	}
+}
+
+// The Harness list is what a start may name, with the Gates each Adapter
+// declares. The Client needs them to draw an Approval Policy that cannot be set
+// to something the Harness will not honour.
+func TestListHarnessesCarriesTheGatesEachAdapterDeclares(t *testing.T) {
+	h := newHost(t, Harness{Name: "gate", Adapter: newGating()})
+
+	w := httptest.NewRecorder()
+	h.handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/harnesses", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	var body struct {
+		Harnesses []HarnessView `json:"harnesses"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	if len(body.Harnesses) != 2 {
+		t.Fatalf("this Host serves %v", body.Harnesses)
+	}
+
+	byName := map[string]HarnessView{}
+	for _, v := range body.Harnesses {
+		byName[v.Name] = v
+	}
+	if v := byName["passthrough"]; v.Tools || len(v.Gates) != 0 {
+		t.Errorf("passthrough answered %+v, and it runs no tools", v)
+	}
+	// The gating Harness holds edit and execute, and nothing else, so read may only
+	// ever be auto.
+	if v := byName["gate"]; !v.Tools || !slices.Equal(v.Gates, []string{"edit", "execute"}) {
+		t.Errorf("the gating Harness answered %+v", v)
 	}
 }

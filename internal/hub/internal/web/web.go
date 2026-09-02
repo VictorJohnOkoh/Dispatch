@@ -33,16 +33,25 @@ import (
 type Hosts interface {
 	All() []string
 	Get(ctx context.Context, host, path string) (*http.Response, error)
+
+	// Post runs one command against a Host and answers as that Host answered,
+	// refusal and all. A command is an intention: what it changed comes back on the
+	// Event stream, never in this answer.
+	Post(ctx context.Context, host, path string, body []byte) (*http.Response, error)
 }
 
-//go:embed page.html page.css page.js fold.js render.js
+//go:embed page.html start.html page.css page.js fold.js render.js
 var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
 // that held a slash would otherwise build a link to somewhere else.
-var page = template.Must(template.New("page.html").
-	Funcs(template.FuncMap{"pathEscape": url.PathEscape}).
-	ParseFS(files, "page.html"))
+var funcs = template.FuncMap{"pathEscape": url.PathEscape}
+
+var page = template.Must(template.New("page.html").Funcs(funcs).ParseFS(files, "page.html"))
+
+// start is the wizard. It is a page of its own rather than a dialog on the
+// Session page, because it is four steps and each one has an address.
+var start = template.Must(template.New("start.html").Funcs(funcs).ParseFS(files, "start.html"))
 
 // transcriptPage is how many Events one read of the transcript asks for. It is
 // the largest the Daemon serves, and a longer Session is several reads.
@@ -57,6 +66,13 @@ const sessionPage = "GET /hosts/{host}/sessions/{session}"
 // own route and not one of the protocol's ten.
 const railRoute = "GET /rail/{host}/{session}"
 
+// The wizard, and the start it ends in. Both are the Client's own.
+const (
+	newRoutePath = "/new"
+	newRoute     = "GET " + newRoutePath
+	startRoute   = "POST /start"
+)
+
 const indexHint = "Dispatch. Open /hosts/{host}/sessions/{session} to watch a Session.\n"
 
 type client struct{ hosts Hosts }
@@ -66,6 +82,8 @@ func New(hosts Hosts) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(sessionPage, c.session)
 	mux.HandleFunc(railRoute, c.railJSON)
+	mux.HandleFunc(newRoute, c.newSession)
+	mux.HandleFunc(startRoute, c.startSession)
 	mux.HandleFunc("GET /page.css", asset("page.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /page.js", asset("page.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))

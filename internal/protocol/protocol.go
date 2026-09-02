@@ -1,4 +1,4 @@
-// Package protocol holds the wire: the ten paths, the seven Frame types, the two
+// Package protocol holds the wire: the paths, the seven Frame types, the two
 // envelopes, the Handshake, the status codes and the Cursor a reader resumes on.
 // It is a leaf package and imports nothing else in this project, which is what
 // lets both roles speak it.

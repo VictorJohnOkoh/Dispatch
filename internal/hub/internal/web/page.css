@@ -69,7 +69,34 @@ body[data-host-state="Down"], body[data-host-state="Connecting"] { opacity: 0.6;
    being unreachable, so the row stays and says so. */
 .rrow.stale { opacity: 0.55; }
 
+.rail .new {
+  display: block;
+  margin-top: 1rem;
+  padding: 0.5rem;
+  text-align: center;
+  border: 1px solid rgba(128, 128, 128, 0.5);
+  border-radius: 6px;
+}
+
 .desk { margin-left: 17rem; padding: 0 1.5rem 4rem; }
+
+/* The wizard. Four steps, each one an address of its own. */
+.wizard { max-width: 44rem; margin: 0 auto; padding: 1.5rem; }
+.steps { display: flex; gap: 1rem; list-style: none; padding: 0; margin: 0.5rem 0; }
+.steps li { opacity: 0.5; }
+.steps li.on { opacity: 1; font-weight: 600; }
+.chosen { display: flex; gap: 0.4rem; margin: 0.4rem 0 1rem; }
+
+.choices { list-style: none; padding: 0; }
+.choices li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.5rem 0; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
+.choices .off { opacity: 0.5; }
+.choices .kind { min-width: 5rem; font-family: ui-monospace, monospace; }
+.pill.cap { opacity: 0.75; }
+
+/* The Host saying no. It names the Session holding the slot and offers to stop
+   it, and it never shows a queue position, because there is no queue. */
+.refusal { border: 1px solid #c05050; border-radius: 7px; padding: 0.8rem; margin: 1rem 0; }
+.refusal p { margin: 0 0 0.6rem; }
 body { max-width: none; }
 
 /* The pair. Session State beside Host State, because Working on a Ready Host and
