@@ -46,8 +46,12 @@ type Run interface {
 	// Interrupt abandons the Prompt in flight and leaves the Session usable.
 	Interrupt(ctx context.Context) error
 
-	// Close ends the Session and returns once the Adapter's reader has stopped.
+	// Close ends the Session and returns once the Adapter has stopped reporting.
 	// Closing stdin and killing the process happen after this, in the Daemon.
+	//
+	// An Adapter reading a pipe keeps draining it after this returns, because a full
+	// stdout pipe stops a Harness that the ladder has not reached yet. Draining is
+	// not reporting: nothing that arrives after Close reaches the Sink.
 	Close() error
 }
 
@@ -104,6 +108,23 @@ type Pipes struct {
 	// Out is the Harness's stdout. There is no stderr field. Stderr is evidence for
 	// a human and never a signal, so an Adapter is not given it.
 	Out io.Reader
+}
+
+// closeOpen ends whichever appendable Event an Adapter has left open, and answers
+// with the Kind it should hold next, which is none.
+//
+// The Sink closes the open Event itself when the other Kind is called, so this is
+// needed only where a Prompt or a message ends. A Session that stays usable may
+// not leave one open: the Cursor sits below every open Event, so it would never
+// move again.
+func closeOpen(out Sink, open event.Kind) event.Kind {
+	switch open {
+	case event.KindAssistantMessage:
+		out.Message("", true)
+	case event.KindReasoning:
+		out.Reasoning("", true)
+	}
+	return ""
 }
 
 // Files is the Daemon's contained file access. Only an Adapter whose Harness

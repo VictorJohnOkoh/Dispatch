@@ -60,7 +60,7 @@ func (d *recording) Message(text string, end bool)   { d.add("Message(%q,%v)", t
 func (d *recording) Reasoning(text string, end bool) { d.add("Reasoning(%q,%v)", text, end) }
 
 func (d *recording) ToolCallRequested(id, name string, k event.ToolKind, title string, args json.RawMessage) {
-	d.add("ToolCallRequested(%s,%s,%s)", id, name, k)
+	d.add("ToolCallRequested(%s,%s,%s,%q,%s)", id, name, k, title, args)
 }
 
 func (d *recording) ToolCallEnded(id string, o event.Outcome, content string) {
@@ -331,6 +331,54 @@ func TestTheAdapterReportsNothingTheRawTranscriptDoesNotHold(t *testing.T) {
 	}
 }
 
+// OpenCode announces a Tool Call with an empty rawInput and sends the path or the
+// command on the frame after it. The Event has to carry what the tool is about to
+// do, so the announcement is held until that frame arrives.
+func TestAToolCallCarriesWhatItIsAboutToDo(t *testing.T) {
+	for _, c := range []struct{ capture, name, says string }{
+		{"llamaswap/read-frames.jsonl", "read", "notes.txt"},
+		{"llamaswap/edit-frames.jsonl", "write", "banana"},
+		{"llamaswap/execute-frames.jsonl", "bash", "echo capstone-probe"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, _ := replay(t, c.capture, swapModel)
+
+			var requested string
+			for _, call := range d.said() {
+				if strings.HasPrefix(call, "ToolCallRequested(") {
+					requested = call
+					break
+				}
+			}
+			if requested == "" {
+				t.Fatalf("nothing was requested: %v", d.said())
+			}
+			if !strings.Contains(requested, c.says) {
+				t.Errorf("%s says nothing about %q", requested, c.says)
+			}
+			if !strings.Contains(requested, ","+c.name+",") {
+				t.Errorf("%s is not named %q, and the name is the tool's own", requested, c.name)
+			}
+		})
+	}
+}
+
+// A native kind this Adapter has no Event for is dropped, and one that never
+// arrives costs nothing. usage_update is both: two Vendors send it and the third
+// does not.
+func TestANativeKindWithNoEventIsDropped(t *testing.T) {
+	d := newRecording()
+	r := &acpRun{name: "opencode", out: d, held: map[string]sessionUpdate{}, stopped: make(chan struct{})}
+
+	r.update(json.RawMessage(`{"update":{"sessionUpdate":"usage_update","used":10660,"size":200000}}`))
+	r.update(json.RawMessage(`{"update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}`))
+	r.update(json.RawMessage(`{"update":{"sessionUpdate":"something_from_next_year"}}`))
+
+	if said := d.said(); len(said) != 0 {
+		t.Errorf("the Daemon was told %v about frames that carry no fact", said)
+	}
+}
+
 // The Gates are declared, and read is not among them.
 func TestTheOpenCodeGatesAreDeclaredAndReadIsNotAmongThem(t *testing.T) {
 	caps := NewOpenCode().Capabilities()
@@ -340,10 +388,16 @@ func TestTheOpenCodeGatesAreDeclaredAndReadIsNotAmongThem(t *testing.T) {
 	if caps.Gates[event.ToolRead] {
 		t.Error("read is gated, and OpenCode never asks about one")
 	}
-	for _, kind := range []event.ToolKind{event.ToolEdit, event.ToolExecute, event.ToolFetch} {
+	for _, kind := range []event.ToolKind{event.ToolEdit, event.ToolExecute} {
 		if !caps.Gates[kind] {
-			t.Errorf("%s is not gated, and OpenCode's permission block covers it", kind)
+			t.Errorf("%s is not gated, and the capture counts one asked for every one started", kind)
 		}
+	}
+	// fetch is the cautious answer rather than the measured one. No capture ever
+	// exercised a webfetch, and a Gate that is declared and then silent is a slot
+	// that says wait and behaves like auto.
+	if caps.Gates[event.ToolFetch] {
+		t.Error("fetch is gated, and no capture has ever seen OpenCode ask about one")
 	}
 }
 

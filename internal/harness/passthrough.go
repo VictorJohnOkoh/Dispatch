@@ -174,21 +174,9 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 		reply strings.Builder
 		open  event.Kind // the appendable Event this reader has open, or ""
 	)
-	// The Sink closes the open Event itself when the other kind is called, so this
-	// is needed only where a Prompt ends.
-	//
 	// A message is left torn only where the Session is ending, because the Daemon
-	// closes those. A Session that stays usable may not leave one open: the Cursor
-	// sits below every open Event, so it would never move again.
-	closeOpen := func() {
-		switch open {
-		case event.KindAssistantMessage:
-			r.out.Message("", true)
-		case event.KindReasoning:
-			r.out.Reasoning("", true)
-		}
-		open = ""
-	}
+	// closes those.
+	closeThis := func() { open = closeOpen(r.out, open) }
 
 	vendors.ReadStream(body, func(f vendors.Frame) {
 		switch f.Kind {
@@ -204,7 +192,7 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 		case vendors.FrameError:
 			// Error is never terminal, so the Session stays usable, which it can
 			// only be once this Prompt is bounded.
-			closeOpen()
+			closeThis()
 			r.out.Failed(event.ErrVendor, f.Text)
 			r.out.Completed(event.StopError, event.Usage{})
 
@@ -214,7 +202,7 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 			case closed:
 				// A stop. No Error and no PromptCompleted, per ADR 0008.
 			case interrupted:
-				closeOpen()
+				closeThis()
 				r.out.Completed(event.StopInterrupted, event.Usage{})
 			default:
 				// The Daemon writes SessionEnded{failed} after this and closes
@@ -223,7 +211,7 @@ func (r *ptRun) read(body io.ReadCloser, cancel context.CancelFunc, done chan st
 			}
 
 		case vendors.FrameEnd:
-			closeOpen()
+			closeThis()
 			r.out.Completed(event.StopReason(f.Stop), event.Usage(f.Usage))
 		}
 	})

@@ -277,6 +277,12 @@ Named here so the answer on #16 cannot quietly overclaim.
   `ApprovalDecided` is the record of the refusal, and the Harness is read only as
   corroboration.
 
+- **No Prompt was ever cancelled.** `session/cancel` is in ACP and in no captured
+  run, so what OpenCode does with one, and whether it still answers the
+  `session/prompt` that was in flight, is untested. The Adapter sends it on an
+  interrupt and bounds the Prompt on the answer as it always does, which means a
+  Harness that ignores it leaves the Session `Working`.
+
 ## Conclusion
 
 ADR 0003's conditional half resolves in favour of OpenCode. Gate 1 passes, which

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -50,11 +52,16 @@ type ACP struct {
 // read is not among them. The capture counts two reads started, two ended and
 // none asked, and the read never crosses the client seam either, so there is
 // nothing to hold. The Workspace Root is the only bound on a read.
+//
+// fetch is not among them either, and that is the cautious answer rather than the
+// measured one. OpenCode's permission block covers webfetch and the config this
+// Adapter writes asks it to, but no capture ever exercised one. A Gate declared
+// and then silent is a slot that says wait and behaves like auto, which is the one
+// lie this project cannot afford, so it stays false until a capture settles it.
 func NewOpenCode() *ACP {
 	caps := Capabilities{Tools: true}
 	caps.Gates[event.ToolEdit] = true
 	caps.Gates[event.ToolExecute] = true
-	caps.Gates[event.ToolFetch] = true
 	return &ACP{name: "opencode", args: []string{"acp"}, caps: caps}
 }
 
@@ -87,7 +94,7 @@ func (a *ACP) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error
 		spec:    spec,
 		out:     out,
 		in:      pipes.In,
-		pending: map[uint64]chan json.RawMessage{},
+		held:    map[string]sessionUpdate{},
 		stopped: make(chan struct{}),
 	}
 	go r.read(pipes.Out)
@@ -141,8 +148,8 @@ type modelConfig struct {
 	Name string `json:"name"`
 }
 
-// qualified is a Model id as OpenCode names it, which is the provider and the id
-// the Vendor spells.
+// qualified is a Model id as OpenCode names it: the provider, then the id the
+// Vendor spells.
 func qualified(model string) string { return providerKey + "/" + model }
 
 // acpRun is one live Session. Everything the Harness says arrives on the one
@@ -157,13 +164,34 @@ type acpRun struct {
 	id      string // the Harness's own session id
 	stopped chan struct{}
 
-	mu       sync.Mutex
-	next     uint64                          // the next JSON-RPC id
-	pending  map[uint64]chan json.RawMessage // requests waiting on their answer
-	prompt   uint64                          // the Prompt in flight, or 0
-	done     bool                            // Close has run, so nothing more is reported
-	openKind event.Kind                      // the appendable Event with text still arriving
-	openID   string                          // the Harness's id for that message
+	// writing is stdin, and it is its own lock. A Harness that stops reading blocks
+	// whoever is writing to it, and everything below would be stuck behind that.
+	writing sync.Mutex
+
+	mu     sync.Mutex
+	next   uint64 // the next JSON-RPC id
+	prompt uint64 // the Prompt in flight, or 0
+	done   bool   // Close has run, so nothing more is reported
+
+	// waiting is the one request whose answer somebody is holding on for. Only the
+	// handshake waits, and it waits for one at a time, so this is a field and not a
+	// table of them.
+	waiting   chan answer
+	waitingID uint64
+
+	openKind event.Kind // the appendable Event with text still arriving
+	openID   string     // the Harness's id for that message
+
+	// held is the Tool Calls the Harness has announced and not yet said anything
+	// about. It is keyed by tool call id, which the Harness makes at runtime, and it
+	// empties as each call is reported.
+	held map[string]sessionUpdate
+}
+
+// answer is one response, as the caller of call reads it.
+type answer struct {
+	result json.RawMessage
+	failed string
 }
 
 // handshake is initialize then session/new, and then the one check that matters:
@@ -333,10 +361,11 @@ func (r *acpRun) read(out io.Reader) {
 // report runs one Sink call unless the Session has said goodbye. Everything after
 // Close is the Harness talking to nobody.
 func (r *acpRun) report(call func()) {
+	// The lock is held across the call, so a Close landing beside it cannot let one
+	// Sink call through behind the goodbye. Nothing the Sink does comes back here.
 	r.mu.Lock()
-	done := r.done
-	r.mu.Unlock()
-	if !done {
+	defer r.mu.Unlock()
+	if !r.done {
 		call()
 	}
 }
@@ -381,8 +410,11 @@ func (r *acpRun) dispatch(f frame) {
 // request whose answer is a fact rather than a return value.
 func (r *acpRun) answered(id uint64, f frame) {
 	r.mu.Lock()
-	waiting, ok := r.pending[id]
-	delete(r.pending, id)
+	held := r.waiting
+	waiting := held != nil && r.waitingID == id
+	if waiting {
+		r.waiting = nil
+	}
 	prompting := r.prompt == id
 	if prompting {
 		r.prompt = 0
@@ -390,12 +422,12 @@ func (r *acpRun) answered(id uint64, f frame) {
 	r.mu.Unlock()
 
 	switch {
-	case ok:
+	case waiting:
 		if f.Error != nil {
-			waiting <- nil
+			held <- answer{failed: f.Error.Message}
 			return
 		}
-		waiting <- f.Result
+		held <- answer{result: f.Result}
 	case prompting:
 		r.completed(f)
 	}
@@ -407,6 +439,7 @@ func (r *acpRun) answered(id uint64, f frame) {
 func (r *acpRun) completed(f frame) {
 	r.report(func() {
 		r.closeOpen()
+		r.announceAll()
 		if f.Error != nil {
 			r.out.Failed(event.ErrAdapterFailed, f.Error.Message)
 			r.out.Completed(event.StopError, event.Usage{})
@@ -415,14 +448,24 @@ func (r *acpRun) completed(f frame) {
 		var done struct {
 			StopReason string `json:"stopReason"`
 			Usage      struct {
-				Input  int `json:"inputTokens"`
-				Output int `json:"outputTokens"`
-				Total  int `json:"totalTokens"`
+				Input     int `json:"inputTokens"`
+				Output    int `json:"outputTokens"`
+				CacheRead int `json:"cachedReadTokens"`
+				Total     int `json:"totalTokens"`
 			} `json:"usage"`
 		}
-		json.Unmarshal(f.Result, &done)
+		// A Prompt is bounded either way, because a Prompt that is never bounded
+		// leaves the Session Working and refusing every Prompt after it. What is not
+		// invented is the reason: an answer nobody could read stops on this project's
+		// own word for it rather than on an empty one attributed to the Vendor.
+		if err := json.Unmarshal(f.Result, &done); err != nil {
+			r.out.Failed(event.ErrAdapterFailed, "the answer to this Prompt could not be read")
+			r.out.Completed(event.StopError, event.Usage{})
+			return
+		}
 		r.out.Completed(event.StopReason(done.StopReason), event.Usage{
-			Input: done.Usage.Input, Output: done.Usage.Output, Total: done.Usage.Total,
+			Input: done.Usage.Input, Output: done.Usage.Output,
+			CacheRead: done.Usage.CacheRead, Total: done.Usage.Total,
 		})
 	})
 }
@@ -441,6 +484,18 @@ type sessionUpdate struct {
 	ToolKind   string          `json:"kind"`
 	Title      string          `json:"title"`
 	RawInput   json.RawMessage `json:"rawInput"`
+
+	// name is the announcement's title, kept when a later frame overwrites Title.
+	name string
+}
+
+// Name is the tool's own name, which OpenCode puts in the title of the frame that
+// announces the call and replaces with something friendlier afterwards.
+func (u sessionUpdate) Name() string {
+	if u.name != "" {
+		return u.name
+	}
+	return u.Title
 }
 
 // contentBlock is one piece of a tool call's result. The Client renders the text
@@ -475,25 +530,80 @@ func (r *acpRun) update(params json.RawMessage) {
 		r.report(func() { r.text(event.KindReasoning, u.MessageID, u.Content.Text) })
 
 	case "tool_call":
-		r.report(func() {
-			r.closeOpen()
-			r.out.ToolCallRequested(u.ToolCallID, u.Title, toolKind(u.ToolKind), u.Title, u.RawInput)
-		})
+		// Held rather than reported. OpenCode announces a call with an empty rawInput
+		// and sends the path or the command on the frame after it, so reporting this
+		// one would write a Tool Call that names nothing it is about to do.
+		r.hold(u)
 
 	case "tool_call_update":
-		// in_progress is deliberately not an Event. OpenCode moves a call there
-		// before it asks permission, so a Client that drew it would show a tool as
-		// having run before the human was asked.
+		// in_progress is deliberately not an Event of its own. OpenCode moves a call
+		// there before it asks permission, so a Client that drew it would show a tool
+		// as having run before the human was asked. Its arguments are still taken,
+		// because deciding what belongs with what is the Adapter's to do.
 		outcome, terminal := outcomeOf(u.Status)
 		if !terminal {
+			r.fill(u)
 			return
 		}
-		r.report(func() { r.out.ToolCallEnded(u.ToolCallID, outcome, blockText(blocks.Blocks)) })
+		r.report(func() {
+			r.announce(u.ToolCallID)
+			r.out.ToolCallEnded(u.ToolCallID, outcome, blockText(blocks.Blocks))
+		})
 
 	default:
 		// usage_update is absent on one Vendor and available_commands_update carries
 		// no fact about this Session, so an Adapter tolerates a native kind it does
 		// not recognise as well as one that never arrives.
+	}
+}
+
+// hold keeps an announced Tool Call until there is something worth reporting
+// about it.
+func (r *acpRun) hold(u sessionUpdate) {
+	u.name = u.Title
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.held[u.ToolCallID] = u
+}
+
+// fill takes the arguments and the better title off a later frame. The name stays
+// the one the announcement gave, which is the tool's, so name and title are the
+// two different things ADR 0006 has them be.
+func (r *acpRun) fill(u sessionUpdate) {
+	r.mu.Lock()
+	waiting, ok := r.held[u.ToolCallID]
+	if ok && len(u.RawInput) > 0 && string(u.RawInput) != "{}" {
+		waiting.RawInput, waiting.Title = u.RawInput, u.Title
+		r.held[u.ToolCallID] = waiting
+		ok = true
+	} else {
+		ok = false
+	}
+	r.mu.Unlock()
+	if ok {
+		r.report(func() { r.announce(u.ToolCallID) })
+	}
+}
+
+// announce writes the Tool Call the Harness announced, once, and before anything
+// that refers to it. Whatever is still held when the Prompt completes is written
+// then, because the Daemon is about to close it and a call cannot end before it
+// was requested. The caller holds the mutex.
+func (r *acpRun) announce(id string) {
+	u, ok := r.held[id]
+	if !ok {
+		return
+	}
+	delete(r.held, id)
+	r.closeOpen()
+	r.out.ToolCallRequested(u.ToolCallID, u.Name(), toolKind(u.ToolKind), u.Title, u.RawInput)
+}
+
+// announceAll writes every Tool Call still held, oldest announcement first. The
+// caller holds the mutex.
+func (r *acpRun) announceAll() {
+	for _, id := range slices.Sorted(maps.Keys(r.held)) {
+		r.announce(id)
 	}
 }
 
@@ -513,13 +623,7 @@ func (r *acpRun) text(kind event.Kind, id, chunk string) {
 }
 
 func (r *acpRun) closeOpen() {
-	switch r.openKind {
-	case event.KindAssistantMessage:
-		r.out.Message("", true)
-	case event.KindReasoning:
-		r.out.Reasoning("", true)
-	}
-	r.openKind, r.openID = "", ""
+	r.openKind, r.openID = closeOpen(r.out, r.openKind), ""
 }
 
 // permission is the one place the Harness blocks on this client. The reader waits
@@ -543,6 +647,8 @@ func (r *acpRun) permission(f frame) {
 		r.fail(*f.ID, -32602, "this permission request could not be read")
 		return
 	}
+
+	r.report(func() { r.announce(ask.ToolCall.ToolCallID) })
 
 	decision, err := r.out.Approve(r.session, ask.ToolCall.ToolCallID, ask.ToolCall.Title, string(ask.ToolCall.RawInput))
 	if err != nil {
@@ -644,26 +750,23 @@ type request struct {
 
 // call sends one request and waits for its answer, the Session ending, or ctx.
 func (r *acpRun) call(ctx context.Context, method string, params any, into any) error {
-	answer := make(chan json.RawMessage, 1)
+	held := make(chan answer, 1)
 
 	r.mu.Lock()
 	id := r.nextID()
-	r.pending[id] = answer
+	r.waiting, r.waitingID = held, id
 	r.mu.Unlock()
 
 	if err := r.write(request{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
-		r.mu.Lock()
-		delete(r.pending, id)
-		r.mu.Unlock()
 		return err
 	}
 
 	select {
-	case result := <-answer:
-		if result == nil {
-			return fmt.Errorf("%s: the Harness refused %s", r.name, method)
+	case got := <-held:
+		if got.failed != "" {
+			return fmt.Errorf("%s: the Harness refused %s: %s", r.name, method, got.failed)
 		}
-		if err := json.Unmarshal(result, into); err != nil {
+		if err := json.Unmarshal(got.result, into); err != nil {
 			return fmt.Errorf("%s: the answer to %s could not be read: %w", r.name, method, err)
 		}
 		return nil
@@ -674,7 +777,8 @@ func (r *acpRun) call(ctx context.Context, method string, params any, into any) 
 	}
 }
 
-// nextID allocates one JSON-RPC id. The caller holds the mutex.
+// nextID is allocated under the mutex, because the reader answers the Harness
+// while the Daemon is sending its own requests.
 func (r *acpRun) nextID() uint64 {
 	r.next++
 	return r.next
