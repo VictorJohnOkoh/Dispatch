@@ -87,11 +87,14 @@ type HostStateFrame struct {
 	Cause Cause     `json:"cause,omitempty"`
 }
 
-// StaleAfter is how long the Hub waits on a live connection before it calls the
-// Host Down. The Daemon beats every KeepaliveInterval, so this is two beats and a
-// half: long enough that one late beat is not a failure, short enough that a
-// pulled cable reaches the user while they are still looking at the screen.
-const StaleAfter = 25 * time.Second
+// StaleAfter is how long a live connection may say nothing before the Hub stops
+// believing it. It is two beats: ADR 0004 leaves Ready when two keepalives are
+// missed, and the Daemon beats every KeepaliveInterval.
+//
+// The Hub takes the rest of its budget in the dial that follows, which is why the
+// user sees a pulled cable inside about twenty-five seconds rather than exactly
+// this.
+const StaleAfter = 2 * KeepaliveInterval
 
 // OriginatedByHub reports whether the Hub makes this Frame rather than forwarding
 // it. Only FrameHost is. Everything else the Hub reads, stamps with a Host and

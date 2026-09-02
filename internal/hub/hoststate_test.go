@@ -175,21 +175,14 @@ func TestHostStateIsAFrameAndNeverAnEvent(t *testing.T) {
 	}
 }
 
-// The backoff curve starts over only after a connection that was Ready for a
-// whole minute, so a Host that flaps does not get treated as recovered.
-func TestTheBackoffResetsOnlyAfterASteadyMinute(t *testing.T) {
-	if hub.SteadyFor != time.Minute {
-		t.Errorf("the curve resets after %v, and ADR 0004 says a minute", hub.SteadyFor)
+// The Hub stops believing a live connection after two missed beats, which is what
+// ADR 0004 leaves Ready on. The rest of the twenty-five seconds a user waits is
+// the dial that follows.
+func TestAHostIsGivenTwoMissedBeats(t *testing.T) {
+	if protocol.StaleAfter != 2*protocol.KeepaliveInterval {
+		t.Errorf("a silent stream is given %v, and the beat is %v", protocol.StaleAfter, protocol.KeepaliveInterval)
 	}
-	if hub.FirstDelay != time.Second || hub.MaxDelay != time.Minute {
-		t.Errorf("the curve is %v to %v", hub.FirstDelay, hub.MaxDelay)
-	}
-	// A connection is only steady if it was Ready. One that never reached Ready is
-	// a Host that is not there, however long the dial took.
-	if protocol.StaleAfter <= protocol.KeepaliveInterval {
-		t.Errorf("a Host is called Down after %v, and it beats every %v", protocol.StaleAfter, protocol.KeepaliveInterval)
-	}
-	if protocol.StaleAfter > 30*time.Second {
-		t.Errorf("a pulled cable takes %v to reach the user", protocol.StaleAfter)
+	if protocol.StaleAfter > 25*time.Second {
+		t.Errorf("a pulled cable takes %v to notice before the dial that follows it", protocol.StaleAfter)
 	}
 }

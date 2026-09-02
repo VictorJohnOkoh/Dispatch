@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -29,14 +28,6 @@ const (
 	// starts over. A shorter one is a flap, and a flap that reset the curve would
 	// let a flapping Host redial at full speed forever.
 	steadyFor = time.Minute
-)
-
-// The curve, for a test to read rather than to restate. A test that wrote the
-// numbers out again would pass while the code held different ones.
-const (
-	FirstDelay = firstDelay
-	MaxDelay   = maxDelay
-	SteadyFor  = steadyFor
 )
 
 type daemonFrame struct {
@@ -148,28 +139,50 @@ type hostReader struct {
 	// connection below, never stored, and this is one connection's memory of what
 	// it has already said.
 	state protocol.HostState
+
+	// failures is how many attempts in a row have not reached Ready. A Host is
+	// Connecting until three of them, because a stream that dropped is usually back
+	// before the third, and dimming a Host for a blink costs the user more than
+	// holding the last display for seven seconds does.
+	failures int
 }
+
+// downAfter is how many attempts in a row must fail before a Host is Down. ADR
+// 0004 counts three, which is about seven seconds on this curve.
+const downAfter = 3
 
 // run reads this Host until the Client leaves. It retries forever, so a Host the
 // user switches on comes back without being told to.
 func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
-	delay := firstDelay
+	delay := r.hub.backoff
 	for ctx.Err() == nil {
+		// A stream that dropped is Connecting again, which is ADR 0004's transition
+		// out of Ready when the stream closes.
 		r.says(ctx, protocol.Connecting, "", out)
-		ready := time.Now()
-		r.once(ctx, out)
 
 		// The curve starts over only after a connection that was Ready for a whole
-		// minute. A shorter one is a flap, and a flap that reset the curve would let
-		// a flapping Host redial at full speed forever.
-		if r.state == protocol.Ready && time.Since(ready) >= steadyFor {
-			delay = firstDelay
+		// minute. That is measured here rather than read off the state afterwards,
+		// because by then this Host is Connecting again and every connection would
+		// look like a flap.
+		if steady := r.once(ctx, out); steady >= r.hub.steady {
+			delay = r.hub.backoff
 		}
 		if !sleep(ctx, jitter(delay)) {
 			return
 		}
 		delay = min(2*delay, maxDelay)
 	}
+}
+
+// failed counts one attempt that did not reach Ready, and calls the Host Down once
+// three in a row have. The cause is where the last one failed: nothing answering
+// at all and a tunnel with nothing behind it are different problems for the user.
+func (r *hostReader) failed(ctx context.Context, why protocol.Cause, out chan<- daemonFrame) {
+	r.failures++
+	if r.failures < downAfter {
+		return
+	}
+	r.says(ctx, protocol.Down, why, out)
 }
 
 // says tells the Client what this Host is, unless it has said so already. The
@@ -189,13 +202,15 @@ func (r *hostReader) says(ctx context.Context, state protocol.HostState, why pro
 	}
 }
 
-// once holds one connection to this Host's Daemon and reads it until it ends.
-func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) {
+// once holds one connection to this Host's Daemon and reads it until it ends. It
+// answers how long that connection was Ready, which is what decides whether the
+// backoff curve starts over.
+func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Duration {
 	conn, err := r.hub.dialer.Dial(ctx, r.id)
 	if err != nil {
 		// Nothing answered at all, which is a machine that is not there.
-		r.says(ctx, protocol.Down, protocol.Unreachable, out)
-		return
+		r.failed(ctx, protocol.Unreachable, out)
+		return 0
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -215,44 +230,54 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) {
 		req.Header.Set(protocol.LogHeader, logID)
 	}
 	if err := req.Write(conn); err != nil {
-		r.says(ctx, protocol.Down, protocol.NoDaemon, out)
-		return
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
 		// The tunnel opened and nothing was behind it, which is a different problem
 		// for the user: the machine is there and its Daemon is not.
-		r.says(ctx, protocol.Down, protocol.NoDaemon, out)
-		return
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
 	}
 	defer resp.Body.Close()
+	// A Daemon that refused the Handshake answers 426 with the versions it can
+	// serve. That Host is Incompatible and the Hub never retries one, which is #54:
+	// until it lands, a refusal is counted with the rest and retried, which is
+	// wrong in the way a Host nobody can use being retried is wrong.
 	if resp.StatusCode != http.StatusOK {
-		r.says(ctx, protocol.Down, protocol.NoDaemon, out)
-		return
+		r.failed(ctx, protocol.NoDaemon, out)
+		return 0
 	}
 
 	// The stream is live, so the Host is Ready. Presence is connection liveness and
 	// nothing else: there is no health check and no ping endpoint.
+	r.failures = 0
 	if !r.says(ctx, protocol.Ready, "", out) {
-		return
+		return 0
 	}
-	r.read(ctx, timed(ctx, conn, resp.Body), out)
+	// A live connection that says nothing is watched by a timer of its own. A read
+	// deadline is not enough: an SSH channel answers SetReadDeadline with "deadline
+	// not supported", so the only way to end a read that will never return is to
+	// close the connection under it.
+	quiet := time.AfterFunc(r.hub.stale, func() { conn.Close() })
+	defer quiet.Stop()
 
-	// The connection ended. Whether that is a machine that went away or a Daemon
-	// that stopped is not knowable from here, so the next dial says which.
-	r.says(ctx, protocol.Connecting, "", out)
+	ready := time.Now()
+	r.read(ctx, beating(quiet, r.hub.stale, resp.Body), out)
+	return time.Since(ready)
 }
 
-// timed makes a read that stops arriving fail rather than hang. The Daemon beats
-// every KeepaliveInterval, so a connection that says nothing for StaleAfter is one
-// the Client must be told about: a stream that is open and silent looks exactly
-// like a stream that is working.
-//
-// Every line pushes the deadline out, and a keepalive comment is a line.
-func timed(ctx context.Context, conn net.Conn, body io.Reader) io.Reader {
+// beating pushes the watchdog out every time the Host says anything, and a
+// keepalive comment is something. A stream that is open and silent looks exactly
+// like a stream that is working, so the silence is the only evidence there is.
+func beating(quiet *time.Timer, wait time.Duration, body io.Reader) io.Reader {
 	return readerFunc(func(p []byte) (int, error) {
-		conn.SetReadDeadline(time.Now().Add(protocol.StaleAfter))
-		return body.Read(p)
+		n, err := body.Read(p)
+		if err == nil {
+			quiet.Reset(wait)
+		}
+		return n, err
 	})
 }
 
