@@ -32,7 +32,7 @@ func TestTheTranscriptStopsAtItsCapAndSaysWhereItStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTranscript: %v", err)
 	}
-	tr.cap = 16
+	tr.limit = 16
 
 	tr.Write(bytes.Repeat([]byte("a"), 10))
 	tr.Write(bytes.Repeat([]byte("b"), 10))
@@ -54,7 +54,28 @@ func TestTheTranscriptStopsAtItsCapAndSaysWhereItStopped(t *testing.T) {
 		t.Errorf("the last line is %q, and it has to say where it stopped", marker)
 	}
 	if strings.Contains(string(raw), "this never lands") {
-		t.Error("the transcript kept writing past its cap")
+		t.Error("the transcript kept writing past its limit")
+	}
+}
+
+// A Session whose output fills the file exactly is not a Session that was cut
+// short, so it gets no line saying it was.
+func TestATranscriptThatExactlyFillsItsLimitSaysNothingAboutStopping(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := newTranscript(dir, "s-exact")
+	if err != nil {
+		t.Fatalf("newTranscript: %v", err)
+	}
+	tr.limit = 16
+	tr.Write(bytes.Repeat([]byte("a"), 16))
+	tr.Close()
+
+	raw, err := os.ReadFile(transcriptPath(dir, "s-exact"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(raw) != strings.Repeat("a", 16) {
+		t.Errorf("the transcript is %q, and every byte of it fitted", raw)
 	}
 }
 

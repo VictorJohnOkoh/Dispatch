@@ -219,7 +219,9 @@ func (d *Daemon) kill(s *Session) {
 	if err := p.stop(d.stopWait); err != nil {
 		d.log.Error("the Harness process tree may have outlived its Session", "session", s.id, "err", err)
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		d.log.Error("the Session's transcript is short of what the Harness said", "session", s.id, "err", err)
+	}
 }
 
 // listSessions answers with this Host's Sessions, live and ended, in start order.

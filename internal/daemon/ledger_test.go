@@ -3,6 +3,7 @@ package daemon
 import (
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
@@ -114,6 +115,29 @@ func TestTheSecondTriggerDoesNotEndAToolCallAgain(t *testing.T) {
 
 	if ends := h.ended(t); len(ends) != 1 {
 		t.Fatalf("the ledger wrote %+v, want the one end the first trigger gave it", ends)
+	}
+}
+
+// The two triggers arrive on two goroutines, so first is decided by the ledger
+// and not by which one the scheduler ran. One of them writes the end and the
+// other finds nothing open, whichever way round they land.
+func TestTheTwoTriggersEndAToolCallOnlyOnce(t *testing.T) {
+	h := newHost(t)
+	id := h.idle(t)
+	s, _, _ := h.sessions.find(id)
+	k := &sink{d: h.Daemon, s: s}
+	k.ToolCallRequested("c1", "bash", event.ToolExecute, "run it", nil)
+
+	// The stop is posted rather than commanded, because a helper that fails the
+	// test cannot be called from a goroutine that is not the test's.
+	var both sync.WaitGroup
+	both.Add(2)
+	go func() { defer both.Done(); k.Completed("stop", event.Usage{}) }()
+	go func() { defer both.Done(); h.post(t, "/v1/sessions/"+string(id)+"/stop", "") }()
+	both.Wait()
+
+	if ends := h.ended(t); len(ends) != 1 {
+		t.Fatalf("the ledger wrote %+v, and one Tool Call ends once", ends)
 	}
 }
 
