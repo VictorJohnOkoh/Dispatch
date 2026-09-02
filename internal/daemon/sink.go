@@ -16,27 +16,66 @@ import (
 // Nothing here returns a write error to the Adapter. A write that fails cancels
 // the Session's context instead, so the Adapter's reader returns from that rather
 // than from a value it might ignore.
+//
+// The mutex is the fence between the Adapter and the Session ending. Every report
+// goes through it, and so does end, so a report cannot land between the ledger
+// reading a Tool Call as open and the ledger writing the end that call is owed.
 type sink struct {
 	d *Daemon
 	s *Session
 
-	mu   sync.Mutex
-	open uint64     // the appendable Event still taking text, or 0
-	kind event.Kind // that Event's Kind
+	mu     sync.Mutex
+	open   uint64     // the appendable Event still taking text, or 0
+	kind   event.Kind // that Event's Kind
+	closed bool       // the Session has ended, so nothing more is reported
+}
+
+// end is the ledger's second trigger and the Session's last word from its Adapter.
+// Every open Tool Call is ended and nothing the Adapter says afterwards is written.
+//
+// It is one step under the one mutex. The Session ends on the request that stopped
+// it and the Adapter reports on its own reader, so a real end arriving beside this
+// either lands before it and is folded out, or lands after it and is dropped.
+//
+// The open message is left open and torn, which is what a stopped Prompt is. The
+// log tears it when SessionEnded lands, and text arriving after that would find no
+// open message and cancel a Session that has already ended.
+func (k *sink) end(refused []string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	if k.closed {
+		return
+	}
+	k.closed, k.open = true, 0
+	k.d.closeCalls(k.s, refused)
+}
+
+// report runs one Sink call under the fence. Everything after the Session's end is
+// the Harness talking to nobody, so it is dropped rather than written below a
+// SessionEnded.
+func (k *sink) report(call func()) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if !k.closed {
+		call()
+	}
 }
 
 // Message and Reasoning add text to the open Event of that Kind. The log holds the
 // accumulated text and sends the Deltas, so nothing is buffered here.
-func (k *sink) Message(text string, end bool)   { k.appendable(event.KindAssistantMessage, text, end) }
-func (k *sink) Reasoning(text string, end bool) { k.appendable(event.KindReasoning, text, end) }
+func (k *sink) Message(text string, end bool) {
+	k.report(func() { k.appendable(event.KindAssistantMessage, text, end) })
+}
+
+func (k *sink) Reasoning(text string, end bool) {
+	k.report(func() { k.appendable(event.KindReasoning, text, end) })
+}
 
 // appendable opens an Event of this Kind, or adds to the one that is already open.
 // Calling the other Kind closes the open one first, which is the rule that keeps
-// one message from swallowing the next.
+// one message from swallowing the next. The caller holds the mutex.
 func (k *sink) appendable(kind event.Kind, text string, end bool) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-
 	if k.open != 0 && k.kind != kind {
 		k.closeOpen()
 	}
@@ -78,14 +117,21 @@ func newAppendable(kind event.Kind, text string, complete bool) any {
 }
 
 func (k *sink) ToolCallRequested(id, name string, kind event.ToolKind, title string, args json.RawMessage) {
-	k.d.write(k.s, event.KindToolCallRequested, &event.ToolCallRequested{
-		ToolCallID: id, Name: name, ToolKind: kind, Title: title, Args: args,
+	k.report(func() {
+		k.d.write(k.s, event.KindToolCallRequested, &event.ToolCallRequested{
+			ToolCallID: id, Name: name, ToolKind: kind, Title: title, Args: args,
+		})
 	})
 }
 
+// ToolCallEnded is the Harness reporting a result, which is the one end the ledger
+// never has to invent. It goes through the fence so that it and the ledger cannot
+// both end the same call.
 func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
-	k.d.write(k.s, event.KindToolCallEnded, &event.ToolCallEnded{
-		ToolCallID: id, Outcome: o, Content: content,
+	k.report(func() {
+		k.d.write(k.s, event.KindToolCallEnded, &event.ToolCallEnded{
+			ToolCallID: id, Outcome: o, Content: content,
+		})
 	})
 }
 
@@ -93,12 +139,14 @@ func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
 // Tool Call the Harness announced and never reported a result for ends unknown
 // here, before the boundary the Client reads as the end of the work.
 func (k *sink) Completed(stop event.StopReason, u event.Usage) {
-	k.d.closeCalls(k.s, nil)
-	k.d.write(k.s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: stop, Usage: u})
+	k.report(func() {
+		k.d.closeCalls(k.s, nil)
+		k.d.write(k.s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: stop, Usage: u})
+	})
 }
 
 func (k *sink) Failed(code event.ErrorCode, msg string) {
-	k.d.write(k.s, event.KindError, &event.Error{Code: code, Message: msg})
+	k.report(func() { k.d.write(k.s, event.KindError, &event.Error{Code: code, Message: msg}) })
 }
 
 // Approve is the one call that blocks until the Daemon decides. There is nothing

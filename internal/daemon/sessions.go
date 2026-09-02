@@ -112,6 +112,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		started: time.Now().UTC(),
 		cancel:  cancel,
 	}
+	s.sink = &sink{d: d, s: s}
 	// The Session joins the registry only once its first Event is in the log. A
 	// Session with no Event folds to Starting, so one added ahead of a write that
 	// failed would hold the Host's one slot for as long as the Daemon runs.
@@ -151,7 +152,7 @@ func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vend
 		Dir:     s.dir,
 		Spawn:   d.spawner(s, h),
 		Files:   files{root: d.root, dir: s.dir},
-	}, &sink{d: d, s: s})
+	}, s.sink)
 	if err != nil {
 		d.endFailed(s, event.ErrHarnessFailed, err.Error())
 		return
@@ -178,7 +179,7 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 		return
 	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
-	d.closeCalls(s, nil)
+	s.sink.end(nil)
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
 	// A Harness that died still has a group, and on Windows that group is a handle
 	// that a child of its own may still be living inside.
@@ -200,7 +201,7 @@ func (d *Daemon) ladder(s *Session, run harness.Run) {
 			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
 		})
 	}
-	d.closeCalls(s, held)
+	s.sink.end(held)
 	if run != nil {
 		run.Close()
 	}
@@ -359,6 +360,11 @@ type Session struct {
 	// cancel ends the launch, the Run and every call either has in flight.
 	cancel context.CancelFunc
 
+	// sink is this Session's whole view of the Daemon, which the Adapter reports
+	// through and the Session's end closes. It is made with the Session and never
+	// replaced, so it is read without the registry mutex.
+	sink *sink
+
 	// run is the live Session the Adapter handed back, which the Daemon holds
 	// because it is the Daemon that prompts and stops it. It is nil until the
 	// Harness is up, and stays nil for a launch that failed.
@@ -454,10 +460,18 @@ func (r *sessions) setRun(s *Session, run harness.Run) {
 	s.run = run
 }
 
-func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) {
+// setProcess keeps the Harness process and its transcript, and reports whether the
+// Session still wants them. A stop that landed while the Harness was starting has
+// already run its kill and found no process, so the spawn takes the process back
+// rather than leaving one nobody owns.
+func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if s.ending {
+		return false
+	}
 	s.proc, s.raw = p, raw
+	return true
 }
 
 // process is the Harness process and the transcript its output is going to. They
