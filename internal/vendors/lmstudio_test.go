@@ -22,6 +22,17 @@ func lmModels(name string) *recorded {
 	return &recorded{body: map[string]string{"/api/v1/models": name}}
 }
 
+// modelByID scans rather than indexes, for the reason isResident does: a listing
+// is a handful of Models and a test reads three of them.
+func modelByID(models []Model, id string) (Model, bool) {
+	for _, m := range models {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return Model{}, false
+}
+
 // LM Studio is the only Vendor in v1 that ever answers Yes, and the only one that
 // answers No. Both matter: Yes shows the Model in an agent Session's picker, No
 // hides it, and Unknown shows it with the gap visible.
@@ -32,11 +43,6 @@ func TestLMStudioAnswersEveryCapabilityValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Catalogue: %v", err)
 	}
-	byID := make(map[string]Model, len(models))
-	for _, m := range models {
-		byID[m.ID] = m
-	}
-
 	for _, c := range []struct {
 		id   string
 		want Capabilities
@@ -48,7 +54,7 @@ func TestLMStudioAnswersEveryCapabilityValue(t *testing.T) {
 		// An embedding Model cannot back a Session, and LM Studio says so in type.
 		{"text-embedding-nomic-embed-text-v1.5", Capabilities{Chat: No, Tools: Unknown, Reasoning: Unknown, Vision: Unknown}},
 	} {
-		m, ok := byID[c.id]
+		m, ok := modelByID(models, c.id)
 		if !ok {
 			t.Fatalf("Catalogue did not return %s", c.id)
 		}
