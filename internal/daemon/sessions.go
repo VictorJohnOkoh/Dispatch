@@ -461,10 +461,18 @@ func (r *sessions) setRun(s *Session, run harness.Run) {
 	s.run = run
 }
 
-func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) {
+// setProcess keeps the Harness process and its transcript, and reports whether the
+// Session still wants them. A stop that landed while the Harness was starting has
+// already run its kill and found no process, so the spawn takes the process back
+// rather than leaving one nobody owns.
+func (r *sessions) setProcess(s *Session, p *harnessProcess, raw *transcript) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if s.ending {
+		return false
+	}
 	s.proc, s.raw = p, raw
+	return true
 }
 
 // process is the Harness process and the transcript its output is going to. They
