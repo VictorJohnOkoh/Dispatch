@@ -2,12 +2,38 @@
 // only applies what arrives after that paint: an Event becomes a row, a Delta adds
 // text to a row that is already there.
 //
-// draw() below is page.js's copy of render.go's draw(). The two must agree, and
-// they are next to each other for that reason.
+// The page loads fold.js and render.js before this one. Those two are the Client's
+// own copy of what the Hub does on the server and they touch no page, so this file
+// is the wiring, and the wiring is the only part that needs a browser to run.
 
 const list = document.getElementById("transcript");
+const stateLine = document.getElementById("state");
+const hostStateLine = document.getElementById("host-state");
+const hostCauseLine = document.getElementById("host-cause");
+const hostMark = document.getElementById("host-mark");
+const staleStamp = document.getElementById("stale");
+const vendorList = document.getElementById("vendors");
 const host = list.dataset.host;
 const session = list.dataset.session;
+
+// events is this Session's own Events by Sequence Number, which is what the fold
+// reads. It is keyed rather than a list, so an Event that arrives twice, once on
+// the stream and once from a refetch, folds once.
+const events = new Map();
+
+// order is those Sequence Numbers, ascending. The fold reads Events in Seq order
+// and the page draws rows in it, so the order is kept as they arrive rather than
+// sorted again on every Event.
+const order = [];
+
+// generation counts the times this page has thrown away what it held. A load that
+// started before a resync belongs to a page that no longer exists, so it stops
+// rather than putting discarded rows back.
+let generation = 0;
+
+// reload holds live Frames that arrive while a resync read is in flight. They
+// are replayed after the replacement commits, so the read cannot overtake them.
+let reload = null;
 
 // rows is every row on the page by Sequence Number, so a Delta finds its message
 // without searching, and a replayed Event replaces its row instead of doubling it.
@@ -19,10 +45,18 @@ const rows = new Map();
 // Deltas is copied whole a thousand times.
 const held = new Map();
 
+// The first paint's rows are adopted, and its Events are read from the page
+// beside them. The rows are what a person reads and the payloads are what the
+// fold reads, and the page carries both so that nothing has to be fetched again
+// to know what is already on screen.
 for (const el of list.children) {
   const seq = Number(el.dataset.seq);
+  order.push(seq);
   rows.set(seq, el);
   remember(seq, el);
+}
+for (const e of JSON.parse(document.getElementById("events").textContent || "[]")) {
+  events.set(e.seq, { kind: e.kind, payload: e.payload });
 }
 
 // remember records what one row's message holds, or forgets a row that has no
@@ -42,13 +76,101 @@ const stream = new EventSource(url);
 stream.addEventListener("event", (frame) => {
   const f = JSON.parse(frame.data);
   if (f.host !== host || f.session !== session) return;
+  if (reload) reload.frames.push({ name: "event", frame: f });
+  apply(f);
+  refold();
+});
+
+// apply puts one Event on the page, replacing the row it already had rather than
+// doubling it, so a replayed Event costs a redrawn row and nothing else. A row is
+// put where its Sequence Number belongs, because a refetch that lands behind a
+// live Event would otherwise draw the transcript out of order.
+function apply(f) {
   const el = render(f.seq, f.kind, draw(f.kind, f.payload));
   const old = rows.get(f.seq);
-  if (old) old.replaceWith(el);
-  else list.append(el);
+  if (old) {
+    old.replaceWith(el);
+  } else {
+    const i = at(f.seq);
+    order.splice(i, 0, f.seq);
+    if (i === order.length - 1) list.append(el);
+    else rows.get(order[i + 1]).before(el);
+  }
+  events.set(f.seq, { kind: f.kind, payload: f.payload });
   rows.set(f.seq, el);
   remember(f.seq, el);
-});
+}
+
+// at is where one Sequence Number belongs in order. Events arrive in order almost
+// always, so the scan runs from the end and stops at once.
+function at(seq) {
+  let i = order.length;
+  while (i > 0 && order[i - 1] > seq) i--;
+  return i;
+}
+
+// refold derives the Session State from the Events this page holds, which is the
+// Client folding rather than asking the Hub what the Session is doing.
+
+function refold() {
+  const view = foldSession(order.map((seq) => events.get(seq)));
+  stateLine.dataset.state = view.state;
+  stateLine.textContent = view.reason ? `${view.state} ${view.reason}` : view.state;
+}
+
+// load reads this Session whole and applies it. Only a resync calls it: the first
+// paint carries its own Events, so nothing is fetched to draw a page that is
+// already drawn.
+//
+// It pages until a read answers with nothing rather than until one answers short,
+// so a Host that serves smaller pages than this asks for costs a round trip and
+// never a lost Event.
+async function load(mine) {
+  const path = `/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/events`;
+  const fresh = [];
+  try {
+    for (let after = 0; mine === generation; ) {
+      const resp = await fetch(`${path}?after=${after}`);
+      // A read that failed leaves the page holding what it had. Answering a resync
+      // with a blank transcript would read as a Session with no Events in it.
+      if (!resp.ok) return;
+      const body = await resp.json();
+      const page = body.events ?? [];
+      if (mine !== generation) return;
+      fresh.push(...page);
+      if (page.length === 0) {
+        commitReload(mine, fresh);
+        return;
+      }
+      after = page[page.length - 1].seq;
+    }
+  } finally {
+    if (reload?.generation === mine) reload = null;
+  }
+}
+
+function commitReload(mine, fresh) {
+  const frames = reload?.generation === mine ? reload.frames : [];
+  reload = null;
+  replaceTranscript(fresh);
+  for (const queued of frames) {
+    if (queued.name === "event") apply(queued.frame);
+    else applyDelta(queued.frame);
+  }
+  refold();
+}
+
+// replaceTranscript commits a completed resync. Until every page has arrived,
+// the person keeps the transcript they already had.
+function replaceTranscript(fresh) {
+  rows.clear();
+  held.clear();
+  events.clear();
+  order.length = 0;
+  list.replaceChildren();
+  for (const e of fresh) apply(e);
+  refold();
+}
 
 stream.addEventListener("delta", (frame) => {
   const f = JSON.parse(frame.data);
@@ -57,26 +179,69 @@ stream.addEventListener("delta", (frame) => {
   // Sequence Number this page has no row for is another Session's message.
   const text = rows.get(f.seq)?.querySelector(".text");
   if (!text) return;
-  if (f.final) {
-    // The final Delta carries the whole text and replaces it.
-    text.textContent = f.text;
-    held.set(f.seq, f.text.length);
-  } else if (f.n === held.get(f.seq)) {
-    // This Delta carries on from where the row stands, which is every Delta of a
-    // message that nothing went wrong with. Appending touches only the new text.
-    text.append(f.text);
-    held.set(f.seq, f.n + f.text.length);
+  if (reload) reload.frames.push({ name: "delta", frame: f });
+  applyDelta(f, text);
+});
+
+function applyDelta(f, target) {
+  const text = target ?? rows.get(f.seq)?.querySelector(".text");
+  if (!text) return;
+  const next = deltaText(text.textContent, held.get(f.seq), f);
+  // Appending touches only the new text, which is what keeps a message arriving
+  // in a thousand Deltas from being copied whole a thousand times.
+  if (next.append !== undefined) text.append(next.append);
+  else text.textContent = next.text;
+  held.set(f.seq, next.held);
+}
+
+// A resync says this page's Cursor is outside the log, or that the log it came
+// from has been replaced. The answer is to discard what this page holds for that
+// Host and refetch it. The stream stays open, so every other Host keeps streaming
+// through it.
+stream.addEventListener("resync", (frame) => {
+  const f = JSON.parse(frame.data);
+  if (f.host && f.host !== host) return;
+  generation++;
+  reload = { generation, frames: [] };
+  load(generation);
+});
+
+// A host frame is the Hub's view of one Host. A Host that is not Ready is never
+// hidden: the page says so and goes on showing what it last knew.
+stream.addEventListener("host", (frame) => {
+  const f = JSON.parse(frame.data);
+  if (f.host !== host) return;
+  document.body.dataset.hostState = f.state;
+  document.body.dataset.hostCause = f.cause ?? "";
+  hostStateLine.textContent = f.state;
+  hostCauseLine.textContent = f.cause ?? "";
+  hostMark.textContent = f.state === "Connecting" ? "reconnecting" : "";
+  if (f.state === "Down") {
+    const at = f.at ? new Date(f.at / 1000) : new Date();
+    staleStamp.textContent = `Stale since ${at.toLocaleString()}`;
+    staleStamp.dateTime = at.toISOString();
   } else {
-    // The row holds more or less than this Delta expects, so the page dropped one.
-    // It repairs itself by rewriting from where the Delta says the text stood.
-    text.textContent = text.textContent.slice(0, f.n) + f.text;
-    held.set(f.seq, f.n + f.text.length);
+    staleStamp.textContent = "";
+    staleStamp.dateTime = "";
   }
 });
 
-// A resync says this page's Cursor is outside the log. The answer is to discard
-// what it holds and refetch, and a reload is both.
-stream.addEventListener("resync", () => location.reload());
+// A vendors frame carries a Host's Vendor catalogue and its reachability. This
+// page shows the live list so a change does not wait for another page load.
+stream.addEventListener("vendors", (frame) => {
+  const f = JSON.parse(frame.data);
+  if (f.host !== host) return;
+  vendorList.replaceChildren(...(f.vendors ?? []).map(renderVendor));
+});
+
+function renderVendor(vendor) {
+  const el = document.createElement("li");
+  const reachability = vendor.reachable ? "reachable" : "unreachable";
+  const resident = (vendor.resident ?? []).map((model) => model.modelId).join(", ");
+  el.append(node("span", "title", vendor.kind));
+  el.append(node("span", "detail", ` — ${reachability}${resident ? ` — ${resident}` : ""}`));
+  return el;
+}
 
 // render builds one row, matching page.html's shape element for element.
 function render(seq, kind, r) {
@@ -95,56 +260,4 @@ function node(tag, className, text) {
   el.className = className;
   el.textContent = text ?? "";
   return el;
-}
-
-// draw is render.go's draw(). A Kind this build has never heard of falls to the
-// default and draws as a neutral row carrying its payload.
-function draw(kind, p) {
-  switch (kind) {
-    case "SessionStarted":
-      return { title: "Session started", detail: `${p.harness} on ${p.model} via ${p.vendor}, in ${p.cwd}` };
-    case "SessionReady":
-      return { title: "Session ready", detail: p.model };
-    case "ApprovalPolicySet":
-      return { title: `Approval policy, set by ${p.setBy}`, detail: policyLine(p.policy) };
-    case "PromptSubmitted":
-      return { title: "Prompt", text: p.text };
-    case "Reasoning":
-      return { title: "Reasoning", text: p.text, appendable: true };
-    case "AssistantMessage":
-      return { title: "Assistant", text: p.text, appendable: true };
-    case "ToolCallRequested":
-      // A call with no arguments carries none, the way render.go's does. Spelling
-      // them "null" would read as an argument whose value is null.
-      return { title: `Tool call: ${p.name}`, detail: `${p.title} ${p.args ? JSON.stringify(p.args) : ""}`.trim() };
-    case "ApprovalRequested":
-      return { title: `Approval requested: ${p.title}`, detail: p.detail };
-    case "ApprovalDecided":
-      return { title: `Approval ${p.decision}`, detail: `decided by ${p.by}` };
-    case "ToolCallEnded":
-      return { title: `Tool call ${p.outcome}`, text: p.content };
-    case "PromptCompleted":
-      return {
-        title: `Prompt completed: ${p.stopReason}`,
-        detail: `${p.usage.input} in, ${p.usage.output} out, ${p.usage.total} total`,
-      };
-    case "Error":
-      return { title: `Error: ${p.code}`, detail: p.message };
-    case "SessionEnded":
-      return { title: `Session ended: ${p.reason}` };
-    case "HubAttached":
-      return { title: "The Hub attached" };
-    case "HubDetached":
-      return { title: "The Hub detached" };
-    case "DaemonStarted":
-      return { title: "The Daemon started" };
-    default:
-      return { title: kind, detail: JSON.stringify(p) };
-  }
-}
-
-// policyLine spells all five slots, because the Approval Policy is always all five
-// set and a line naming three of them would read as the other two being off.
-function policyLine(policy) {
-  return ["read", "edit", "execute", "fetch", "other"].map((k) => `${k} ${policy[k]}`).join(", ");
 }

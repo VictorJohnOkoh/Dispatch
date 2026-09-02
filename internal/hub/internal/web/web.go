@@ -1,6 +1,6 @@
 // Package web is the Client: one server-rendered page showing one Session's
-// transcript. The template, the CSS and the JS are embedded, so the binary is the
-// whole deployment and nothing is read from disk at runtime.
+// transcript. The template, the CSS and the three JS files are embedded, so the
+// binary is the whole deployment and nothing is read from disk at runtime.
 //
 // The first paint is drawn here rather than in JS. SPEC.md decides it, and it is
 // what keeps this the only Hub package that knows Event Kinds exist. The Hub
@@ -30,7 +30,7 @@ type Hosts interface {
 	Get(ctx context.Context, host, path string) (*http.Response, error)
 }
 
-//go:embed page.html page.css page.js
+//go:embed page.html page.css page.js fold.js render.js
 var files embed.FS
 
 var page = template.Must(template.ParseFS(files, "page.html"))
@@ -53,6 +53,8 @@ func New(hosts Hosts) http.Handler {
 	mux.HandleFunc(sessionPage, c.session)
 	mux.HandleFunc("GET /page.css", asset("page.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /page.js", asset("page.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, indexHint)
@@ -77,11 +79,15 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	state, reason := fold(events)
 	if err := page.Execute(w, view{
 		Host:    host,
 		Session: id,
 		Cursor:  protocol.MergedCursor{host: at}.String(),
+		State:   state.String(),
+		Reason:  string(reason),
 		Rows:    rows(events),
+		Events:  payloads(events),
 	}); err != nil {
 		// The header has gone and half a page with it, so there is nothing left to
 		// answer with. The operational log is the Daemon's; the Hub's is stderr.
@@ -95,7 +101,36 @@ type view struct {
 	Host    string
 	Session string
 	Cursor  string
-	Rows    []row
+
+	// State is the Session's, folded here for the first paint. The browser folds it
+	// again from the same Events and keeps folding as they arrive, which is why
+	// fold.js exists.
+	State  string
+	Reason string
+
+	Rows []row
+
+	// Events is those same Events as JSON, for the browser to fold. The rows carry
+	// what a person reads and the payloads carry what the fold reads, and a page
+	// that shipped only the rows would have to fetch the Session again to know what
+	// it was already showing.
+	Events template.JS
+}
+
+// payloads is the Events as the page carries them, in the shape the stream sends and
+// the read path answers with, so the browser applies all three the same way.
+//
+// It is safe in a script element because encoding/json escapes <, > and & even
+// inside a payload it is passing through, so nothing a Harness writes can close
+// the tag.
+func payloads(events []protocol.Event) template.JS {
+	raw, err := json.Marshal(events)
+	if err != nil {
+		// Nothing here can fail that the page can do anything about, and an empty
+		// list is a page that folds from the stream alone.
+		return template.JS("[]")
+	}
+	return template.JS(raw)
 }
 
 // transcript reads one Session whole, oldest first, and the Cursor the last read

@@ -8,11 +8,12 @@ import (
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
+	"github.com/VictorJohnOkoh/Dispatch/internal/session"
 )
 
 // row is one Event as the page draws it. Text is the body a Delta may still add
 // to, and only Reasoning and AssistantMessage have one, so a Delta finds its row
-// by Seq. page.js draws the same row from a live Frame, and the two must agree.
+// by Seq. render.js draws the same row from a live Frame, and the two must agree.
 type row struct {
 	Seq        uint64
 	Kind       string
@@ -37,12 +38,32 @@ func rows(events []protocol.Event) []row {
 	return out
 }
 
+// fold is the Session's State for the first paint, from the same Events the rows
+// were drawn from. An Event that cannot be decoded is skipped, exactly as the
+// rows skip it, so the two halves of the page describe the same list.
+//
+// The browser folds the same Events again with fold.js and keeps folding as more
+// arrive. The two functions are the pair the shared fixture keeps honest; what it
+// cannot check is this skip, because an Event this Hub cannot decode is one the
+// browser folds from its raw payload anyway.
+func fold(events []protocol.Event) (session.State, event.EndReason) {
+	decoded := make([]event.Event, 0, len(events))
+	for _, e := range events {
+		one, err := event.Decode(e.Seq, event.SessionID(e.Session), e.At, event.Kind(e.Kind), e.Payload)
+		if err != nil {
+			continue
+		}
+		decoded = append(decoded, one)
+	}
+	return session.Fold(decoded)
+}
+
 // draw turns one Event into its row. An unknown Kind arrives here with its payload
 // still raw and draws as a neutral row, which is the whole cost of the Hub knowing
 // Kinds at all.
 func draw(e event.Event) row {
 	// The title starts from the Kind, so a Kind with no payload and a Kind this
-	// build never heard of both have a line before the switch runs. page.js reads
+	// build never heard of both have a line before the switch runs. render.js reads
 	// the Kind and nothing else for those, and the two must not disagree because
 	// one of them was written with an empty payload.
 	r := row{Seq: e.Seq, Kind: string(e.Kind), Title: note(e.Kind)}
@@ -91,7 +112,7 @@ func draw(e event.Event) row {
 	return r
 }
 
-// compact spells a raw payload the way page.js spells it. The Hub forwards what
+// compact spells a raw payload the way render.js spells it. The Hub forwards what
 // the Harness sent, byte for byte, and JSON.stringify writes no space between a
 // key and its value, so the same Event drawn here and drawn live would otherwise
 // differ by whitespace alone.

@@ -1,0 +1,25 @@
+{
+  "about": "The transcript renderer specification shared by the Hub's Go first paint and the Client's JavaScript live paint.",
+  "cases": [
+    {"name":"Session started","kind":"SessionStarted","payload":{"harness":"opencode","model":"qwen3","vendor":"ollama","cwd":"/work"},"row":{"title":"Session started","detail":"opencode on qwen3 via ollama, in /work"}},
+    {"name":"Session ready","kind":"SessionReady","payload":{"model":"qwen3"},"row":{"title":"Session ready","detail":"qwen3"}},
+    {"name":"Approval Policy","kind":"ApprovalPolicySet","payload":{"policy":{"read":"auto","edit":"wait","execute":"wait","fetch":"refuse","other":"wait"},"setBy":"user"},"row":{"title":"Approval policy, set by user","detail":"read auto, edit wait, execute wait, fetch refuse, other wait"}},
+    {"name":"Prompt","kind":"PromptSubmitted","payload":{"text":"Use the fixture"},"row":{"title":"Prompt","text":"Use the fixture"}},
+    {"name":"Reasoning","kind":"Reasoning","payload":{"text":"Checking","complete":false},"row":{"title":"Reasoning","text":"Checking","appendable":true}},
+    {"name":"Assistant","kind":"AssistantMessage","payload":{"text":"Done","complete":true},"row":{"title":"Assistant","text":"Done","appendable":true}},
+    {"name":"Tool Call object arguments","kind":"ToolCallRequested","payload":{"toolCallId":"c1","name":"shell","toolKind":"execute","title":"run tests","args":{"cmd":"go test ./..."}},"row":{"title":"Tool call: shell","detail":"run tests {\"cmd\":\"go test ./...\"}"}},
+    {"name":"Tool Call zero arguments","kind":"ToolCallRequested","payload":{"toolCallId":"c2","name":"answer","toolKind":"other","title":"return","args":0},"row":{"title":"Tool call: answer","detail":"return 0"}},
+    {"name":"Tool Call false arguments","kind":"ToolCallRequested","payload":{"toolCallId":"c3","name":"confirm","toolKind":"other","title":"set","args":false},"row":{"title":"Tool call: confirm","detail":"set false"}},
+    {"name":"Tool Call null arguments","kind":"ToolCallRequested","payload":{"toolCallId":"c4","name":"shell","toolKind":"execute","title":"run","args":null},"row":{"title":"Tool call: shell","detail":"run"}},
+    {"name":"Approval requested","kind":"ApprovalRequested","payload":{"toolCallId":"c1","title":"run tests","detail":"in /work"},"row":{"title":"Approval requested: run tests","detail":"in /work"}},
+    {"name":"Approval decided","kind":"ApprovalDecided","payload":{"toolCallId":"c1","decision":"allowed","by":"user"},"row":{"title":"Approval allowed","detail":"decided by user"}},
+    {"name":"Tool Call ended","kind":"ToolCallEnded","payload":{"toolCallId":"c1","outcome":"ok","content":"PASS"},"row":{"title":"Tool call ok","text":"PASS"}},
+    {"name":"Prompt completed","kind":"PromptCompleted","payload":{"stopReason":"stop","usage":{"input":10,"output":2,"cacheRead":0,"total":12}},"row":{"title":"Prompt completed: stop","detail":"10 in, 2 out, 12 total"}},
+    {"name":"Error","kind":"Error","payload":{"code":"vendor_error","message":"connection refused"},"row":{"title":"Error: vendor_error","detail":"connection refused"}},
+    {"name":"Session ended","kind":"SessionEnded","payload":{"reason":"stopped"},"row":{"title":"Session ended: stopped"}},
+    {"name":"Hub attached","kind":"HubAttached","payload":{},"row":{"title":"The Hub attached"}},
+    {"name":"Hub detached","kind":"HubDetached","payload":{},"row":{"title":"The Hub detached"}},
+    {"name":"Daemon started","kind":"DaemonStarted","payload":{},"row":{"title":"The Daemon started"}},
+    {"name":"Unknown Kind","kind":"Telemetry","payload":{"beat":3},"row":{"title":"Telemetry","detail":"{\"beat\":3}"}}
+  ]
+}
