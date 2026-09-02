@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"sync"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
@@ -88,19 +87,14 @@ func (k *sink) ToolCallRequested(id, name string, kind event.ToolKind, title str
 // and a refusal it decided is not overwritten by what the Harness reports about
 // the call afterwards.
 func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
-	if !slices.Contains(k.d.sessions.openCalls(k.s), id) {
-		return
-	}
-	k.d.write(k.s, event.KindToolCallEnded, &event.ToolCallEnded{
-		ToolCallID: id, Outcome: o, Content: content,
-	})
+	k.d.endCall(k.s, id, o, content)
 }
 
 // Completed ends the Prompt, and is the first of the ledger's two triggers. A
 // Tool Call the Harness announced and never reported a result for ends unknown
 // here, before the boundary the Client reads as the end of the work.
 func (k *sink) Completed(stop event.StopReason, u event.Usage) {
-	k.d.closeCalls(k.s, nil)
+	k.d.closeCalls(k.s)
 	k.d.write(k.s, event.KindPromptCompleted, &event.PromptCompleted{StopReason: stop, Usage: u})
 }
 

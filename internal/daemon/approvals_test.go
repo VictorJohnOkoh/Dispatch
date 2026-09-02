@@ -294,6 +294,70 @@ func TestAHarnessWithNoToolsGetsNoPolicyAtAll(t *testing.T) {
 	}
 }
 
+// A question about a Tool Call the Harness never announced is refused, and the
+// refusal is an Error rather than a decision about a Tool Call that does not
+// exist.
+func TestAQuestionAboutACallThatWasNeverRequestedIsRefused(t *testing.T) {
+	h, id, out := gated(t, gateStart)
+
+	decision, err := out.Approve(context.Background(), "ghost", "rm -rf /", "")
+	if decision != event.DecisionRefused || err == nil {
+		t.Fatalf("Approve = %q, %v", decision, err)
+	}
+	var failed event.Error
+	h.payload(t, id, event.KindError, &failed)
+	if failed.Code != event.ErrAdapterFailed || !strings.Contains(failed.Message, "ghost") {
+		t.Errorf("the Error is %+v, and it has to name the call", failed)
+	}
+	if ends := h.ended(t); len(ends) != 0 {
+		t.Errorf("a Tool Call that was never requested was ended: %+v", ends)
+	}
+	if held := h.policies(t); len(held) != 1 {
+		t.Errorf("the policy changed: %+v", held)
+	}
+}
+
+// An interrupt refuses the question the Prompt left open, because the Adapter
+// holding one is blocked inside Approve and cannot read the interrupt until it
+// has an answer.
+func TestAnInterruptRefusesTheQuestionThePromptLeftOpen(t *testing.T) {
+	h, id, out := gated(t, gateStart)
+	answered := asks(out, "c1", event.ToolExecute)
+	h.waitState(t, id, "Asking")
+
+	h.command(t, id, "interrupt", "")
+	if decision := answer(t, answered); decision != event.DecisionRefused {
+		t.Errorf("Approve = %q, and the interrupt abandoned the Prompt", decision)
+	}
+	ends := h.ended(t)
+	if len(ends) != 1 || ends[0].Outcome != event.OutcomeRefused {
+		t.Errorf("the log holds %+v, want c1 ended refused", ends)
+	}
+}
+
+// The Host config's default is what a Session starts on, and it is told apart
+// from the built-in fallback by being different from it.
+func TestTheHostConfigsDefaultIsWhatASessionStartsOn(t *testing.T) {
+	a := newGating()
+	h := newHost(t, Harness{Name: "gate", Adapter: a})
+	// refuse where the fallback would wait, and wait where it would run.
+	h.policyDefault = event.Policy{event.RuleWait, event.RuleRefuse, event.RuleRefuse, event.RuleWait, event.RuleWait}
+
+	id := h.started(t, h.post(t, "/v1/sessions", gateStart)).Session
+	h.waitState(t, id, "Idle")
+
+	held := h.policies(t)
+	if len(held) != 1 {
+		t.Fatalf("the Session started on %+v", held)
+	}
+	// read and the two ungated slots are clipped to auto; the gated two are the
+	// config's own.
+	want := event.Policy{event.RuleAuto, event.RuleRefuse, event.RuleRefuse, event.RuleAuto, event.RuleAuto}
+	if held[0].Policy != want {
+		t.Errorf("the Session started on %v, want %v", held[0].Policy, want)
+	}
+}
+
 // The Session's own default is the Host config's, clipped by the Gates: a slot
 // this Harness cannot hold is auto whatever the config said.
 func TestTheStartingPolicyIsTheHostDefaultClippedByTheGates(t *testing.T) {

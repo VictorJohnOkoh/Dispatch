@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
@@ -23,7 +24,13 @@ func (d *Daemon) approve(ctx context.Context, s *Session, id, title, detail stri
 	if !ok {
 		// A question about a Tool Call the Harness never announced. Nothing here can
 		// say which slot it belongs to, and guessing would gate the wrong thing.
-		return event.DecisionRefused, fmt.Errorf("daemon: no Tool Call %q was ever requested", id)
+		//
+		// The refusal is an Error rather than an ApprovalDecided, because there is no
+		// Tool Call to decide about: writing one would invent the very thing that is
+		// missing. The Adapter is told no, and the Session stays usable.
+		msg := fmt.Sprintf("the Harness asked about the Tool Call %q and never requested it", id)
+		d.write(s, event.KindError, &event.Error{Code: event.ErrAdapterFailed, Message: msg})
+		return event.DecisionRefused, errors.New("daemon: " + msg)
 	}
 
 	switch d.sessions.policy(s)[kind] {
@@ -37,6 +44,10 @@ func (d *Daemon) approve(ctx context.Context, s *Session, id, title, detail stri
 		d.refuse(s, id, event.ByPolicy)
 		return event.DecisionRefused, nil
 	}
+
+	// Everything else waits, and a slot that somehow holds no Rule waits with it,
+	// because waiting is the side that asks a human rather than the side that runs
+	// a tool unattended.
 
 	// Wait. The question goes in the log, the Session folds to Asking, and the
 	// answer is what releases this.
@@ -66,9 +77,7 @@ func (d *Daemon) refuse(s *Session, id string, by event.DecidedBy) {
 	d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 		ToolCallID: id, Decision: event.DecisionRefused, By: by,
 	})
-	d.write(s, event.KindToolCallEnded, &event.ToolCallEnded{
-		ToolCallID: id, Outcome: event.OutcomeRefused,
-	})
+	d.endCall(s, id, event.OutcomeRefused, "")
 }
 
 // chosenPolicy is the Approval Policy a Session begins with: the user's, when the

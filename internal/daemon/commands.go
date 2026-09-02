@@ -76,9 +76,17 @@ func (d *Daemon) boundFailed(s *Session, err error) {
 // interrupt abandons the Prompt in flight and keeps the Session. It returns once
 // the Adapter has stopped reading, and the Adapter is what writes PromptCompleted,
 // so the Session is Idle again by the time this answers.
+//
+// A question the Prompt left open is refused first, the same way the ladder does
+// it. The Adapter that is holding one is blocked inside Approve and cannot read
+// the interrupt until it has an answer, so an interrupt that skipped this would
+// answer the user while nothing had actually been abandoned.
 func (d *Daemon) interrupt(w http.ResponseWriter, r *http.Request) {
 	d.commanding.Lock()
 	s, run, ok := d.allow(w, r, session.Working, session.Asking)
+	if ok {
+		d.refuseHeld(s, event.ByUser)
+	}
 	d.commanding.Unlock()
 	if !ok {
 		return
@@ -249,6 +257,8 @@ func (d *Daemon) flip(s *Session, id string) {
 		return
 	}
 	policy := d.sessions.policy(s)
+	// A slot that is already auto has nothing to flip, and the policy has not
+	// changed, so writing it again would put a value in the log that nothing set.
 	if policy[kind] == event.RuleAuto {
 		return
 	}

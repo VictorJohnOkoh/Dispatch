@@ -201,7 +201,7 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 		return
 	}
 	d.write(s, event.KindError, &event.Error{Code: code, Message: msg})
-	d.closeCalls(s, nil)
+	d.closeCalls(s)
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndFailed})
 	// A Harness that died still has a group, and on Windows that group is a handle
 	// that a child of its own may still be living inside.
@@ -217,21 +217,26 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 //
 // Because step 6 is a kill, a stop always finishes.
 func (d *Daemon) ladder(s *Session, run harness.Run) {
-	held := d.sessions.held(s)
-	for _, call := range held {
-		d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
-			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
-		})
-		// Step 1 frees a Harness that is blocked on an answer nobody is going to
-		// give it. A stop that only wrote the Event would leave it blocked until the
-		// kill.
-		d.sessions.tell(s, call, event.DecisionRefused)
-	}
-	d.closeCalls(s, held)
+	d.refuseHeld(s, event.BySessionStopped)
+	d.closeCalls(s)
 	if run != nil {
 		run.Close()
 	}
 	d.kill(s)
+}
+
+// refuseHeld refuses every question this Session has open and frees whoever is
+// waiting on one, which is the ladder's steps 1 and 2. A Harness blocked inside
+// Approve cannot read anything until it has an answer, so writing the Event
+// without delivering it would leave it blocked until the kill.
+//
+// Each refusal ends its Tool Call with it, because a Tool Call the Daemon refused
+// is over. Whatever else is open was in flight and is nobody's to end here.
+func (d *Daemon) refuseHeld(s *Session, by event.DecidedBy) {
+	for _, call := range d.sessions.held(s) {
+		d.refuse(s, call, by)
+		d.sessions.tell(s, call, event.DecisionRefused)
+	}
 }
 
 // kill is the ladder's last three steps against whatever process this Session has,
@@ -449,8 +454,6 @@ func (r *sessions) find(id event.SessionID) (*Session, harness.Run, session.Stat
 }
 
 // ask registers one open question and hands back what the answer will arrive on.
-// The channel is buffered, so an answer that lands after the Adapter stopped
-// waiting is dropped rather than blocking whoever wrote it.
 func (r *sessions) ask(s *Session, id string) chan event.Decision {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -469,14 +472,20 @@ func (r *sessions) answered(s *Session, id string) {
 	delete(s.asking, id)
 }
 
-// tell delivers one decision to the Adapter holding that Tool Call. A question
-// nobody is waiting on is one the Adapter has already given up on, and the Event
-// is the record either way.
+// tell delivers one decision to the Adapter holding that Tool Call, and never
+// waits to. A question nobody is reading is one the Adapter has given up on, and
+// a second answer to one question is one answer too many: the Event is the record
+// either way, and a send that blocked here would block the whole registry with it.
 func (r *sessions) tell(s *Session, id string, decision event.Decision) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if answer, ok := s.asking[id]; ok {
-		answer <- decision
+	answer, ok := s.asking[id]
+	if !ok {
+		return
+	}
+	select {
+	case answer <- decision:
+	default:
 	}
 }
 
