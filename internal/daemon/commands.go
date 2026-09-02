@@ -184,11 +184,16 @@ func ungated(caps harness.Capabilities, p event.Policy) *protocol.Refusal {
 type approvalRequest struct {
 	ToolCallID string         `json:"toolCallId"`
 	Decision   event.Decision `json:"decision"`
+
+	// Always is the user answering this question and the next one of its class at
+	// the same time, which is what "always allow" is. It flips one slot to auto and
+	// writes the whole policy it produced.
+	Always bool `json:"always"`
 }
 
-// decideApproval answers one held Tool Call. Nothing on this Host asks yet.
-// Passthrough is the only Harness and it runs no tools, so every decision here
-// meets a question that is not open.
+// decideApproval answers one held Tool Call. The decision is the record, the
+// Adapter is released with it, and a refusal ends the Tool Call here, because a
+// Tool Call the Daemon refused is over whatever the Harness says next.
 func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 	var req approvalRequest
 	if !decode(w, r, &req) {
@@ -217,13 +222,40 @@ func (d *Daemon) decideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
+	if req.Decision == event.DecisionRefused {
+		d.refuse(s, req.ToolCallID, event.ByUser)
+	} else if _, err := d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 		ToolCallID: req.ToolCallID, Decision: req.Decision, By: event.ByUser,
 	}); err != nil {
 		logRefused(w)
 		return
 	}
+	d.sessions.tell(s, req.ToolCallID, req.Decision)
+
+	// The flip comes after the decision, so this question was answered by the user
+	// and the new policy is what the next Tool Call of that class meets.
+	if req.Always && req.Decision == event.DecisionAllowed {
+		d.flip(s, req.ToolCallID)
+	}
 	w.WriteHeader(protocol.StatusAccepted)
+}
+
+// flip is "always allow": the slot this Tool Call belongs to becomes auto, and the
+// whole policy that produced goes in the log, because every value the Approval
+// Policy ever holds is an ApprovalPolicySet.
+func (d *Daemon) flip(s *Session, id string) {
+	kind, ok := d.sessions.kindOf(s, id)
+	if !ok {
+		return
+	}
+	policy := d.sessions.policy(s)
+	if policy[kind] == event.RuleAuto {
+		return
+	}
+	policy[kind] = event.RuleAuto
+	d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
+		Policy: policy, SetBy: event.SetByUser,
+	})
 }
 
 // allow finds the Session the path names and folds it. It answers the request

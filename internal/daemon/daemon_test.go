@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
@@ -45,7 +46,7 @@ func plain(t *testing.T, adapters []vendors.Adapter, log *slog.Logger) *Daemon {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { events.Close() })
-	return New(log, events, dir, workspace.Root{}, adapters, nil)
+	return New(log, events, dir, workspace.Root{}, adapters, nil, event.Policy{})
 }
 
 var addrLine = regexp.MustCompile(`addr=(\S+)`)

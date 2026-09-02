@@ -27,6 +27,13 @@ type startRequest struct {
 	Harness string `json:"harness"`
 	Model   string `json:"model"`
 	Dir     string `json:"dir"`
+
+	// Policy is the user choosing the Approval Policy at the start. Without it the
+	// Session gets the Host config's default, clipped by the Harness's Gates. With
+	// it, a slot the Harness cannot gate fails the start rather than being quietly
+	// turned into auto: it is the same rule and the same code as a change while the
+	// Session runs.
+	Policy *event.Policy `json:"policy"`
 }
 
 // startedBody is the one command answer with a body. The Seq tells the caller
@@ -69,6 +76,13 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 			Reason: protocol.ReasonWorkspace, Detail: err.Error(),
 		})
 		return
+	}
+
+	if req.Policy != nil {
+		if refusal := ungated(h.Adapter.Capabilities(), *req.Policy); refusal != nil {
+			refuse(w, protocol.StatusUnprocessable, *refusal)
+			return
+		}
 	}
 
 	vendor := d.vendors.serving(req.Model)
@@ -123,6 +137,15 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.sessions.add(s)
+
+	// The Approval Policy is chosen when the Session starts, and it is in the log
+	// before the Harness exists, so nothing can be asked before the answer is
+	// decidable. A Harness that runs no tools has none at all.
+	if policy, setBy, has := d.chosenPolicy(s.caps, req.Policy); has {
+		d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
+			Policy: policy, SetBy: setBy,
+		})
+	}
 
 	go d.launch(ctx, s, h, vendor)
 
@@ -199,6 +222,10 @@ func (d *Daemon) ladder(s *Session, run harness.Run) {
 		d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 			ToolCallID: call, Decision: event.DecisionRefused, By: event.BySessionStopped,
 		})
+		// Step 1 frees a Harness that is blocked on an answer nobody is going to
+		// give it. A stop that only wrote the Event would leave it blocked until the
+		// kill.
+		d.sessions.tell(s, call, event.DecisionRefused)
 	}
 	d.closeCalls(s, held)
 	if run != nil {
@@ -379,6 +406,11 @@ type Session struct {
 	// ending is set by whoever writes SessionEnded, so a stop and a launch that
 	// failed cannot both write one and leave the end reason to a race.
 	ending bool
+
+	// asking is the questions this Session is holding a Tool Call for, keyed by the
+	// tool call id the Harness made at runtime. The Adapter waits on the channel and
+	// the decision is what sends to it.
+	asking map[string]chan event.Decision
 }
 
 // sessions is this Host's Session registry: every Session the Daemon started, in
@@ -414,6 +446,61 @@ func (r *sessions) find(id event.SessionID) (*Session, harness.Run, session.Stat
 	}
 	state, _ := session.Fold(s.events)
 	return s, s.run, state
+}
+
+// ask registers one open question and hands back what the answer will arrive on.
+// The channel is buffered, so an answer that lands after the Adapter stopped
+// waiting is dropped rather than blocking whoever wrote it.
+func (r *sessions) ask(s *Session, id string) chan event.Decision {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s.asking == nil {
+		s.asking = map[string]chan event.Decision{}
+	}
+	answer := make(chan event.Decision, 1)
+	s.asking[id] = answer
+	return answer
+}
+
+// answered forgets one question, whether it was decided or abandoned.
+func (r *sessions) answered(s *Session, id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(s.asking, id)
+}
+
+// tell delivers one decision to the Adapter holding that Tool Call. A question
+// nobody is waiting on is one the Adapter has already given up on, and the Event
+// is the record either way.
+func (r *sessions) tell(s *Session, id string, decision event.Decision) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if answer, ok := s.asking[id]; ok {
+		answer <- decision
+	}
+}
+
+// kindOf is the ToolKind of one Tool Call this Session requested, which is the
+// slot of the Approval Policy that decides it.
+func (r *sessions) kindOf(s *Session, id string) (event.ToolKind, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range s.events {
+		if e.Kind != event.KindToolCallRequested {
+			continue
+		}
+		if p, ok := e.Payload.(*event.ToolCallRequested); ok && p.ToolCallID == id {
+			return p.ToolKind, true
+		}
+	}
+	return 0, false
+}
+
+// policy is the Approval Policy this Session holds now, folded from its own Events.
+func (r *sessions) policy(s *Session) event.Policy {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return session.Policy(s.events)
 }
 
 // held is the Tool Calls this Session is waiting on a decision for.

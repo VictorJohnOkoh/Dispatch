@@ -322,7 +322,7 @@ func TestAClientCommandAndFrameCrossTheHubAndDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := daemon.New(slog.New(slog.NewTextHandler(io.Discard, nil)), events, dir, root, nil, nil)
+	d := daemon.New(slog.New(slog.NewTextHandler(io.Discard, nil)), events, dir, root, nil, nil, event.Policy{})
 	h := hub.New([]hostset.Host{{ID: "desk"}}, pipeDialer{
 		handlers: map[hostset.HostID]http.Handler{"desk": d.Handler()},
 	}).Handler()

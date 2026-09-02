@@ -3,7 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"slices"
 	"sync"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
@@ -83,7 +83,14 @@ func (k *sink) ToolCallRequested(id, name string, kind event.ToolKind, title str
 	})
 }
 
+// ToolCallEnded is what the Harness said happened, and it is dropped for a Tool
+// Call that is already closed. The Daemon closes one itself when it refuses it,
+// and a refusal it decided is not overwritten by what the Harness reports about
+// the call afterwards.
 func (k *sink) ToolCallEnded(id string, o event.Outcome, content string) {
+	if !slices.Contains(k.d.sessions.openCalls(k.s), id) {
+		return
+	}
 	k.d.write(k.s, event.KindToolCallEnded, &event.ToolCallEnded{
 		ToolCallID: id, Outcome: o, Content: content,
 	})
@@ -101,9 +108,8 @@ func (k *sink) Failed(code event.ErrorCode, msg string) {
 	k.d.write(k.s, event.KindError, &event.Error{Code: code, Message: msg})
 }
 
-// Approve is the one call that blocks until the Daemon decides. There is nothing
-// here that can decide yet, and the only Harness this build runs declares no
-// Gates, so it refuses rather than waiting on an answer that cannot arrive.
-func (k *sink) Approve(context.Context, string, string, string) (event.Decision, error) {
-	return event.DecisionRefused, errors.New("daemon: this Daemon has no Approval Policy yet")
+// Approve is the one call that blocks until the Daemon decides. The Approval
+// Policy is what decides it, and a wait slot means the user does.
+func (k *sink) Approve(ctx context.Context, id, title, detail string) (event.Decision, error) {
+	return k.d.approve(ctx, k.s, id, title, detail)
 }
