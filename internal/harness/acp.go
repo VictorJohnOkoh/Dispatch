@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
-	"slices"
 	"strings"
 	"sync"
 
@@ -22,16 +20,13 @@ import (
 // docs/research/captures/opencode/. Those bytes are this file's specification and
 // the tests replay them.
 
-// providerKey is the name of the provider this Adapter writes into the Session's
-// own opencode.json, and so the first half of the Model id OpenCode reports back.
+// providerKey is the name of the provider this Adapter puts in the Session's
+// OpenCode config, and so the first half of the Model id OpenCode reports back.
 // It is the name the captures were recorded under, and changing it means
 // recapturing them.
 const providerKey = "capstone"
 
-// configFile is the per-Session config, written in the working directory. It
-// merges with the user's global config rather than replacing it, so it makes this
-// Session's Vendor reachable and hides nothing else.
-const configFile = "opencode.json"
+const configEnv = "OPENCODE_CONFIG_CONTENT="
 
 // frameLimit is the longest line this Adapter will read. A permission request
 // carries the whole diff of an edit, so the limit is generous, and a Harness that
@@ -77,13 +72,10 @@ func (a *ACP) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error
 	if spec.Spawn == nil || spec.Files == nil {
 		return nil, fmt.Errorf("%s: this Harness needs both a Spawner and contained file access", a.name)
 	}
-	// The config is written before the spawn. OpenCode reads it from the working
-	// directory as it starts, so a file written afterwards is a file it never saw.
-	if err := spec.Files.WriteTextFile(configFile, sessionConfig(spec)); err != nil {
-		return nil, fmt.Errorf("%s: the Session's %s could not be written: %w", a.name, configFile, err)
-	}
-
-	pipes, err := spec.Spawn(ctx, Launch{Args: a.args})
+	pipes, err := spec.Spawn(ctx, Launch{
+		Args: a.args,
+		Env:  []string{configEnv + sessionConfig(spec)},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -116,11 +108,18 @@ func sessionConfig(spec SessionSpec) string {
 		Provider: map[string]providerConfig{providerKey: {
 			Name:   "Dispatch Vendor",
 			NPM:    "@ai-sdk/openai-compatible",
-			Option: providerOptions{BaseURL: spec.Vendor.Base + "/v1", APIKey: "not-required-for-a-local-vendor"},
+			Option: providerOptions{BaseURL: spec.Vendor.Base + "/v1", APIKey: apiKey(spec.Vendor.Token)},
 			Models: map[string]modelConfig{spec.Model: {Name: spec.Model}},
 		}},
 	}, "", "  ")
 	return string(raw) + "\n"
+}
+
+func apiKey(token string) string {
+	if token != "" {
+		return token
+	}
+	return "not-required-for-a-local-vendor"
 }
 
 // The shape of opencode.json, cut down to the keys this Session needs. The two
@@ -185,7 +184,8 @@ type acpRun struct {
 	// held is the Tool Calls the Harness has announced and not yet said anything
 	// about. It is keyed by tool call id, which the Harness makes at runtime, and it
 	// empties as each call is reported.
-	held map[string]sessionUpdate
+	held      map[string]sessionUpdate
+	heldOrder []string
 }
 
 // answer is one response, as the caller of call reads it.
@@ -317,13 +317,17 @@ func (r *acpRun) Close() error {
 		return nil
 	}
 	id := r.nextID()
+	r.done = true
+	close(r.stopped)
 	r.mu.Unlock()
 
-	err := r.write(request{JSONRPC: "2.0", ID: &id, Method: "session/close", Params: map[string]any{
+	// A pipe write has no cancellation. Send the protocol goodbye in the
+	// background so the Daemon can continue the ladder and close stdin if this
+	// Harness has stopped reading.
+	go r.write(request{JSONRPC: "2.0", ID: &id, Method: "session/close", Params: map[string]any{
 		"sessionId": r.id,
 	}})
-	r.stop()
-	return err
+	return nil
 }
 
 // stop makes the Session report nothing more and frees whatever is waiting on an
@@ -355,6 +359,11 @@ func (r *acpRun) read(out io.Reader) {
 			continue
 		}
 		r.dispatch(f)
+	}
+	if err := lines.Err(); err != nil {
+		r.report(func() {
+			r.out.Failed(event.ErrAdapterFailed, "the Harness output could not be read: "+err.Error())
+		})
 	}
 }
 
@@ -563,6 +572,9 @@ func (r *acpRun) hold(u sessionUpdate) {
 	u.name = u.Title
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, exists := r.held[u.ToolCallID]; !exists {
+		r.heldOrder = append(r.heldOrder, u.ToolCallID)
+	}
 	r.held[u.ToolCallID] = u
 }
 
@@ -595,6 +607,12 @@ func (r *acpRun) announce(id string) {
 		return
 	}
 	delete(r.held, id)
+	for i, heldID := range r.heldOrder {
+		if heldID == id {
+			r.heldOrder = append(r.heldOrder[:i], r.heldOrder[i+1:]...)
+			break
+		}
+	}
 	r.closeOpen()
 	r.out.ToolCallRequested(u.ToolCallID, u.Name(), toolKind(u.ToolKind), u.Title, u.RawInput)
 }
@@ -602,8 +620,8 @@ func (r *acpRun) announce(id string) {
 // announceAll writes every Tool Call still held, oldest announcement first. The
 // caller holds the mutex.
 func (r *acpRun) announceAll() {
-	for _, id := range slices.Sorted(maps.Keys(r.held)) {
-		r.announce(id)
+	for len(r.heldOrder) > 0 {
+		r.announce(r.heldOrder[0])
 	}
 }
 
@@ -799,8 +817,8 @@ func (r *acpRun) write(f request) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", r.name, err)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.writing.Lock()
+	defer r.writing.Unlock()
 	if _, err := r.in.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("%s: the Harness would not take a frame: %w", r.name, err)
 	}

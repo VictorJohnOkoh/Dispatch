@@ -20,7 +20,7 @@ import (
 // blocks. The Adapter is holding one Tool Call while this runs, and so is the
 // Harness behind it.
 func (d *Daemon) approve(ctx context.Context, s *Session, id, title, detail string) (event.Decision, error) {
-	kind, ok := d.sessions.kindOf(s, id)
+	rule, ok := d.sessions.ruleFor(s, id)
 	if !ok {
 		// A question about a Tool Call the Harness never announced. Nothing here can
 		// say which slot it belongs to, and guessing would gate the wrong thing.
@@ -33,7 +33,7 @@ func (d *Daemon) approve(ctx context.Context, s *Session, id, title, detail stri
 		return event.DecisionRefused, errors.New("daemon: " + msg)
 	}
 
-	switch d.sessions.policy(s)[kind] {
+	switch rule {
 	case event.RuleAuto:
 		d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 			ToolCallID: id, Decision: event.DecisionAllowed, By: event.ByPolicy,
@@ -51,14 +51,21 @@ func (d *Daemon) approve(ctx context.Context, s *Session, id, title, detail stri
 
 	// Wait. The question goes in the log, the Session folds to Asking, and the
 	// answer is what releases this.
+	d.commanding.Lock()
+	if d.sessions.ending(s) {
+		d.commanding.Unlock()
+		return event.DecisionRefused, errors.New("daemon: the Session is ending")
+	}
 	answer := d.sessions.ask(s, id)
-	defer d.sessions.answered(s, id)
-
 	if _, err := d.write(s, event.KindApprovalRequested, &event.ApprovalRequested{
 		ToolCallID: id, Title: title, Detail: detail,
 	}); err != nil {
+		d.sessions.answered(s, id)
+		d.commanding.Unlock()
 		return event.DecisionRefused, err
 	}
+	d.commanding.Unlock()
+	defer d.sessions.answered(s, id)
 
 	select {
 	case decision := <-answer:

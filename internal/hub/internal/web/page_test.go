@@ -222,3 +222,130 @@ setTimeout(() => {
 		t.Errorf("the Host that is not answering reads %q", got.Rows[2])
 	}
 }
+
+func TestHostFramesShowStateCauseMarkAndStaleStamp(t *testing.T) {
+	var got struct {
+		Connecting struct {
+			State string `json:"state"`
+			Mark  string `json:"mark"`
+			Stale string `json:"stale"`
+		} `json:"connecting"`
+		Down struct {
+			State string `json:"state"`
+			Cause string `json:"cause"`
+			Mark  string `json:"mark"`
+			Stale string `json:"stale"`
+		} `json:"down"`
+	}
+	pageUnder(t, `
+opened.send("host", {host: "desk", state: "Connecting"});
+const connecting = {
+  state: dom.hostStateElement.textContent,
+  mark: dom.hostMarkElement.textContent,
+  stale: dom.staleElement.textContent,
+};
+opened.send("host", {host: "desk", state: "Down", cause: "no-daemon", at: 1788345900000000});
+const down = {
+  state: dom.hostStateElement.textContent,
+  cause: dom.hostCauseElement.textContent,
+  mark: dom.hostMarkElement.textContent,
+  stale: dom.staleElement.textContent,
+};
+console.log(JSON.stringify({connecting, down}));
+`, &got)
+
+	if got.Connecting.State != "Connecting" || got.Connecting.Mark != "reconnecting" || got.Connecting.Stale != "" {
+		t.Errorf("Connecting drew %+v", got.Connecting)
+	}
+	if got.Down.State != "Down" || got.Down.Cause != "no-daemon" || got.Down.Mark != "" {
+		t.Errorf("Down drew %+v", got.Down)
+	}
+	if !strings.Contains(got.Down.Stale, "Stale") {
+		t.Errorf("Down has no visible Stale stamp: %q", got.Down.Stale)
+	}
+}
+
+func TestConnectingHostsStayAtFullStrength(t *testing.T) {
+	css, err := os.ReadFile("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(css), `body[data-host-state="Connecting"] { opacity`) ||
+		strings.Contains(string(css), `body[data-host-state="Down"], body[data-host-state="Connecting"]`) {
+		t.Fatal("Connecting is dimmed with Down")
+	}
+}
+
+func TestVendorFramesReplaceTheVisibleVendorState(t *testing.T) {
+	var got struct {
+		First  string `json:"first"`
+		Second string `json:"second"`
+	}
+	pageUnder(t, `
+opened.send("vendors", {host: "desk", vendors: [{
+  kind: "ollama", base: "http://127.0.0.1:11434", reachable: true,
+  resident: [{modelId: "qwen3", loadedContext: 8192, vram: 1024}],
+}]});
+const first = dom.vendorsElement.textContent;
+opened.send("vendors", {host: "desk", vendors: [{
+  kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: [],
+}]});
+console.log(JSON.stringify({first, second: dom.vendorsElement.textContent}));
+`, &got)
+
+	if !strings.Contains(got.First, "ollama") || !strings.Contains(got.First, "qwen3") {
+		t.Errorf("the first Vendor frame drew %q", got.First)
+	}
+	if !strings.Contains(got.Second, "ollama") || !strings.Contains(got.Second, "unreachable") {
+		t.Errorf("the changed Vendor frame drew %q", got.Second)
+	}
+	if strings.Contains(got.Second, "qwen3") {
+		t.Errorf("the changed Vendor frame kept the old resident Model: %q", got.Second)
+	}
+}
+
+func TestAFailedResyncKeepsTheTranscript(t *testing.T) {
+	var got struct {
+		Rows int    `json:"rows"`
+		Text string `json:"text"`
+	}
+	pageUnder(t, `
+served.set("0", "refused");
+opened.send("resync", {host: "desk"});
+setTimeout(() => console.log(JSON.stringify({
+  rows: dom.transcript.children.length,
+  text: dom.transcript.children[0]?.textContent ?? "",
+})), 0);
+`, &got)
+
+	if got.Rows != 1 || !strings.Contains(got.Text, "Session started") {
+		t.Errorf("a failed resync left %d rows saying %q", got.Rows, got.Text)
+	}
+}
+
+func TestAnEventThatArrivesDuringAResyncSurvivesTheCommit(t *testing.T) {
+	var got struct {
+		Rows  int    `json:"rows"`
+		State string `json:"state"`
+	}
+	pageUnder(t, `
+let answer;
+// The rail reads through the same fetch, and this test holds the transcript's
+// read open, so the rail keeps the fixture's answer.
+const rail = globalThis.fetch;
+globalThis.fetch = (url) => url.startsWith("/rail/") ? rail(url) : new Promise((resolve) => {
+  answer = () => resolve({ok: true, json: async () => ({events: []})});
+});
+opened.send("resync", {host: "desk"});
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionReady", payload: {model: "qwen3"}});
+answer();
+setTimeout(() => console.log(JSON.stringify({
+  rows: dom.transcript.children.length,
+  state: dom.stateElement.textContent,
+})), 0);
+`, &got)
+
+	if got.Rows != 1 || got.State != "Idle" {
+		t.Errorf("the resync commit left %d rows and State %q", got.Rows, got.State)
+	}
+}

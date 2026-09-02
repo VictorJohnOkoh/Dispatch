@@ -165,3 +165,13 @@ func (a *reading) Start(ctx context.Context, spec harness.SessionSpec, _ harness
 func (a *reading) Prompt(context.Context, string) error { return nil }
 func (a *reading) Interrupt(context.Context) error      { return nil }
 func (a *reading) Close() error                         { return nil }
+
+// said is a transcript's file, read back once it is closed.
+func (t *transcript) said(tb *testing.T) string {
+	tb.Helper()
+	raw, err := os.ReadFile(t.path)
+	if err != nil {
+		tb.Fatalf("read the transcript: %v", err)
+	}
+	return string(raw)
+}
