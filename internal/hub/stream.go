@@ -80,6 +80,11 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 
 	keepalive := time.NewTicker(h.keepalive)
 	defer keepalive.Stop()
+	// reading is the same channel, dropped once every reader has ended. The stream
+	// stays open on keepalives alone after that: one that ended would read to the
+	// Client as one that finished, and the browser would reconnect at once and keep
+	// doing it against Hosts the Hub has stopped working on.
+	reading := frames
 	for {
 		select {
 		case <-r.Context().Done():
@@ -87,9 +92,10 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 		case <-keepalive.C:
 			io.WriteString(w, protocol.Keepalive)
 			flush.Flush()
-		case frame, ok := <-frames:
+		case frame, ok := <-reading:
 			if !ok {
-				return
+				reading = nil
+				continue
 			}
 			switch {
 			case frame.name == string(protocol.FrameResync):
@@ -152,6 +158,11 @@ type hostReader struct {
 // 0004 counts three, which is about seven seconds on this curve.
 const downAfter = 3
 
+// refusalLimit bounds the refusal body the Hub reads. It is a handful of version
+// numbers, and a Host that answers megabytes to a Handshake is not one this Hub
+// reads to the end.
+const refusalLimit = 4096
+
 // run reads this Host until the Client leaves. It retries forever, so a Host the
 // user switches on comes back without being told to.
 func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
@@ -159,7 +170,7 @@ func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 	for ctx.Err() == nil {
 		// A stream that dropped is Connecting again, which is ADR 0004's transition
 		// out of Ready when the stream closes.
-		r.says(ctx, protocol.Connecting, "", out)
+		r.says(ctx, protocol.HostStateFrame{State: protocol.Connecting}, out)
 
 		// The curve starts over only after a connection that was Ready for a whole
 		// minute. That is measured here rather than read off the state afterwards,
@@ -167,6 +178,12 @@ func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 		// look like a flap.
 		if steady := r.once(ctx, out); steady >= r.hub.steady {
 			delay = r.hub.backoff
+		}
+		// Incompatible is the one state the Hub stops working on. This reader ends,
+		// so the Host takes no more dials and makes no more backoff traffic, and it
+		// keeps its place in the merged stream and on the page.
+		if r.state == protocol.Incompatible {
+			return
 		}
 		if !sleep(ctx, jitter(delay)) {
 			return
@@ -183,20 +200,20 @@ func (r *hostReader) failed(ctx context.Context, why protocol.Cause, out chan<- 
 	if r.failures < downAfter {
 		return
 	}
-	r.says(ctx, protocol.Down, why, out)
+	r.says(ctx, protocol.HostStateFrame{State: protocol.Down, Cause: why}, out)
 }
 
 // says tells the Client what this Host is, unless it has said so already. The
 // frame is the Hub's own: it cannot be an Event, because every Event carries a
 // Session id and a Host that is down has no Session to carry one.
-func (r *hostReader) says(ctx context.Context, state protocol.HostState, why protocol.Cause, out chan<- daemonFrame) bool {
-	if r.state == state {
+func (r *hostReader) says(ctx context.Context, said protocol.HostStateFrame, out chan<- daemonFrame) bool {
+	if r.state == said.State {
 		return true
 	}
-	r.state = state
+	r.state = said.State
 	// The merged-stream writer adds the Host to every Frame. It must not be in this
 	// body too, or JSON carries the same key twice.
-	body, _ := json.Marshal(protocol.HostStateFrame{State: state, Cause: why})
+	body, _ := json.Marshal(said)
 	select {
 	case out <- daemonFrame{host: r.id, name: string(protocol.FrameHost), data: body}:
 		return true
@@ -249,9 +266,14 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 	}
 	defer resp.Body.Close()
 	// A Daemon that refused the Handshake answers 426 with the versions it can
-	// serve. That Host is Incompatible and the Hub never retries one, which is #54:
-	// until it lands, a refusal is counted with the rest and retried, which is
-	// wrong in the way a Host nobody can use being retried is wrong.
+	// serve. That Host is Incompatible rather than Down: the machine answered, and
+	// what it said was that it speaks another version.
+	if resp.StatusCode == protocol.StatusUpgradeRequired {
+		var refusal protocol.Refusal
+		json.NewDecoder(io.LimitReader(resp.Body, refusalLimit)).Decode(&refusal)
+		r.says(ctx, protocol.HostStateFrame{State: protocol.Incompatible, Speaks: refusal.Speaks}, out)
+		return 0
+	}
 	if resp.StatusCode != http.StatusOK {
 		r.failed(ctx, protocol.NoDaemon, out)
 		return 0
@@ -307,7 +329,7 @@ func (r *hostReader) read(ctx context.Context, body io.Reader, out chan<- daemon
 					if frame.name != string(protocol.FrameHello) || !validHello(frame.data) {
 						return time.Time{}
 					}
-					if !r.deliver(ctx, frame, out) || !r.says(ctx, protocol.Ready, "", out) {
+					if !r.deliver(ctx, frame, out) || !r.says(ctx, protocol.HostStateFrame{State: protocol.Ready}, out) {
 						return time.Time{}
 					}
 					r.failures = 0

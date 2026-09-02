@@ -73,9 +73,8 @@ stream.addEventListener("vendors", (frame) => {
   row.replaceChildren(...drawn);
 });
 
-// A host frame is the Hub's own, and the only Frame it originates. Nothing sends
-// one yet: the Hub starts reporting Host State when it tracks presence, and what
-// each of the four looks like is this view's to decide before then.
+// A host frame is the Hub's own, and the only Frame it originates. What each of
+// the four states looks like is this view's to decide.
 //
 // Connecting keeps its content at full strength with a mark, because the blink is
 // usually over before it becomes Down. Only Down dims and stamps.
@@ -87,7 +86,7 @@ stream.addEventListener("host", (frame) => {
   const pill = card.querySelector(".pill");
   if (pill) {
     pill.dataset.hostState = f.state;
-    pill.textContent = f.cause ? `${f.state} ${f.cause}` : f.state;
+    pill.textContent = says(f);
   }
   // A Host that has gone says one thing about itself, not two. Whatever its
   // Vendors were last reported as is what a machine nobody can reach knows about
@@ -120,6 +119,21 @@ function stamp(card, since) {
 function unstamp(card) {
   const had = card.querySelector(".stamp");
   if (had) had.remove();
+}
+
+// says is what the pill reads. An Incompatible Host names both versions, because
+// the user fixes it by updating one of the two machines and has to know which.
+function says(f) {
+  if (f.state === "Incompatible" && f.speaks) {
+    return `Incompatible: this Hub speaks ${hubSpeaks()}, this Host speaks ${f.speaks.join(", ")}`;
+  }
+  return f.cause ? `${f.state} ${f.cause}` : f.state;
+}
+
+// hubSpeaks is the version this Hub requires, stamped on the page by the Hub that
+// drew it. The browser never names a version of its own.
+function hubSpeaks() {
+  return drawnPage ? drawnPage.dataset.protocol : "";
 }
 
 function down(host) {
