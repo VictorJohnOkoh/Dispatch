@@ -86,7 +86,8 @@ type Model struct {
 	// is running a smaller LoadedContext is the lie the picker must not tell.
 	TrainedContext int
 
-	// Quant is a label such as "Q4_K_M". llama-swap never reports one.
+	// Quant is a label such as "Q4_K_M". llama-swap reports one only for a Model
+	// it has loaded, and never for the rest of its listing.
 	Quant string
 
 	// DiskBytes is the size of the weights on disk.
@@ -104,6 +105,20 @@ const (
 	No
 	Yes
 )
+
+// supportOf turns a boolean a Vendor reported into a Support. A key the Vendor did
+// not send is Unknown and never No, which is the whole reason there are three
+// values: absent means nobody has said, and No hides the Model from a picker.
+func supportOf(reported *bool) Support {
+	switch {
+	case reported == nil:
+		return Unknown
+	case *reported:
+		return Yes
+	default:
+		return No
+	}
+}
 
 // Capabilities is the four questions the Client's Model picker asks. Nothing here
 // is version dependent: an endpoint that does not carry the answer produces

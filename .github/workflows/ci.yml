@@ -27,3 +27,4 @@ jobs:
         with:
           go-version-file: go.mod
       - run: ./scripts/check-imports.sh
+      - run: ./scripts/check-unload.sh

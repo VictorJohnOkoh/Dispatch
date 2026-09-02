@@ -1,0 +1,1 @@
+{"running":[{"model":"qwen2.5-coder-1.5b","state":"ready","cmd":"C:/Users/Victor/tools/llama.cpp/llama-server.exe\n--model C:/Users/Victor/.lmstudio/models/lmstudio-community/Qwen2.5-Coder-1.5B-Instruct-GGUF/Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf\n--port 5801 --host 127.0.0.1 -ngl 99 --jinja\n-c 32768\n","proxy":"http://localhost:5801","ttl":300,"name":"","description":""}]}

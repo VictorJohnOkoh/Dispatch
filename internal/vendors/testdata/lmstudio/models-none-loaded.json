@@ -1,0 +1,167 @@
+{
+  "models": [
+    {
+      "type": "llm",
+      "publisher": "prism-ml",
+      "key": "prism-ml/bonsai-27b",
+      "display_name": "Bonsai 27B",
+      "architecture": "qwen35",
+      "quantization": {
+        "name": "Q1_0",
+        "bits_per_weight": 1
+      },
+      "size_bytes": 4734614604,
+      "params_string": "27B",
+      "loaded_instances": [],
+      "max_context_length": 262144,
+      "format": "gguf",
+      "capabilities": {
+        "vision": true,
+        "trained_for_tool_use": true,
+        "reasoning": {
+          "allowed_options": [
+            "off",
+            "on"
+          ],
+          "default": "on"
+        }
+      },
+      "description": null,
+      "variants": [
+        "prism-ml/bonsai-27b@q1_0"
+      ],
+      "selected_variant": "prism-ml/bonsai-27b@q1_0"
+    },
+    {
+      "type": "llm",
+      "publisher": "unsloth",
+      "key": "qwen3.8-27b@q4_0",
+      "display_name": "Mtp Qwen3.8 27B",
+      "architecture": "qwen35",
+      "quantization": {
+        "name": "Q4_0",
+        "bits_per_weight": 4
+      },
+      "size_bytes": 2297201904,
+      "params_string": "27B",
+      "loaded_instances": [],
+      "max_context_length": 262144,
+      "format": "gguf",
+      "capabilities": {
+        "vision": true,
+        "trained_for_tool_use": true
+      },
+      "description": null
+    },
+    {
+      "type": "llm",
+      "publisher": "unsloth",
+      "key": "qwen3.8-27b@q3_k_s",
+      "display_name": "Qwen3.8 27B",
+      "architecture": "qwen35",
+      "quantization": {
+        "name": "Q3_K_S",
+        "bits_per_weight": 3
+      },
+      "size_bytes": 13502100816,
+      "params_string": "27B",
+      "loaded_instances": [],
+      "max_context_length": 262144,
+      "format": "gguf",
+      "capabilities": {
+        "vision": true,
+        "trained_for_tool_use": true
+      },
+      "description": null
+    },
+    {
+      "type": "llm",
+      "publisher": "unsloth",
+      "key": "gpt-oss-20b",
+      "display_name": "GPT-OSS 20B",
+      "architecture": "gpt-oss",
+      "quantization": {
+        "name": "F16",
+        "bits_per_weight": 16
+      },
+      "size_bytes": 13792640811,
+      "params_string": "20B",
+      "loaded_instances": [],
+      "max_context_length": 131072,
+      "format": "gguf",
+      "capabilities": {
+        "vision": false,
+        "trained_for_tool_use": true
+      },
+      "description": null
+    },
+    {
+      "type": "llm",
+      "publisher": "qwen",
+      "key": "qwen/qwen3.5-9b",
+      "display_name": "Qwen3.5 9B",
+      "architecture": "qwen35",
+      "quantization": {
+        "name": "Q8_0",
+        "bits_per_weight": 8
+      },
+      "size_bytes": 10449384671,
+      "params_string": "9B",
+      "loaded_instances": [],
+      "max_context_length": 262144,
+      "format": "gguf",
+      "capabilities": {
+        "vision": true,
+        "trained_for_tool_use": true,
+        "reasoning": {
+          "allowed_options": [
+            "off",
+            "on"
+          ],
+          "default": "on"
+        }
+      },
+      "description": null,
+      "variants": [
+        "qwen/qwen3.5-9b@q8_0"
+      ],
+      "selected_variant": "qwen/qwen3.5-9b@q8_0"
+    },
+    {
+      "type": "llm",
+      "publisher": "lmstudio-community",
+      "key": "qwen2.5-coder-1.5b-instruct",
+      "display_name": "Qwen2.5 Coder 1.5B Instruct",
+      "architecture": "qwen2",
+      "quantization": {
+        "name": "Q8_0",
+        "bits_per_weight": 8
+      },
+      "size_bytes": 1646573056,
+      "params_string": "1.5B",
+      "loaded_instances": [],
+      "max_context_length": 32768,
+      "format": "gguf",
+      "capabilities": {
+        "vision": false,
+        "trained_for_tool_use": false
+      },
+      "description": null
+    },
+    {
+      "type": "embedding",
+      "publisher": "nomic-ai",
+      "key": "text-embedding-nomic-embed-text-v1.5",
+      "display_name": "Nomic Embed Text v1.5",
+      "quantization": {
+        "name": "Q4_K_M",
+        "bits_per_weight": 4
+      },
+      "size_bytes": 84106624,
+      "params_string": null,
+      "loaded_instances": [],
+      "max_context_length": 2048,
+      "format": "gguf"
+    }
+  ]
+}

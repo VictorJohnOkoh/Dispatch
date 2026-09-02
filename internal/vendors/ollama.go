@@ -1,12 +1,10 @@
 package vendors
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -134,14 +132,12 @@ func (o *OllamaAdapter) Unload(ctx context.Context, modelID string) error {
 }
 
 func (o *OllamaAdapter) keepAlive(ctx context.Context, modelID string, seconds int) error {
-	request := struct {
+	payload, err := json.Marshal(struct {
 		Model     string     `json:"model"`
 		Messages  []struct{} `json:"messages"`
 		Stream    bool       `json:"stream"`
 		KeepAlive int        `json:"keep_alive"`
-	}{Model: modelID, Messages: []struct{}{}, KeepAlive: seconds}
-
-	payload, err := json.Marshal(request)
+	}{Model: modelID, Messages: []struct{}{}, KeepAlive: seconds})
 	if err != nil {
 		return fmt.Errorf("ollama: %w", err)
 	}
@@ -151,31 +147,12 @@ func (o *OllamaAdapter) keepAlive(ctx context.Context, modelID string, seconds i
 // call does one request and decodes the body into out, which may be nil when only
 // the status matters.
 func (o *OllamaAdapter) call(ctx context.Context, method, path string, payload []byte, out any) error {
-	var reader io.Reader
-	if payload != nil {
-		reader = bytes.NewReader(payload)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, o.endpoint.Base+path, reader)
+	status, body, err := request(ctx, o.client, method, o.endpoint.Base+path, payload)
 	if err != nil {
 		return fmt.Errorf("ollama: %s: %w", path, err)
 	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("ollama: %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("ollama: %s: %w", path, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return ollamaError(path, resp.StatusCode, body)
+	if status != http.StatusOK {
+		return ollamaError(path, status, body)
 	}
 	if out == nil {
 		return nil

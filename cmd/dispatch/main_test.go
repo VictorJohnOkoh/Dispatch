@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/config"
+	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -90,18 +91,19 @@ func TestDaemonStartsFromTheExampleFile(t *testing.T) {
 	}
 }
 
-// A configured Vendor with no Adapter stops the Daemon at start, rather than
-// leaving a Vendor the user named and the Daemon never speaks to.
-func TestDaemonRefusesAVendorWithNoAdapter(t *testing.T) {
-	dir := t.TempDir()
-	body := strings.Replace(daemonConfig(t, dir), `"ollama"`, `"lmstudio"`, 1)
-	path := writeConfig(t, dir, "daemon.json", body)
-	var errOut strings.Builder
-	if code := run(done(t), []string{"daemon", "-config", path}, &errOut); code != 1 {
-		t.Fatalf("exit %d, want 1", code)
-	}
-	if !strings.Contains(errOut.String(), "no Adapter yet") {
-		t.Errorf("stderr = %q", errOut.String())
+// Every Vendor kind the config accepts has an Adapter, which is the claim three
+// Vendors exist to make. The default branch stays because a fourth kind added to
+// the config and not here would otherwise be a Vendor the Daemon never speaks to.
+func TestEveryVendorKindHasAnAdapter(t *testing.T) {
+	for _, kind := range []vendors.Kind{vendors.Ollama, vendors.LMStudio, vendors.LlamaSwap} {
+		adapter, err := newVendor(vendors.Endpoint{Kind: kind, Base: "http://127.0.0.1:1"})
+		if err != nil {
+			t.Errorf("Vendor kind %s: %v", kind, err)
+			continue
+		}
+		if adapter.Endpoint().Kind != kind {
+			t.Errorf("Vendor kind %s got an Adapter for %s", kind, adapter.Endpoint().Kind)
+		}
 	}
 }
 

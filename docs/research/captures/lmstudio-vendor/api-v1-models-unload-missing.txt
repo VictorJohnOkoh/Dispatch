@@ -1,0 +1,7 @@
+{
+  "error": {
+    "type": "model_not_found",
+    "message": "Model with instance identifier 'no-such-model-v9' is not loaded."
+  }
+}
+HTTP 404
