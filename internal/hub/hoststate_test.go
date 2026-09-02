@@ -101,6 +101,50 @@ func TestATunnelWithNoDaemonBehindItIsDownNoDaemon(t *testing.T) {
 	}
 }
 
+func TestADialerNoDaemonErrorIsDownNoDaemon(t *testing.T) {
+	h := hub.New([]hostset.Host{{ID: "desk"}}, dialFunc(func(context.Context, hostset.HostID) (net.Conn, error) {
+		return nil, hostset.ErrNoDaemon
+	}))
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+
+	got := states(t, srv.URL, 2)
+	if got[1].State != protocol.Down || got[1].Cause != protocol.NoDaemon {
+		t.Errorf("a closed forwarded port is %q %q", got[1].State, got[1].Cause)
+	}
+}
+
+func TestAHostFrameCarriesOneHostField(t *testing.T) {
+	h := hub.New([]hostset.Host{{ID: "desk"}}, dialFunc(func(context.Context, hostset.HostID) (net.Conn, error) {
+		return nil, hostset.ErrUnreachable
+	}))
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+
+	ctx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(line, "data:") {
+			if n := strings.Count(line, `"host"`); n != 1 {
+				t.Errorf("the Host frame carries %d host fields: %s", n, line)
+			}
+			return
+		}
+	}
+}
+
 // A Host whose Event stream is live is Ready, and nothing else makes one Ready.
 func TestAHostWithALiveStreamIsReady(t *testing.T) {
 	h := hub.New([]hostset.Host{{ID: "desk"}}, pipeDialer{

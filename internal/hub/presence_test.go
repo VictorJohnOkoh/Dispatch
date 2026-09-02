@@ -96,6 +96,35 @@ func TestAHostIsConnectingUntilThreeAttemptsHaveFailed(t *testing.T) {
 	}
 }
 
+func TestHTTP200WithoutAHandshakeNeverMakesAHostReady(t *testing.T) {
+	var dials atomic.Int32
+	h := quick([]Host{{ID: "desk"}}, dialFn(func(context.Context, hostset.HostID) (net.Conn, error) {
+		dials.Add(1)
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			bufio.NewReader(server).ReadString('\n')
+			fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nnot a Dispatch Handshake")
+		}()
+		return client, nil
+	}))
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+
+	var said []protocol.HostState
+	watch(t, srv.URL, func(f protocol.HostStateFrame) bool {
+		said = append(said, f.State)
+		return f.State == protocol.Ready || f.State == protocol.Down
+	})
+
+	if said[len(said)-1] != protocol.Down {
+		t.Fatalf("an unrelated HTTP process made the Host %s", said[len(said)-1])
+	}
+	if n := dials.Load(); n < downAfter {
+		t.Errorf("the Hub stopped after %d failed Handshakes", n)
+	}
+}
+
 // A stream that is open and silent looks exactly like a stream that is working.
 // The Daemon beats, so a connection that says nothing for the wait is one the
 // Client has to be told about.
