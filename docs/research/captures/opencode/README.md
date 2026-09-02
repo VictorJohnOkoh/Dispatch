@@ -52,7 +52,10 @@ Recorded so nothing downstream reads more into these files than they hold.
 - **One Model per Vendor**, and **one run per class**, not the 12/12 that
   produced the Hermes findings.
 - **Every permission request was answered with allow.** No refusal was captured,
-  so these bytes say nothing about what `reject` does.
+  so these bytes say nothing about what `reject` does. Issue #46 settles that.
+  `bash scripts/capture-opencode-host.sh --reject` answers one edit with
+  `reject_once` and lands the result in `../opencode-reject/<vendor>/`, on its own
+  so a refused Tool Call cannot disturb the counts above.
 - **`webfetch` was never exercised**, though OpenCode's permission block gates it.
 
 ## The run that failed first
