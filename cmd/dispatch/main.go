@@ -144,13 +144,16 @@ func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.
 	return out, nil
 }
 
-// newVendor is the one place a Vendor Kind is read. Ollama is the Adapter this
-// milestone has, and a configured Vendor with no Adapter is a startup error rather
-// than a Vendor that quietly never appears.
+// newVendor is the one place a Vendor Kind is read. A configured Vendor with no
+// Adapter is a startup error rather than a Vendor that quietly never appears.
 func newVendor(endpoint vendors.Endpoint) (vendors.Adapter, error) {
 	switch endpoint.Kind {
 	case vendors.Ollama:
 		return vendors.NewOllama(endpoint.Base, nil), nil
+	case vendors.LMStudio:
+		return vendors.NewLMStudio(endpoint.Base, nil), nil
+	case vendors.LlamaSwap:
+		return vendors.NewLlamaSwap(endpoint.Base, nil), nil
 	default:
 		return nil, fmt.Errorf("Vendor kind %s has no Adapter yet", endpoint.Kind)
 	}

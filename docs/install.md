@@ -113,6 +113,35 @@ Four rules for this file:
 - The directory that holds `logPath` must exist. The Daemon makes the file, not the directory.
 - An unknown key stops the Daemon. There is no key that is quietly ignored.
 
+A Vendor `kind` is `ollama`, `lmstudio` or `llamaswap`, and `base` is where that Vendor already
+answers on the Host. The Daemon does not start a Vendor. It only speaks to one that is running.
+
+### A llama-swap Host needs `ttl: 0`
+
+Only if you list a `llamaswap` Vendor. Skip this if you do not.
+
+Set `ttl: 0` on every Model in llama-swap's own `config.yaml`, next to each `cmd`:
+
+```yaml
+models:
+  "qwen2.5-coder-1.5b":
+    cmd: |
+      ...
+    ttl: 0
+```
+
+Leaving the key out does the same thing. Writing the `0` shows the next reader a decision instead of
+an absence.
+
+The Daemon does all the loading and unloading, and ADR 0002 gives it that job alone. A `ttl` above
+zero puts a second evictor on the Host that works to its own clock and cannot see a Session. A
+Session idle between two prompts then loses its Model and pays a cold load nobody planned, which
+runs from 4.4s for a 1.5B to 22.5s for a 20B on the development Host.
+
+**Nothing checks this for you.** `ttl` is a config key, and llama-swap serves no endpoint that reads
+or writes it, so the Daemon can neither set it nor warn you. A Host that misses this is not an error
+you will see. It is a reload you will wait for.
+
 ## 4. Copy both files to the Host
 
 The binary and `daemon.json` are the whole install. There is no third file.

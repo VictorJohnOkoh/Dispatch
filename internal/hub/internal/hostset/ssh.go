@@ -38,12 +38,11 @@ type SSHProfile struct {
 
 	User string
 
-	// KeyPath is an ed25519 private key with no passphrase. Key auth is the whole
+	// An ed25519 private key with no passphrase. Key auth is the whole
 	// security boundary, so there is no password fallback and no other key type.
 	KeyPath string
 
-	// KnownHosts is the file the Host's key is checked against. There is no
-	// unchecked mode, because a tunnel to the wrong machine carries Prompts.
+	// The file the Host's key is checked against
 	KnownHosts string
 
 	// DaemonPort is the loopback port the direct-tcpip channel opens onto.

@@ -1,0 +1,2 @@
+{"src":"llama-swap","error":{"message":"no model id could be identified","type":"invalid_request_error","param":null,"code":"not_found"}}
+HTTP 404

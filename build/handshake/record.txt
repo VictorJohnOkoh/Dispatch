@@ -1,0 +1,7 @@
+Behaviour 12, the Handshake. Built 2026-09-02T19:54:36Z from 88a4410.
+
+dispatch-daemon  protocol 1, the commit unchanged. Runs on the Host.
+dispatch-hub     protocol 2, the same commit with internal/protocol/protocol.go
+                 raised by one. Runs on the Client machine.
+
+Expect: the Host reads Incompatible and it is never retried.

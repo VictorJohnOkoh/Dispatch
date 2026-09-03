@@ -27,7 +27,18 @@ const (
 	FrameEnd
 )
 
-// Usage is the token count one Vendor reported for one Prompt.
+// Usage is the token count one Vendor reported for one Prompt. Two of these
+// numbers do not compare across Vendors, which three Vendors made visible:
+//
+//   - Output counted no reasoning tokens on Ollama or llama-swap for the same
+//     thinking output LM Studio counted 51 for. Zero means not reported, not none.
+//   - Input and CacheRead split differently. llama-swap charged 24 input tokens
+//     against a 2986-token cached prefix where the others charged about 3010 and
+//     cached nothing. The totals agree and the split does not, so summing Input
+//     across Vendors measures nothing.
+//
+// This is why a Session records the Vendor and Model that served it rather than
+// the ones it was configured with.
 type Usage struct {
 	Input     int
 	Output    int

@@ -268,6 +268,15 @@ caller-supplied `http.RoundTripper`, so the tier-two tests for `vendors` open no
 socket. Recording them cost a `curl` and a save, exactly as `SPEC.md` predicted
 once M3 had Ollama running anyway.
 
+**Extended to the other two Vendors 2026-09-02.** Seven bodies from a real
+LM Studio 0.4.21 at [`captures/lmstudio-vendor/`](captures/lmstudio-vendor/) and
+nine from a real llama-swap v251 at
+[`captures/llamaswap-vendor/`](captures/llamaswap-vendor/), each with a table
+saying which endpoint it came from, and each copied into
+`internal/vendors/testdata/`. The llama-swap set answers the question ADR 0007
+left open: the listing call is `GET /v1/models`, and it carries a model id and a
+load status and no capability, no size and no context length at all.
+
 This is the same fault as R4 in a new place. Across this exercise the capture
 has claimed success from a multiplexing error, from a pipeline's exit code,
 from a launcher stub that never ran, and now from a status line. **Every one of

@@ -1,54 +1,17 @@
 package vendors
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// recorded replays the bodies in testdata/ollama, which were captured from a real
-// Ollama v0.33.2 on loopback. The fixtures are the specification here, and no test
-// in this file opens a socket.
-type recorded struct {
-	status map[string]int
-	body   map[string]string // path to a file under testdata/ollama
-
-	seen []*http.Request
-}
-
-func (r *recorded) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.seen = append(r.seen, req)
-
-	name, ok := r.body[req.URL.Path]
-	if !ok {
-		return nil, errors.New("no fixture for " + req.URL.Path)
-	}
-	body, err := os.ReadFile(filepath.Join("testdata", "ollama", name))
-	if err != nil {
-		return nil, err
-	}
-
-	status := r.status[req.URL.Path]
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(bytes.NewReader(body)),
-		Request:    req,
-	}, nil
-}
-
 func ollamaFrom(t *testing.T, r *recorded) *OllamaAdapter {
 	t.Helper()
+	r.dir = "ollama"
 	return NewOllama("http://127.0.0.1:11434", r)
 }
 
@@ -270,12 +233,8 @@ type sentChat struct {
 
 func decodeSent(t *testing.T, req *http.Request) sentChat {
 	t.Helper()
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		t.Fatalf("read the sent body: %v", err)
-	}
 	var sent sentChat
-	if err := json.Unmarshal(body, &sent); err != nil {
+	if err := json.Unmarshal(sentBody(t, req), &sent); err != nil {
 		t.Fatalf("decode the sent body: %v", err)
 	}
 	return sent

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "type": "model_not_found",
+    "message": "Model no-such-model-v9 not found in downloaded models"
+  }
+}
