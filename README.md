@@ -15,4 +15,4 @@ history at once, so reattaching and restarting are the same mechanism.
 
 
 To put a Daemon on a machine and reach it from the Hub, follow
-[docs/install.md](docs/install.md). It names every file to copy and every command to run.
+[docs/install.md](docs/install.md) for a more manual install process or use Host Registration to add a new host after setting up at least the host and daemon on each machine.
