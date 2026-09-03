@@ -3,6 +3,7 @@ package harness
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,12 +32,20 @@ type piScript struct {
 
 	mu   sync.Mutex
 	sent map[string]string // a recorded command id, against the one that was sent
+	gate string            // the extensionPath a recorded extension_error is given
 }
 
 // newPiScript replays one pi-gate-dispatch capture whole, both directions.
 func newPiScript(t *testing.T, capture string) *piScript {
 	t.Helper()
-	return startPiScript(t, readFrames(t, filepath.Join("pi-gate-dispatch", capture)))
+	return startPiScript(t, readFrames(t, filepath.Join("pi-gate-dispatch", capture)), "")
+}
+
+// newPiScriptFrom replays a capture as though extension had been the file that
+// failed, which is how a failure that is not the Gate's is played.
+func newPiScriptFrom(t *testing.T, capture, extension string) *piScript {
+	t.Helper()
+	return startPiScript(t, readFrames(t, filepath.Join("pi-gate-dispatch", capture)), extension)
 }
 
 // newPiStream replays one pi-vendors event stream behind a launch that says the
@@ -53,7 +62,7 @@ func newPiStream(t *testing.T, capture, model, base string) *piScript {
 			startProbe, model, base))},
 		{Dir: "out", Frame: json.RawMessage(`{"type":"prompt"}`)},
 	}
-	return startPiScript(t, append(launch, events...))
+	return startPiScript(t, append(launch, events...), "")
 }
 
 // announcement is the Gate saying it is ready, taken out of the gate capture so
@@ -69,15 +78,40 @@ func announcement(t *testing.T) json.RawMessage {
 	return nil
 }
 
-func startPiScript(t *testing.T, frames []recorded) *piScript {
+func startPiScript(t *testing.T, frames []recorded, gate string) *piScript {
 	t.Helper()
 	s := &piScript{
 		transport: newTransport(t),
 		frames:    frames,
 		sent:      map[string]string{},
+		gate:      gate,
 	}
 	s.play(s.walk)
 	return s
+}
+
+// spawn remembers the Gate the launch named, unless the test pinned one of its
+// own. The captures were recorded against throwaway scripts, and the Adapter
+// tells its Gate from any other extension by the path it loaded.
+func (s *piScript) spawn() Spawner {
+	inner := s.transport.spawn()
+	return func(ctx context.Context, l Launch) (Pipes, error) {
+		s.mu.Lock()
+		if s.gate == "" {
+			s.gate = gateOf(l.Args)
+		}
+		s.mu.Unlock()
+		return inner(ctx, l)
+	}
+}
+
+func gateOf(args []string) string {
+	for i, arg := range args {
+		if arg == "-e" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 // readFrames reads a capture whose lines carry a dir and a frame.
@@ -143,29 +177,38 @@ func (s *piScript) walk() {
 	}
 }
 
-// rewrite puts the id this Adapter used on a recorded response, so a capture whose
-// client numbered its commands differently still replays.
+// rewrite makes a recorded frame name what this run used: the id this Adapter
+// sent on a response, so a capture whose client numbered its commands differently
+// still replays, and the file this Adapter loaded on an extension_error.
 func (s *piScript) rewrite(frame json.RawMessage) []byte {
-	var f struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-	}
-	if json.Unmarshal(frame, &f) != nil || f.Type != "response" {
-		return frame
-	}
 	s.mu.Lock()
-	sent, ok := s.sent[f.ID]
-	s.mu.Unlock()
-	if !ok {
-		return frame
+	defer s.mu.Unlock()
+	switch piType(frame) {
+	case "response":
+		sent, ok := s.sent[piID(frame)]
+		if !ok {
+			return frame
+		}
+		return withField(frame, "id", sent)
+	case "extension_error":
+		if s.gate == "" {
+			return frame
+		}
+		return withField(frame, "extensionPath", s.gate)
 	}
+	return frame
+}
 
+func withField(frame []byte, name, value string) []byte {
 	var body map[string]json.RawMessage
 	if json.Unmarshal(frame, &body) != nil {
 		return frame
 	}
-	body["id"], _ = json.Marshal(sent)
-	out, _ := json.Marshal(body)
+	body[name], _ = json.Marshal(value)
+	out, err := json.Marshal(body)
+	if err != nil {
+		return frame
+	}
 	return out
 }
 

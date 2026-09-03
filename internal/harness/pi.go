@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,7 @@ func (a *Pi) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error)
 
 	r := &piRun{
 		name:    a.name,
+		gate:    a.gate,
 		session: ctx,
 		spec:    spec,
 		out:     out,
@@ -118,6 +120,7 @@ func (a *Pi) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error)
 // reader goroutine, so the Sink is called from one goroutine and needs no lock.
 type piRun struct {
 	name    string
+	gate    string // the file -e named, which is the only extension that is a Gate
 	session context.Context
 	spec    SessionSpec
 	out     Sink
@@ -220,13 +223,28 @@ func (r *piRun) accept(got piFrame) error {
 	}
 	// The Vendor is checked as well as the Model, because a Host's models.json may
 	// name one Model under two providers and only one of them is this Session's.
-	// The Base is a prefix of what Pi reports and not the whole of it, because the
-	// path after it is how that file was written and not a fact about the Vendor.
-	if !strings.HasPrefix(state.Model.BaseURL, r.spec.Vendor.Base) {
+	if !sameEndpoint(state.Model.BaseURL, r.spec.Vendor.Base) {
 		return fmt.Errorf("%s: this Session's Vendor is %s and the Harness selected %s at %s",
 			r.name, r.spec.Vendor.Base, state.Model.Provider, state.Model.BaseURL)
 	}
 	return nil
+}
+
+// sameEndpoint is whether two addresses are the same Vendor. The scheme and the
+// host are compared and the path is not, because the path is how the Host's
+// models.json was written and not a fact about the Vendor. The two are parsed
+// rather than matched as text: 127.0.0.1:12345 starts with 127.0.0.1:1234 and is
+// another Vendor.
+func sameEndpoint(reported, want string) bool {
+	got, err := url.Parse(reported)
+	if err != nil {
+		return false
+	}
+	asked, err := url.Parse(want)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(got.Scheme, asked.Scheme) && strings.EqualFold(got.Host, asked.Host)
 }
 
 // Prompt sends the Prompt and returns once the Harness has taken it. The Prompt
@@ -339,10 +357,11 @@ type piFrame struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
 
-	// response, and the error text of an extension_error
-	Success bool            `json:"success"`
-	Error   string          `json:"error"`
-	Data    json.RawMessage `json:"data"`
+	// response, and the error text of an extension_error with the file it came from
+	Success       bool            `json:"success"`
+	Error         string          `json:"error"`
+	Data          json.RawMessage `json:"data"`
+	ExtensionPath string          `json:"extensionPath"`
 
 	// extension_ui_request. The Gate's payload is in whichever display field the
 	// method has: message on notify and title on select. Message is raw because Pi
@@ -468,10 +487,16 @@ func (r *piRun) answered(f piFrame) {
 // extensionFailed records a Gate that loaded and then threw. Before the start
 // probe is answered this fails the launch; after it the Gate is already known to
 // have announced, so a later failure is reported and the Daemon decides.
+//
+// Only the file this Adapter loaded is the Gate. A Host may load extensions of
+// its own, and calling one of those a Gate failure would be reporting something
+// that did not happen. Such a failure during the launch is left alone: if it did
+// stop the Gate announcing, the launch still fails, and it fails saying that.
 func (r *piRun) extensionFailed(f piFrame) {
 	r.mu.Lock()
 	launching := r.probe != nil
-	if launching {
+	mine := filepath.Clean(f.ExtensionPath) == filepath.Clean(r.gate)
+	if launching && mine {
 		r.gateFailure = f.Error
 	}
 	r.mu.Unlock()

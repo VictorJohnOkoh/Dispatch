@@ -275,6 +275,24 @@ func TestAPiGateThatThrewIsNotASession(t *testing.T) {
 	}
 }
 
+// An extension that is not the Gate is the Host's own, and its failure is not
+// this Adapter's to report as a Gate that would not load. The launch still fails,
+// because the Gate did not announce, and that is what it says.
+func TestAnotherPiExtensionsFailureIsNotTheGates(t *testing.T) {
+	s := newPiScriptFrom(t, "silent-gate-frames.jsonl", "/opt/pi/extensions/somebody-elses.js")
+	_, _, err := startPi(t, s, lmstudio, event.DecisionAllowed)
+
+	if err == nil {
+		t.Fatal("a Pi whose Gate never announced started a Session")
+	}
+	if strings.Contains(err.Error(), "would not load") {
+		t.Errorf("the launch failed with %q, and this Adapter's Gate is not what failed", err)
+	}
+	if !strings.Contains(err.Error(), "announce") {
+		t.Errorf("the launch failed with %q, which does not say the Gate was missing", err)
+	}
+}
+
 // The third shape: the extension did not parse, so Pi exited before it answered
 // anything at all.
 func TestAPiThatExitedDuringLaunchIsNotASession(t *testing.T) {
@@ -314,6 +332,21 @@ func TestAVendorPiDidNotSelectIsNotASession(t *testing.T) {
 		t.Fatal("a Session started against a Vendor nobody asked for")
 	}
 	if !strings.Contains(err.Error(), "127.0.0.1:11434") {
+		t.Errorf("the launch failed with %q, which does not name the Vendor that was asked for", err)
+	}
+}
+
+// The Vendor is one address and not the text of one. A Vendor on port 12345 is
+// not the Vendor on port 1234, although one address begins with the other.
+func TestAPiVendorOnAnotherPortIsNotThisOne(t *testing.T) {
+	asked := lmstudio
+	asked.vendor.Base = "http://127.0.0.1:123"
+	_, _, err := startPi(t, newPiScript(t, "gate-allow-frames.jsonl"), asked, event.DecisionAllowed)
+
+	if err == nil {
+		t.Fatal("a Session started against a Vendor on another port")
+	}
+	if !strings.Contains(err.Error(), "127.0.0.1:123") {
 		t.Errorf("the launch failed with %q, which does not name the Vendor that was asked for", err)
 	}
 }
