@@ -3,15 +3,12 @@ package harness
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 )
 
 // The scripted transport for Pi, and the same idea as script_test.go: Pi stops
@@ -29,17 +26,11 @@ import (
 // package writes rather than replays.
 
 type piScript struct {
-	t       *testing.T
-	frames  []recorded
-	pipes   Pipes
-	toAgent *io.PipeWriter
-	agent   *bufio.Scanner
+	*transport
+	frames []recorded
 
-	done chan struct{}
-
-	mu        sync.Mutex
-	sent      map[string]string // a recorded command id, against the one that was sent
-	abandoned bool              // the test is over, so an unplayed frame is not a failure
+	mu   sync.Mutex
+	sent map[string]string // a recorded command id, against the one that was sent
 }
 
 // newPiScript replays one pi-gate-dispatch capture whole, both directions.
@@ -80,27 +71,12 @@ func announcement(t *testing.T) json.RawMessage {
 
 func startPiScript(t *testing.T, frames []recorded) *piScript {
 	t.Helper()
-	fromAdapter, adapterWrites := io.Pipe()
-	adapterReads, scriptWrites := io.Pipe()
 	s := &piScript{
-		t:       t,
-		frames:  frames,
-		pipes:   Pipes{In: adapterWrites, Out: adapterReads},
-		toAgent: scriptWrites,
-		agent:   bufio.NewScanner(fromAdapter),
-		done:    make(chan struct{}),
-		sent:    map[string]string{},
+		transport: newTransport(t),
+		frames:    frames,
+		sent:      map[string]string{},
 	}
-	s.agent.Buffer(make([]byte, 0, 64<<10), 8<<20)
-	go s.play()
-	// The play goroutine is stopped before the test ends, because a script that
-	// reported a mismatch afterwards would panic rather than fail.
-	t.Cleanup(func() {
-		s.abandon()
-		scriptWrites.Close()
-		adapterWrites.Close()
-		<-s.done
-	})
+	s.play(s.walk)
 	return s
 }
 
@@ -149,20 +125,14 @@ func captureLines(t *testing.T, capture string) [][]byte {
 	return out
 }
 
-// spawn is the Spawner a test hands the Adapter. No process starts.
-func (s *piScript) spawn() Spawner {
-	return func(context.Context, Launch) (Pipes, error) { return s.pipes, nil }
-}
-
-// play walks the capture. An in frame is written to the Adapter; an out frame is
-// the write the Adapter is expected to make next. The pipe is closed at the end,
-// because a capture that runs out is a Harness whose stdout ended.
-func (s *piScript) play() {
-	defer close(s.done)
-	defer s.toAgent.Close()
+// walk goes through the capture. An in frame is written to the Adapter; an out
+// frame is the write the Adapter is expected to make next. Stdout is ended at the
+// end, because a capture that runs out is a Harness that went away.
+func (s *piScript) walk() {
+	defer s.hangUp()
 	for _, r := range s.frames {
 		if r.Dir == "in" {
-			if _, err := s.toAgent.Write(append(s.rewrite(r.Frame), '\n')); err != nil {
+			if !s.feed(s.rewrite(r.Frame)) {
 				return
 			}
 			continue
@@ -199,32 +169,18 @@ func (s *piScript) rewrite(frame json.RawMessage) []byte {
 	return out
 }
 
-// abandon stops the script from judging what it has left. A test that ends the
-// Session early, and every test at its cleanup, leaves frames unplayed on purpose.
-func (s *piScript) abandon() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.abandoned = true
-}
-
-func (s *piScript) quiet() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.abandoned
-}
-
 // expect reads the Adapter's next write and checks it is the one the capture
 // recorded. A command is matched on its type, and on the one field that carries
 // the decision or the Prompt, because those two are what the replay is for.
 func (s *piScript) expect(want json.RawMessage) bool {
-	if !s.agent.Scan() {
+	got, ok := s.next()
+	if !ok {
 		if s.quiet() {
 			return false
 		}
 		s.t.Errorf("the capture expected %s and the Adapter wrote nothing more", piType(want))
 		return false
 	}
-	got := s.agent.Bytes()
 	if s.quiet() {
 		return false
 	}
@@ -247,16 +203,6 @@ func (s *piScript) expect(want json.RawMessage) bool {
 		s.mu.Unlock()
 	}
 	return true
-}
-
-// wait blocks until the capture is played out.
-func (s *piScript) wait(t *testing.T) {
-	t.Helper()
-	select {
-	case <-s.done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the capture never played out")
-	}
 }
 
 // prompts is the Prompt text of every turn the capture's own run drove, so a

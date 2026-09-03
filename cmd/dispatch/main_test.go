@@ -146,7 +146,7 @@ func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	}
 }
 
-func TestOpenCodeIsServedWithItsApprovalPolicy(t *testing.T) {
+func TestEveryHarnessWithAnAdapterIsServed(t *testing.T) {
 	var lines strings.Builder
 	got, err := newHarnesses([]config.HarnessProfile{
 		{Name: "passthrough"},

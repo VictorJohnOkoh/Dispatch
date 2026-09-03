@@ -82,13 +82,12 @@ func (a *Pi) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error)
 	if spec.Spawn == nil {
 		return nil, fmt.Errorf("%s: this Harness needs a Spawner", a.name)
 	}
-	// The provider is named after the Vendor Kind, because Pi's providers live in a
-	// Host-level models.json written once at Host setup and there is no per-Session
-	// config route into it. What that file actually named is read back below rather
-	// than assumed.
+	// Only the Model is named. Pi's providers live in a Host-level models.json
+	// written once at Host setup, and what that file called this Vendor is the
+	// Host's business: the launch reads back which one answered rather than
+	// spelling a name this repo would be guessing at.
 	pipes, err := spec.Spawn(ctx, Launch{Args: []string{
 		"--mode", "rpc",
-		"--provider", spec.Vendor.Kind.String(),
 		"--model", spec.Model,
 		"-e", a.gate,
 	}})
@@ -108,7 +107,7 @@ func (a *Pi) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error)
 	}
 	go r.read(pipes.Out)
 
-	if err := r.handshake(ctx); err != nil {
+	if err := r.checkLaunch(ctx); err != nil {
 		r.stop()
 		return nil, err
 	}
@@ -127,9 +126,7 @@ type piRun struct {
 	stopped chan struct{} // Close or a failed Start has run
 	gone    chan struct{} // the Harness's stdout reached its end
 
-	// writing is stdin, and it is its own lock. A Harness that stops reading blocks
-	// whoever is writing to it, and everything below would be stuck behind that.
-	writing sync.Mutex
+	writing sync.Mutex // stdin, and its own lock, as in acp.go
 
 	mu   sync.Mutex
 	done bool // Close has run, so nothing more is reported
@@ -164,10 +161,10 @@ type piCall struct {
 	announced bool
 }
 
-// handshake sends one command and reads the launch off the frames that arrive
+// checkLaunch sends one command and reads the launch off the frames that arrive
 // before its answer. Pi has no handshake of its own, so the command is get_state,
 // whose answer says which Model and which Vendor this Session actually got.
-func (r *piRun) handshake(ctx context.Context) error {
+func (r *piRun) checkLaunch(ctx context.Context) error {
 	answered := make(chan piFrame, 1)
 	r.mu.Lock()
 	r.probe = answered
@@ -178,7 +175,7 @@ func (r *piRun) handshake(ctx context.Context) error {
 	}
 	select {
 	case got := <-answered:
-		return r.check(got)
+		return r.accept(got)
 	case <-r.gone:
 		// Pi exits 1 on an extension that does not parse, before it answers anything.
 		return fmt.Errorf("%s: the Harness ended before it answered the start probe", r.name)
@@ -189,10 +186,10 @@ func (r *piRun) handshake(ctx context.Context) error {
 	}
 }
 
-// check is the launch decision. A Session whose Gate did not load would run
+// accept is the launch decision. A Session whose Gate did not load would run
 // ungated, so it is refused rather than started, which is what ADR 0008 asks of a
 // Gate that depends on a loadable component.
-func (r *piRun) check(got piFrame) error {
+func (r *piRun) accept(got piFrame) error {
 	r.mu.Lock()
 	failure, ready := r.gateFailure, r.ready
 	r.mu.Unlock()
@@ -223,9 +220,11 @@ func (r *piRun) check(got piFrame) error {
 	}
 	// The Vendor is checked as well as the Model, because a Host's models.json may
 	// name one Model under two providers and only one of them is this Session's.
-	if want := r.spec.Vendor.Base + "/v1"; state.Model.BaseURL != want {
+	// The Base is a prefix of what Pi reports and not the whole of it, because the
+	// path after it is how that file was written and not a fact about the Vendor.
+	if !strings.HasPrefix(state.Model.BaseURL, r.spec.Vendor.Base) {
 		return fmt.Errorf("%s: this Session's Vendor is %s and the Harness selected %s at %s",
-			r.name, want, state.Model.Provider, state.Model.BaseURL)
+			r.name, r.spec.Vendor.Base, state.Model.Provider, state.Model.BaseURL)
 	}
 	return nil
 }
@@ -261,11 +260,9 @@ func (r *piRun) Prompt(ctx context.Context, text string) error {
 	return err
 }
 
-// Interrupt abandons the Prompt in flight. Pi ends the turn itself, so the Prompt
-// is still bounded by agent_settled as it always is.
-//
-// No captured run ever aborted one, so what Pi does with this is written down
-// nowhere and is not established here.
+// Interrupt abandons the Prompt in flight, which Pi answers by ending the turn,
+// so the Prompt is still bounded by agent_settled as it always is. No captured
+// run ever aborted one, so what Pi does with this is not established here.
 func (r *piRun) Interrupt(context.Context) error {
 	r.mu.Lock()
 	prompting := r.prompt != ""
@@ -286,8 +283,6 @@ func (r *piRun) Close() error {
 	return nil
 }
 
-// stop makes the Session report nothing more and frees whatever is waiting on an
-// answer that is not coming.
 func (r *piRun) stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -328,11 +323,9 @@ func (r *piRun) read(out io.Reader) {
 	}
 }
 
-// report runs one Sink call unless the Session has been closed. Everything after
-// Close is the Harness talking to nobody.
+// report runs one Sink call unless the Session has been closed, holding the lock
+// across it for the reason acp.go's report gives.
 func (r *piRun) report(call func()) {
-	// The lock is held across the call, so a Close landing beside it cannot let one
-	// Sink call through behind the goodbye. Nothing the Sink does comes back here.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.done {
@@ -622,11 +615,8 @@ func (r *piRun) completed() {
 	r.report(func() {
 		r.closeOpen()
 		r.announceAll()
-		// A Prompt is bounded either way, because a Prompt that is never bounded
-		// leaves the Session Working and so refusing every Prompt after it. What is
-		// not invented is the reason: a Prompt that settled with no turn to say why
-		// stops on this project's own word rather than on an empty one attributed to
-		// the Vendor.
+		// Bounded either way, and on this project's own word rather than on an empty
+		// one attributed to the Vendor. See completed in acp.go.
 		if stop == "" {
 			r.out.Failed(event.ErrAdapterFailed, "this Prompt settled with no turn to say why it stopped")
 			r.out.Completed(event.StopError, used)
@@ -637,8 +627,8 @@ func (r *piRun) completed() {
 }
 
 // hold keeps a Tool Call until there is something worth reporting about it. The
-// first frame to name a call is the one with its arguments, and the frames after
-// it do not overwrite what it said. The caller holds the mutex.
+// first frame to name a call is the one carrying its arguments. The caller holds
+// the mutex.
 func (r *piRun) hold(id, name string, args json.RawMessage) {
 	if id == "" || r.calls[id] != nil {
 		return
@@ -668,8 +658,8 @@ func (r *piRun) announce(id string) {
 	r.out.ToolCallRequested(id, call.name, toolKindOf(call.name), call.name, call.args)
 }
 
-// announceAll writes every Tool Call still pending, oldest first. The caller holds
-// the mutex.
+// announceAll writes every Tool Call still pending, oldest first. The caller
+// holds the mutex.
 func (r *piRun) announceAll() {
 	for len(r.pending) > 0 {
 		r.announce(r.pending[0])
@@ -754,8 +744,6 @@ type command struct {
 	Cancelled bool   `json:"cancelled,omitempty"`
 }
 
-// write puts one line on stdin. Writes are serialised because the reader answers
-// the Harness's dialogs while the Daemon is sending its own commands.
 func (r *piRun) write(c command) error {
 	line, err := json.Marshal(c)
 	if err != nil {

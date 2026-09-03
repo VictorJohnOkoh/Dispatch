@@ -9,18 +9,25 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 )
 
-// The three Vendors the pi-vendors pass drove, each with the Model it ran and the
-// loopback address it ran against. The same wizard and the same prompts, so what
-// differs between the three rows is the Vendor and nothing else.
-var piVendors = []struct {
-	name  string
-	model string
-	base  string
-}{
-	{"lmstudio", "qwen/qwen3.5-9b", "http://127.0.0.1:1234"},
-	{"ollama", "qwen3.5:9b", "http://127.0.0.1:11434"},
-	{"llamacpp", "qwen3.5-9b", "http://127.0.0.1:8080"},
+// piVendor is one Session's Vendor and the Model on it, which travel together
+// through every replay because the launch checks them together.
+type piVendor struct {
+	name   string
+	model  string
+	vendor vendors.Endpoint
 }
+
+// The three Vendors the pi-vendors pass drove. The same wizard and the same
+// prompts, so what differs between the three rows is the Vendor and nothing else.
+var piVendors = []piVendor{
+	{"lmstudio", "qwen/qwen3.5-9b", vendors.Endpoint{Kind: vendors.LMStudio, Base: "http://127.0.0.1:1234"}},
+	{"ollama", "qwen3.5:9b", vendors.Endpoint{Kind: vendors.Ollama, Base: "http://127.0.0.1:11434"}},
+	{"llamacpp", "qwen3.5-9b", vendors.Endpoint{Kind: vendors.LlamaSwap, Base: "http://127.0.0.1:8080"}},
+}
+
+// lmstudio is the run the gate captures were recorded on, and the one every test
+// that is not about Vendor coverage uses.
+var lmstudio = piVendors[0]
 
 // piAdapter is the Adapter under test, with its Gate written into a directory
 // this test owns.
@@ -35,14 +42,14 @@ func piAdapter(t *testing.T) *Pi {
 
 // startPi runs the launch and hands back what the Daemon was told. It drives no
 // Prompt, because the launch failures have none to drive.
-func startPi(t *testing.T, s *piScript, model, base string, decision event.Decision) (*recording, Run, error) {
+func startPi(t *testing.T, s *piScript, on piVendor, decision event.Decision) (*recording, Run, error) {
 	t.Helper()
 	d := newRecording()
 	d.decide = decision
 	run, err := piAdapter(t).Start(t.Context(), SessionSpec{
 		Session: "s-1",
-		Model:   model,
-		Vendor:  vendors.Endpoint{Kind: vendors.LMStudio, Base: base},
+		Model:   on.model,
+		Vendor:  on.vendor,
 		Dir:     t.TempDir(),
 		Spawn:   s.spawn(),
 	}, d)
@@ -51,9 +58,9 @@ func startPi(t *testing.T, s *piScript, model, base string, decision event.Decis
 
 // replayPi drives one capture from Start through every Prompt it recorded to
 // Close, and hands back what the Daemon was told.
-func replayPi(t *testing.T, s *piScript, model, base string, decision event.Decision) *recording {
+func replayPi(t *testing.T, s *piScript, on piVendor, decision event.Decision) *recording {
 	t.Helper()
-	d, run, err := startPi(t, s, model, base, decision)
+	d, run, err := startPi(t, s, on, decision)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -75,10 +82,10 @@ func replayPi(t *testing.T, s *piScript, model, base string, decision event.Deci
 }
 
 // replayVendor drives one pi-vendors event stream.
-func replayVendor(t *testing.T, vendor, capture, model, base string) *recording {
+func replayVendor(t *testing.T, on piVendor, capture string) *recording {
 	t.Helper()
-	s := newPiStream(t, "pi-vendors/"+vendor+"/"+capture, model, base)
-	return replayPi(t, s, model, base, event.DecisionAllowed)
+	s := newPiStream(t, "pi-vendors/"+on.name+"/"+capture, on.model, on.vendor.Base)
+	return replayPi(t, s, on, event.DecisionAllowed)
 }
 
 // The five Kinds a Harness is the authority on, from recorded bytes and no
@@ -87,7 +94,7 @@ func replayVendor(t *testing.T, vendor, capture, model, base string) *recording 
 func TestTheFiveHarnessKindsComeOutOfThePiCaptures(t *testing.T) {
 	for _, vendor := range piVendors {
 		t.Run(vendor.name, func(t *testing.T) {
-			d := replayVendor(t, vendor.name, "tool-events.jsonl", vendor.model, vendor.base)
+			d := replayVendor(t, vendor, "tool-events.jsonl")
 
 			said := d.said()
 			for _, kind := range []string{"Reasoning(", "Message(", "ToolCallRequested(", "ToolCallEnded(", "Completed("} {
@@ -113,7 +120,7 @@ func TestTheFiveHarnessKindsComeOutOfThePiCaptures(t *testing.T) {
 func TestEveryPiToolCallReachesATerminalStatus(t *testing.T) {
 	for _, vendor := range piVendors {
 		t.Run(vendor.name, func(t *testing.T) {
-			d := replayVendor(t, vendor.name, "tool-events.jsonl", vendor.model, vendor.base)
+			d := replayVendor(t, vendor, "tool-events.jsonl")
 
 			said := d.said()
 			requested, ended := count(said, "ToolCallRequested("), count(said, "ToolCallEnded(")
@@ -131,7 +138,7 @@ func TestEveryPiToolCallReachesATerminalStatus(t *testing.T) {
 // rather than reported. The whole of it still arrives on the call's end, and the
 // raw bytes are in the Session's transcript either way.
 func TestPiStreamedToolOutputIsDropped(t *testing.T) {
-	d := replayVendor(t, "lmstudio", "tool-events.jsonl", "qwen/qwen3.5-9b", "http://127.0.0.1:1234")
+	d := replayVendor(t, lmstudio, "tool-events.jsonl")
 
 	for _, call := range d.said() {
 		if strings.Contains(call, "partialResult") {
@@ -139,7 +146,9 @@ func TestPiStreamedToolOutputIsDropped(t *testing.T) {
 		}
 	}
 	// The end carries the output the updates were fragments of, so nothing a human
-	// reads is lost by dropping them.
+	// reads is lost by dropping them. The dropped bytes are still written down:
+	// stdout goes to the transcript whole, which daemon's
+	// TestTheTranscriptHoldsTheHarnessStdout is.
 	if !strings.Contains(strings.Join(d.said(), "\n"), "sample.txt") {
 		t.Errorf("the tool's output never reached the Daemon: %v", d.said())
 	}
@@ -163,8 +172,7 @@ func TestThePiGatesAreDeclaredForEveryToolKind(t *testing.T) {
 // Every ToolKind is held, and the Daemon is asked about each one. This is the
 // coverage the allow run measured, read back out of its own bytes.
 func TestPiHoldsEveryToolKind(t *testing.T) {
-	d := replayPi(t, newPiScript(t, "gate-allow-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:1234", event.DecisionAllowed)
+	d := replayPi(t, newPiScript(t, "gate-allow-frames.jsonl"), lmstudio, event.DecisionAllowed)
 
 	said := d.said()
 	if count(said, "ToolCallRequested(") == 0 {
@@ -195,8 +203,7 @@ func TestPiHoldsEveryToolKind(t *testing.T) {
 // own out frames say deny, so the script fails the test if the Adapter says
 // anything else.
 func TestPiAnswersTheGateWithTheDaemonsRefusal(t *testing.T) {
-	d := replayPi(t, newPiScript(t, "gate-deny-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:1234", event.DecisionRefused)
+	d := replayPi(t, newPiScript(t, "gate-deny-frames.jsonl"), lmstudio, event.DecisionRefused)
 
 	said := d.said()
 	if count(said, "ToolCallEnded(") == 0 {
@@ -219,8 +226,7 @@ func TestPiAnswersTheGateWithTheDaemonsRefusal(t *testing.T) {
 // that anything ran and the Daemon hears the request, then the question, and
 // nothing in between.
 func TestAPiCallIsNotReportedAsRunningBeforeItsQuestion(t *testing.T) {
-	d := replayPi(t, newPiScript(t, "gate-allow-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:1234", event.DecisionAllowed)
+	d := replayPi(t, newPiScript(t, "gate-allow-frames.jsonl"), lmstudio, event.DecisionAllowed)
 
 	said := d.said()
 	requested, asked := indexOf(said, "ToolCallRequested("), indexOf(said, "Approve(")
@@ -241,8 +247,7 @@ func TestAPiCallIsNotReportedAsRunningBeforeItsQuestion(t *testing.T) {
 // fails rather than degrading. This is the general shape of the three: the probe
 // was answered and nothing came ahead of it.
 func TestAPiWithNoGateIsNotASession(t *testing.T) {
-	_, _, err := startPi(t, newPiScript(t, "no-gate-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:1234", event.DecisionAllowed)
+	_, _, err := startPi(t, newPiScript(t, "no-gate-frames.jsonl"), lmstudio, event.DecisionAllowed)
 
 	if err == nil {
 		t.Fatal("a Pi whose Gate never announced started a Session")
@@ -255,11 +260,15 @@ func TestAPiWithNoGateIsNotASession(t *testing.T) {
 // The second shape: the Gate loaded and then threw, and Pi says so in a frame of
 // its own that arrives before the probe's answer.
 func TestAPiGateThatThrewIsNotASession(t *testing.T) {
-	_, _, err := startPi(t, newPiScript(t, "silent-gate-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:1234", event.DecisionAllowed)
+	_, _, err := startPi(t, newPiScript(t, "silent-gate-frames.jsonl"), lmstudio, event.DecisionAllowed)
 
 	if err == nil {
 		t.Fatal("a Pi whose Gate threw started a Session")
+	}
+	// Both halves: this Adapter's own words for the decision, and Pi's words for
+	// the cause, which are the extension's and not this Adapter's to invent.
+	if !strings.Contains(err.Error(), "would not load") {
+		t.Errorf("the launch failed with %q, which does not say the Gate was the reason", err)
 	}
 	if !strings.Contains(err.Error(), "the Gate failed to announce") {
 		t.Errorf("the launch failed with %q, and Pi said why", err)
@@ -269,8 +278,7 @@ func TestAPiGateThatThrewIsNotASession(t *testing.T) {
 // The third shape: the extension did not parse, so Pi exited before it answered
 // anything at all.
 func TestAPiThatExitedDuringLaunchIsNotASession(t *testing.T) {
-	_, _, err := startPi(t, newPiScript(t, "broken-gate-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:1234", event.DecisionAllowed)
+	_, _, err := startPi(t, newPiScript(t, "broken-gate-frames.jsonl"), lmstudio, event.DecisionAllowed)
 
 	if err == nil {
 		t.Fatal("a Pi that exited during its launch started a Session")
@@ -283,8 +291,9 @@ func TestAPiThatExitedDuringLaunchIsNotASession(t *testing.T) {
 // The Model is selected and then read back, because a Host's models.json may name
 // a Model this Session did not ask for.
 func TestAModelPiDidNotSelectIsNotASession(t *testing.T) {
-	_, _, err := startPi(t, newPiScript(t, "gate-allow-frames.jsonl"),
-		"qwen3.5:9b", "http://127.0.0.1:1234", event.DecisionAllowed)
+	asked := lmstudio
+	asked.model = "qwen3.5:9b"
+	_, _, err := startPi(t, newPiScript(t, "gate-allow-frames.jsonl"), asked, event.DecisionAllowed)
 
 	if err == nil {
 		t.Fatal("a Session started on a Model nobody asked for")
@@ -297,8 +306,9 @@ func TestAModelPiDidNotSelectIsNotASession(t *testing.T) {
 // The Vendor is read back as well, because one Model id may sit under two
 // providers and only one of them is this Session's.
 func TestAVendorPiDidNotSelectIsNotASession(t *testing.T) {
-	_, _, err := startPi(t, newPiScript(t, "gate-allow-frames.jsonl"),
-		"qwen/qwen3.5-9b", "http://127.0.0.1:11434", event.DecisionAllowed)
+	asked := lmstudio
+	asked.vendor = piVendors[1].vendor
+	_, _, err := startPi(t, newPiScript(t, "gate-allow-frames.jsonl"), asked, event.DecisionAllowed)
 
 	if err == nil {
 		t.Fatal("a Session started against a Vendor nobody asked for")
@@ -313,7 +323,7 @@ func TestAVendorPiDidNotSelectIsNotASession(t *testing.T) {
 // the same Kinds, every Tool Call is requested before it ends, and the Prompt
 // ends once. Nothing above this seam can tell which Harness ran.
 func TestPiAndOpenCodeRenderTheSameWay(t *testing.T) {
-	pi := replayVendor(t, "llamacpp", "tool-events.jsonl", "qwen3.5-9b", "http://127.0.0.1:8080")
+	pi := replayVendor(t, piVendors[2], "tool-events.jsonl")
 	opencode, _ := replay(t, "opencode/llamaswap/execute-frames.jsonl", swapModel)
 
 	for _, kind := range []string{"Reasoning(", "Message(", "ToolCallRequested(", "ToolCallEnded(", "Completed("} {
