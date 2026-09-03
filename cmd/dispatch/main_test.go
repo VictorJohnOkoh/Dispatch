@@ -112,17 +112,30 @@ func TestEveryVendorKindHasAnAdapter(t *testing.T) {
 // because that Daemon can start no Session.
 func TestDaemonWarnsAboutAHarnessWithNoAdapter(t *testing.T) {
 	dir := t.TempDir()
-	path := writeConfig(t, dir, "daemon.json", daemonConfig(t, dir))
+	// Hermes is the Harness ADR 0003 turned into a test fixture, so it is the one
+	// this build knows the name of and has no Adapter for.
+	withHermes := strings.Replace(daemonConfig(t, dir), `{"name": "passthrough"},`,
+		`{"name": "passthrough"}, {"name": "hermes", "exe": "/usr/local/bin/hermes"},`, 1)
+	path := writeConfig(t, dir, "daemon.json", withHermes)
 	var log strings.Builder
 	if code := run(done(t), []string{"daemon", "-config", path}, &log); code != 0 {
 		t.Fatalf("exit %d: %s", code, log.String())
 	}
-	if !strings.Contains(log.String(), "harness=pi") {
+	if !strings.Contains(log.String(), "harness=hermes") {
 		t.Errorf("log = %q", log.String())
 	}
 
-	only := strings.Replace(daemonConfig(t, dir), `{"name": "passthrough"},`, "", 1)
-	only = strings.Replace(only, `{"name": "opencode", "exe": "/usr/local/bin/opencode"},`, "", 1)
+	// The same file with every Harness this build has an Adapter for taken out of
+	// it, so hermes is the only one left and the Daemon can start no Session.
+	only := withHermes
+	for _, served := range []string{
+		`{"name": "passthrough"}, `,
+		`{"name": "opencode", "exe": "/usr/local/bin/opencode"},`,
+		`{"name": "pi", "exe": "/usr/local/bin/pi"}`,
+	} {
+		only = strings.Replace(only, served, "", 1)
+	}
+	only = strings.Replace(only, `"/usr/local/bin/hermes"},`, `"/usr/local/bin/hermes"}`, 1)
 	path = writeConfig(t, dir, "none.json", only)
 	var errOut strings.Builder
 	if code := run(done(t), []string{"daemon", "-config", path}, &errOut); code != 1 {
@@ -138,11 +151,12 @@ func TestOpenCodeIsServedWithItsApprovalPolicy(t *testing.T) {
 	got, err := newHarnesses([]config.HarnessProfile{
 		{Name: "passthrough"},
 		{Name: "opencode", Exe: "/usr/local/bin/opencode"},
-	}, slog.New(slog.NewTextHandler(&lines, nil)))
+		{Name: "pi", Exe: "/usr/local/bin/pi"},
+	}, t.TempDir(), slog.New(slog.NewTextHandler(&lines, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Name != "passthrough" || got[1].Name != "opencode" {
+	if len(got) != 3 || got[0].Name != "passthrough" || got[1].Name != "opencode" || got[2].Name != "pi" {
 		t.Errorf("served Harnesses = %v", got)
 	}
 	if lines.Len() != 0 {
