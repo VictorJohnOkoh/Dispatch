@@ -118,14 +118,13 @@ The marginal cost is one file. `harness/pi.go` sits beside `acp.go` in a package
 in `docs/research/captures/pi-vendors/` for the fixture tests. The whole cost of the second real
 Harness is translation, which is the work the seam exists to isolate.
 
-**Pi's Gate declaration is a runtime value, not a scope question.** ADR 0008 requires a Gate that
-depends on a loadable component to announce itself before `Start` returns, and whether Pi's
-permission-gate extension can announce has not been captured. Both answers keep Pi in v1. If it can
-announce, the Adapter declares Gates and a failed load fails the launch. If it cannot, the Adapter
-declares no Gates, every slot is forced to `auto`, and the Client draws a Session with no gates
-anywhere. That second outcome is ugly and it is true, which is the correct pairing.
+**Pi's Gate declaration is a runtime value, and the value is now measured.** ADR 0008 requires a Gate
+that depends on a loadable component to announce itself before `Start` returns. Both answers kept Pi
+in v1, and the answer is the first one: the Gate announces. `captures/pi-gate-dispatch/` has it as
+frame 2 with the first command's response as frame 3, so **the Adapter declares Gates and a failed
+load fails the launch**. The second branch, no Gates and every slot forced to `auto`, is not needed.
 
-The capture is a task for the build, not a blocker on this freeze. It is listed under holes below.
+The Gate is `internal/harness/dispatch-gate.js`, which `harness/pi.go` loads with `-e`.
 
 ## Decided here: three Vendors
 
@@ -454,9 +453,10 @@ milestone makes its failures correct.
 seconds while every other Host keeps working.
 
 **M8. The second Harness and the other two Vendors.** `harness/pi.go`, `vendors/lmstudio.go` and
-`vendors/llamaswap.go`, all against fixtures already in this repo, plus the Pi gate work described
-under holes. They are last on purpose: they are the proof the two abstractions are abstractions, and
-that proof is only worth anything once there is something for them to plug into.
+`vendors/llamaswap.go`, all against fixtures already in this repo, plus loading the Gate that
+`captures/pi-gate-dispatch/` settled. They are last on purpose: they are the proof the two
+abstractions are abstractions, and that proof is only worth anything once there is something for them
+to plug into.
 *Watch:* the same Session and the same transcript rendering, with one Harness swapped in the wizard.
 And one Model list showing `Yes` from LM Studio, `Unknown` from Ollama, and `Unknown` from llama-swap
 until the Model is resident.
@@ -668,16 +668,16 @@ claim needs an empirical check before anything is designed against it.
 
 Named, so that nobody discovers them by being surprised.
 
-- **Pi's Gate needs an extension we write, and it needs one capture.** The mechanism itself is proven:
-  `captures/pi-gate/` holds an allow run and a deny run, and the file state settles it rather than the
-  wording, since the target was deleted on `Yes` and survived on `No`. What those captures do not show
-  is a Gate in ADR 0008's sense. Pi's bundled `permission-gate.ts` fires only on `bash`, and only for
-  three regexes (`rm -rf`, `sudo`, `chmod 777`), so most `execute` calls sail past it, and it never
-  announces itself. The Daemon therefore ships its own extension, and what that extension must add is
-  coverage of every `toolKind` plus an announcement before `Start` returns. The one capture still owed
-  is that the announcement arrives. If it cannot, the Adapter declares no Gates, every slot is forced
-  to `auto`, and the Client draws a Session with no gates anywhere, which ADR 0008 already called the
-  correct outcome because it is what is true.
+- ~~**Pi's Gate needs an extension we write, and it needs one capture.**~~ **Closed 2026-09-03.** The
+  extension is `internal/harness/dispatch-gate.js` and the capture is `captures/pi-gate-dispatch/`.
+  It announces before `Start` returns, so the Adapter declares Gates and a failed load fails the
+  launch, which is #57's to write. Three signals say a load failed, and all three come before `Start`
+  returns: Pi exits 1 on an extension that does not parse, it sends an `extension_error` frame for an
+  extension that loads and then throws, and a probe answered with no announcement ahead of it is the
+  general shape. All five ToolKinds were held and no tool call sailed past, but two of the five needed
+  a fixture tool: Pi's eight built-in tools reach `read`, `edit` and `execute` only, so **a `fetch`
+  Gate declared against a stock Pi is a Gate that never fires**, which is what #57 must decide to
+  declare or not.
 - **The Vendor fixtures do not exist.** Finding R8. Tier-two tests for `vendors` need recorded bodies
   for a caller-supplied `http.RoundTripper`, and the capture that should have produced them wrote
   nothing while reporting `HTTP 200`. It is no longer the problem it was: M3 has Ollama running

@@ -1,0 +1,73 @@
+{
+  "label": "no-gate",
+  "captured_at": "2026-09-03T17:58:39.507677+00:00",
+  "pi_cmd": "pi",
+  "extensions": [],
+  "provider": "lmstudio",
+  "model": "qwen/qwen3.5-9b",
+  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/wd-no-gate",
+  "prompts": [],
+  "deny_kinds": [],
+  "exit_code": 0,
+  "elapsed_seconds": 0.48,
+  "workdir_before": [],
+  "workdir_after": [],
+  "announcement": {
+    "question": "does the Gate announce itself before Start returns?",
+    "start_is": "the response to the first command (start-probe, get_state)",
+    "ready_seq": null,
+    "probe_response_seq": 2,
+    "answer": "no announcement arrived at all"
+  },
+  "gate_decisions": [],
+  "kinds_gated": {
+    "read": 0,
+    "edit": 0,
+    "execute": 0,
+    "fetch": 0,
+    "other": 0
+  },
+  "tool_starts": 0,
+  "ungated_tool_calls": [],
+  "extension_errors": [],
+  "probe_response": {
+    "id": "start-probe",
+    "type": "response",
+    "command": "get_state",
+    "success": true,
+    "data": {
+      "model": {
+        "id": "qwen/qwen3.5-9b",
+        "name": "qwen/qwen3.5-9b",
+        "api": "openai-completions",
+        "provider": "lmstudio",
+        "baseUrl": "http://127.0.0.1:1234/v1",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 128000,
+        "maxTokens": 16384
+      },
+      "thinkingLevel": "off",
+      "isStreaming": false,
+      "isCompacting": false,
+      "steeringMode": "one-at-a-time",
+      "followUpMode": "one-at-a-time",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-no-gate\\2026-09-03T17-58-39-364Z_01a0686c-3e04-7c32-bbe4-574ca4218f7c.jsonl",
+      "sessionId": "01a0686c-3e04-7c32-bbe4-574ca4218f7c",
+      "autoCompactionEnabled": true,
+      "messageCount": 0,
+      "pendingMessageCount": 0
+    }
+  },
+  "event_types": {
+    "response": 1
+  }
+}

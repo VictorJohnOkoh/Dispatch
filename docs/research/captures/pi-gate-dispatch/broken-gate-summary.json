@@ -1,0 +1,37 @@
+{
+  "label": "broken-gate",
+  "captured_at": "2026-09-03T17:58:40.221907+00:00",
+  "pi_cmd": "pi",
+  "extensions": [
+    "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/broken-gate.js"
+  ],
+  "provider": "lmstudio",
+  "model": "qwen/qwen3.5-9b",
+  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/wd-broken-gate",
+  "prompts": [],
+  "deny_kinds": [],
+  "exit_code": 1,
+  "elapsed_seconds": 0.52,
+  "workdir_before": [],
+  "workdir_after": [],
+  "announcement": {
+    "question": "does the Gate announce itself before Start returns?",
+    "start_is": "the response to the first command (start-probe, get_state)",
+    "ready_seq": null,
+    "probe_response_seq": null,
+    "answer": "no announcement arrived at all"
+  },
+  "gate_decisions": [],
+  "kinds_gated": {
+    "read": 0,
+    "edit": 0,
+    "execute": 0,
+    "fetch": 0,
+    "other": 0
+  },
+  "tool_starts": 0,
+  "ungated_tool_calls": [],
+  "extension_errors": [],
+  "probe_response": null,
+  "event_types": {}
+}
