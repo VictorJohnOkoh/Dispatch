@@ -608,6 +608,50 @@ rather than infer them from the Harness's output.
 
 ---
 
+## CORRECTION — 2026-09-03, the Gate Dispatch ships
+
+### P8. The Gate announces before `Start` returns, and P7's trap 2 is avoidable
+
+P7 used Pi's bundled example. `internal/harness/dispatch-gate.ts` is the Gate the Daemon ships, and
+`captures/pi-gate-dispatch/` is four runs of it against Pi 0.84.3. `[capture]`
+
+**It announces.** A `session_start` handler calls `ctx.ui.notify`, which is fire-and-forget, and the
+notification lands as frame 2 with the first command's response as frame 3. ADR 0008's requirement
+that a loadable Gate announce itself before `Start` returns is met, so the Pi Adapter declares Gates
+rather than forcing every slot to `auto`.
+
+```json
+>>> {"id":"start-probe","type":"get_state"}
+<<< {"type":"extension_ui_request","id":"1b959a09-…","method":"notify",
+     "message":"{\"protocol\":\"dispatch.gate/1\",\"event\":\"ready\",…}","notifyType":"info"}
+<<< {"id":"start-probe","type":"response","command":"get_state","success":true,"data":{…}}
+```
+
+**A failed load is loud twice.** An unparseable extension makes Pi exit 1 in under a second, before
+answering any command, with the parse error on stderr. A Pi that starts but answers the probe with no
+announcement ahead of it is the other shape. Either is enough to fail the launch.
+
+**Trap 2 is avoidable.** P7 recorded that the UI request carries no `toolCallId`, leaving correlation
+to ordering. `title` is the one field the extension controls, so the Gate puts JSON there and the
+Daemon reads it as a payload:
+
+```json
+<<< {"type":"extension_ui_request","id":"59c9096a-…","method":"select",
+     "title":"{\"protocol\":\"dispatch.gate/1\",\"event\":\"request\",
+               \"toolCallId\":\"796707030\",\"toolName\":\"bash\",\"kind\":\"execute\"}",
+     "options":["allow","deny"]}
+```
+
+Traps 1 and 3 stand: `tool_execution_start` still fires before the Gate resolves, and a denial still
+arrives as `isError: true` with free text. The text is now chosen by this repo, so it can be matched
+on, which is a smaller claim than a protocol signal.
+
+**Coverage.** All five ToolKinds were held in both the allow and the deny run, and
+`ungated_tool_calls` is empty in both. `fetch` and `other` needed two no-op fixture tools
+(`scripts/pi-gate-probe-tools.ts`), because Pi's eight built-in tools reach only three of the five.
+
+---
+
 ## 0. Identifying the two harnesses
 
 ### Hermes

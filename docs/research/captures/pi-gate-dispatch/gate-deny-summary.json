@@ -1,0 +1,133 @@
+{
+  "label": "gate-deny",
+  "captured_at": "2026-09-03T17:30:35.822951+00:00",
+  "pi_cmd": "pi",
+  "extensions": [
+    "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.ts",
+    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-probe-tools.ts"
+  ],
+  "provider": "lmstudio",
+  "model": "qwen/qwen3.5-9b",
+  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/workdir-deny",
+  "prompts": [
+    "Use the read tool to read notes.txt.",
+    "Use the write tool to create hello.txt containing the single word hello.",
+    "Use the bash tool to run exactly: rm -rf scratch.txt",
+    "Use the fetch tool on the url https://example.com",
+    "Use the note tool to record the text hello"
+  ],
+  "deny_kinds": [
+    "edit",
+    "execute",
+    "fetch",
+    "other",
+    "read"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 35.89,
+  "announcement": {
+    "question": "does the Gate announce itself before Start returns?",
+    "start_is": "the response to the first command (start-probe, get_state)",
+    "ready_seq": 2,
+    "probe_response_seq": 3,
+    "answer": "yes - the announcement preceded the start probe response"
+  },
+  "gate_decisions": [
+    {
+      "seq": 52,
+      "kind": "read",
+      "toolName": "read",
+      "toolCallId": "650693561",
+      "decision": "deny"
+    },
+    {
+      "seq": 197,
+      "kind": "edit",
+      "toolName": "write",
+      "toolCallId": "264582167",
+      "decision": "deny"
+    },
+    {
+      "seq": 360,
+      "kind": "execute",
+      "toolName": "bash",
+      "toolCallId": "384293142",
+      "decision": "deny"
+    },
+    {
+      "seq": 576,
+      "kind": "fetch",
+      "toolName": "fetch",
+      "toolCallId": "908564272",
+      "decision": "deny"
+    },
+    {
+      "seq": 835,
+      "kind": "other",
+      "toolName": "note",
+      "toolCallId": "966376032",
+      "decision": "deny"
+    }
+  ],
+  "kinds_gated": {
+    "read": 1,
+    "edit": 1,
+    "execute": 1,
+    "fetch": 1,
+    "other": 1
+  },
+  "tool_starts": 5,
+  "ungated_tool_calls": [],
+  "extension_errors": [],
+  "probe_response": {
+    "id": "start-probe",
+    "type": "response",
+    "command": "get_state",
+    "success": true,
+    "data": {
+      "model": {
+        "id": "qwen/qwen3.5-9b",
+        "name": "qwen/qwen3.5-9b",
+        "api": "openai-completions",
+        "provider": "lmstudio",
+        "baseUrl": "http://127.0.0.1:1234/v1",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "contextWindow": 128000,
+        "maxTokens": 16384
+      },
+      "thinkingLevel": "off",
+      "isStreaming": false,
+      "isCompacting": false,
+      "steeringMode": "one-at-a-time",
+      "followUpMode": "one-at-a-time",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\sessions-deny\\2026-09-03T17-30-00-286Z_01a06852-02de-7a07-9330-c5533d28b9f9.jsonl",
+      "sessionId": "01a06852-02de-7a07-9330-c5533d28b9f9",
+      "autoCompactionEnabled": true,
+      "messageCount": 0,
+      "pendingMessageCount": 0
+    }
+  },
+  "event_types": {
+    "extension_ui_request": 6,
+    "response": 6,
+    "agent_start": 5,
+    "turn_start": 10,
+    "message_start": 20,
+    "message_end": 20,
+    "message_update": 884,
+    "tool_execution_start": 5,
+    "tool_execution_end": 5,
+    "turn_end": 10,
+    "agent_end": 5,
+    "agent_settled": 5
+  }
+}
