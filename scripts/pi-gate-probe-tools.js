@@ -9,7 +9,7 @@
  */
 
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
 
 const fetchTool = defineTool({
 	name: "fetch",
@@ -35,7 +35,7 @@ const noteTool = defineTool({
 	},
 });
 
-export default function (pi: ExtensionAPI) {
+export default function (pi) {
 	pi.registerTool(fetchTool);
 	pi.registerTool(noteTool);
 }

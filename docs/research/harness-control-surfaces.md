@@ -612,8 +612,13 @@ rather than infer them from the Harness's output.
 
 ### P8. The Gate announces before `Start` returns, and P7's trap 2 is avoidable
 
-P7 used Pi's bundled example. `internal/harness/dispatch-gate.ts` is the Gate the Daemon ships, and
+P7 used Pi's bundled example. `internal/harness/dispatch-gate.js` is the Gate the Daemon ships, and
 `captures/pi-gate-dispatch/` is five runs of it against Pi 0.84.3. `[capture]`
+
+**Pi loads a plain `.js` extension through `-e`.** Every path in `extensions.md` is `*.ts`, and the
+auto-discovery globs are `.ts` only, so this was not documented. It matters because it keeps the Gate
+in the two languages this repo already has. Auto-discovery was not tested and the globs suggest it
+would not find a `.js` file, but the Daemon passes `-e` and never relies on discovery.
 
 **It announces.** A `session_start` handler calls `ctx.ui.notify`, which is fire-and-forget, and the
 notification lands as frame 2 with the first command's response as frame 3. ADR 0008's requirement
@@ -633,7 +638,7 @@ stderr. An extension that loads and then throws in `session_start` leaves Pi run
 it as a frame of its own that arrives before the probe response:
 
 ```json
-<<< {"type":"extension_error","extensionPath":"…\pi-gate-silent-gate.ts",
+<<< {"type":"extension_error","extensionPath":"…\pi-gate-silent-gate.js",
      "event":"session_start","error":"the Gate failed to announce"}
 ```
 
@@ -659,7 +664,7 @@ on, which is a smaller claim than a protocol signal.
 `ungated_tool_calls` is empty in both. File state settles the pair rather than the wording: the deny
 run was told to write a file and to delete another, and its working directory is unchanged.
 
-`fetch` and `other` needed two no-op fixture tools (`scripts/pi-gate-probe-tools.ts`), because Pi's
+`fetch` and `other` needed two no-op fixture tools (`scripts/pi-gate-probe-tools.js`), because Pi's
 eight built-in tools reach `read`, `edit` and `execute` only. So a `fetch` Gate declared against a
 stock Pi is a Gate that never fires. That is a fact about Pi's tool set rather than about the Gate.
 

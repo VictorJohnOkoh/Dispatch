@@ -8,9 +8,7 @@
  * Daemon must catch by itself.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-export default function (pi: ExtensionAPI) {
+export default function (pi) {
 	pi.on("session_start", async () => {
 		throw new Error("the Gate failed to announce");
 	});

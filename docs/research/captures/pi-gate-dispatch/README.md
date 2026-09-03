@@ -1,25 +1,27 @@
 # The Dispatch Gate for Pi — 2026-09-03
 
 Five runs of `scripts/pi-gate-capture.py` against Pi 0.84.3 in `--mode rpc`, loading
-[`internal/harness/dispatch-gate.ts`](../../../../internal/harness/dispatch-gate.ts), the Gate the
+[`internal/harness/dispatch-gate.js`](../../../../internal/harness/dispatch-gate.js), the Gate the
 Daemon ships. This closes the hole [#56](https://github.com/VictorJohnOkoh/Dispatch/issues/56) named.
 
 The earlier [`../pi-gate/`](../pi-gate/) captures proved the mechanism with Pi's own bundled
 `permission-gate.ts`, which fires on `bash` alone and only for three regexes, and never announces
 itself. These runs replace it with a Gate in ADR 0008's sense.
 
-Provider `lmstudio`, model `qwen/qwen3.5-9b`, one prompt per tool.
+Provider `lmstudio`, model `qwen/qwen3.5-9b`, one prompt per tool. Pi's own extensions are
+TypeScript and these are plain JavaScript, because this repo is Go and vanilla JS. Pi loads either
+through `-e`, which these runs show.
 
 | run | extensions | decisions | outcome |
 | --- | --- | --- | --- |
 | `gate-allow-*` | Gate + probe tools | allow everything | 6 tool calls, all held, all ran |
-| `gate-deny-*` | Gate + probe tools | deny everything | 6 tool calls, all held, none ran |
+| `gate-deny-*` | Gate + probe tools | deny everything | 5 tool calls, all held, none ran |
 | `no-gate-*` | none | — | no announcement, `get_state` still answered |
-| `broken-gate-*` | one unparseable `.ts` | — | Pi exited 1 before the first command |
+| `broken-gate-*` | one unparseable `.js` | — | Pi exited 1 before the first command |
 | `silent-gate-*` | a Gate that throws in `session_start` | — | Pi kept running, no announcement, `extension_error` |
 
-Files hashed at capture time (sha256, first 16): `dispatch-gate.ts` `b87066640dbcb458`,
-`pi-gate-probe-tools.ts` `e1e36e309f104dbb`, `pi-gate-silent-gate.ts` `a2c4176f50973ba8`.
+Files hashed at capture time (sha256, first 16): `dispatch-gate.js` `25aeff568aa06649`,
+`pi-gate-probe-tools.js` `3638c03406f34383`, `pi-gate-silent-gate.js` `5bba7646f750ef1c`.
 
 ## The answer #56 asked for: yes, it announces before `Start` returns
 
@@ -48,18 +50,18 @@ two branches. The second branch, no Gates and every slot forced to `auto`, is no
 command, with the reason on stderr:
 
 ```
-Error: Failed to load extension "…/broken-gate.ts": Failed to load extension: ParseError: Missing semicolon.
+Error: Failed to load extension "…/broken-gate.js": Failed to load extension: ParseError: Missing semicolon.
 Hint: Start without extensions using "pi -ne".
 ```
 
 **The extension loads and then fails.** `silent-gate-*` uses
-[`scripts/pi-gate-silent-gate.ts`](../../../../scripts/pi-gate-silent-gate.ts), which registers its
+[`scripts/pi-gate-silent-gate.js`](../../../../scripts/pi-gate-silent-gate.js), which registers its
 `tool_call` handler and throws in `session_start`. Pi kept running and answered the probe, and the
 announcement never arrived. Pi reports this as a frame of its own, which arrives before the probe
 response:
 
 ```json
-<<< {"type":"extension_error","extensionPath":"…\\pi-gate-silent-gate.ts",
+<<< {"type":"extension_error","extensionPath":"…\\pi-gate-silent-gate.js",
      "event":"session_start","error":"the Gate failed to announce"}
 ```
 
@@ -70,22 +72,23 @@ extension supplied at all — `get_state` answered as frame 2, no announcement.
 
 ## Coverage: all five ToolKinds, and no tool call sailed past
 
-`kinds_gated` in the two gated summaries, which agree:
+`kinds_gated` in the two gated summaries. Every kind is held in both; the counts differ only because
+the allow run's model chose `bash` twice.
 
-| ToolKind | held | tool exercised | tools in the table not exercised |
-| --- | --- | --- | --- |
-| `read` | 1 | `read` | `grep`, `find`, `ls` |
-| `edit` | 1 | `write` | `edit` |
-| `execute` | 2 | `bash` | `powershell` |
-| `fetch` | 1 | `fetch` | — |
-| `other` | 1 | `note` | anything unnamed |
+| ToolKind | allow | deny | tool exercised | tools in the table not exercised |
+| --- | --- | --- | --- | --- |
+| `read` | 1 | 1 | `read` | `grep`, `find`, `ls` |
+| `edit` | 1 | 1 | `write` | `edit` |
+| `execute` | 2 | 1 | `bash` | `powershell` |
+| `fetch` | 1 | 1 | `fetch` | — |
+| `other` | 1 | 1 | `note` | anything unnamed |
 
 `ungated_tool_calls` is empty in both runs. Every `tool_execution_start` was matched by a Gate request
 for the same `toolCallId`. The mapping is a table in one file, so an unexercised name is a table entry
 and not a separate behaviour.
 
 **`fetch` and `other` needed a fixture.** Both come from
-[`scripts/pi-gate-probe-tools.ts`](../../../../scripts/pi-gate-probe-tools.ts), two no-op tools loaded
+[`scripts/pi-gate-probe-tools.js`](../../../../scripts/pi-gate-probe-tools.js), two no-op tools loaded
 only by the capture. Pi has eight built-in tools and none of them is a fetch, and none of them falls
 outside the Gate's table, so against a stock Pi the `fetch` and `other` slots cannot be driven at all.
 A `fetch` Gate declared for a stock Pi is a Gate that never fires. That is a fact about Pi's tool set,

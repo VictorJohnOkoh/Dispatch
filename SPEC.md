@@ -124,7 +124,7 @@ in v1, and the answer is the first one: the Gate announces. `captures/pi-gate-di
 frame 2 with the first command's response as frame 3, so **the Adapter declares Gates and a failed
 load fails the launch**. The second branch, no Gates and every slot forced to `auto`, is not needed.
 
-The Gate is `internal/harness/dispatch-gate.ts`, which `harness/pi.go` loads with `-e`.
+The Gate is `internal/harness/dispatch-gate.js`, which `harness/pi.go` loads with `-e`.
 
 ## Decided here: three Vendors
 
@@ -669,7 +669,7 @@ claim needs an empirical check before anything is designed against it.
 Named, so that nobody discovers them by being surprised.
 
 - ~~**Pi's Gate needs an extension we write, and it needs one capture.**~~ **Closed 2026-09-03.** The
-  extension is `internal/harness/dispatch-gate.ts` and the capture is `captures/pi-gate-dispatch/`.
+  extension is `internal/harness/dispatch-gate.js` and the capture is `captures/pi-gate-dispatch/`.
   It announces before `Start` returns, so the Adapter declares Gates and a failed load fails the
   launch, which is #57's to write. Three signals say a load failed, and all three come before `Start`
   returns: Pi exits 1 on an extension that does not parse, it sends an `extension_error` frame for an

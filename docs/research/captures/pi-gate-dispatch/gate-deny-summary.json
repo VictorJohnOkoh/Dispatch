@@ -1,10 +1,10 @@
 {
   "label": "gate-deny",
-  "captured_at": "2026-09-03T17:37:43.240110+00:00",
+  "captured_at": "2026-09-03T17:58:31.129395+00:00",
   "pi_cmd": "pi",
   "extensions": [
-    "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.ts",
-    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-probe-tools.ts"
+    "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.js",
+    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-probe-tools.js"
   ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",
@@ -24,7 +24,7 @@
     "read"
   ],
   "exit_code": 0,
-  "elapsed_seconds": 34.02,
+  "elapsed_seconds": 24.09,
   "workdir_before": [
     "notes.txt",
     "scratch.txt"
@@ -42,56 +42,49 @@
   },
   "gate_decisions": [
     {
-      "seq": 49,
+      "seq": 51,
       "kind": "read",
       "toolName": "read",
-      "toolCallId": "155108168",
+      "toolCallId": "924235607",
       "decision": "deny"
     },
     {
-      "seq": 155,
+      "seq": 161,
       "kind": "edit",
       "toolName": "write",
-      "toolCallId": "980968032",
+      "toolCallId": "899254411",
       "decision": "deny"
     },
     {
-      "seq": 218,
+      "seq": 302,
       "kind": "execute",
       "toolName": "bash",
-      "toolCallId": "324059975",
+      "toolCallId": "252374583",
       "decision": "deny"
     },
     {
-      "seq": 440,
-      "kind": "execute",
-      "toolName": "bash",
-      "toolCallId": "976305137",
-      "decision": "deny"
-    },
-    {
-      "seq": 577,
+      "seq": 423,
       "kind": "fetch",
       "toolName": "fetch",
-      "toolCallId": "614980246",
+      "toolCallId": "235289637",
       "decision": "deny"
     },
     {
-      "seq": 789,
+      "seq": 557,
       "kind": "other",
       "toolName": "note",
-      "toolCallId": "475866739",
+      "toolCallId": "516451221",
       "decision": "deny"
     }
   ],
   "kinds_gated": {
     "read": 1,
     "edit": 1,
-    "execute": 2,
+    "execute": 1,
     "fetch": 1,
     "other": 1
   },
-  "tool_starts": 6,
+  "tool_starts": 5,
   "ungated_tool_calls": [],
   "extension_errors": [],
   "probe_response": {
@@ -124,24 +117,24 @@
       "isCompacting": false,
       "steeringMode": "one-at-a-time",
       "followUpMode": "one-at-a-time",
-      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-gate-deny\\2026-09-03T17-37-09-556Z_01a06858-8fb4-73a0-adab-f0baa16d3754.jsonl",
-      "sessionId": "01a06858-8fb4-73a0-adab-f0baa16d3754",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-gate-deny\\2026-09-03T17-58-07-385Z_01a0686b-c119-737b-af86-7ee9a242e10f.jsonl",
+      "sessionId": "01a0686b-c119-737b-af86-7ee9a242e10f",
       "autoCompactionEnabled": true,
       "messageCount": 0,
       "pendingMessageCount": 0
     }
   },
   "event_types": {
-    "extension_ui_request": 7,
+    "extension_ui_request": 6,
     "response": 6,
     "agent_start": 5,
-    "turn_start": 11,
-    "message_start": 22,
-    "message_end": 22,
-    "message_update": 808,
-    "tool_execution_start": 6,
-    "tool_execution_end": 6,
-    "turn_end": 11,
+    "turn_start": 10,
+    "message_start": 20,
+    "message_end": 20,
+    "message_update": 533,
+    "tool_execution_start": 5,
+    "tool_execution_end": 5,
+    "turn_end": 10,
     "agent_end": 5,
     "agent_settled": 5
   }

@@ -11,19 +11,18 @@
  * protocol has no structured payload: `notify` has `message`, `select` has
  * `title`. That is also what carries the `toolCallId` the UI request otherwise
  * drops.
+ *
+ * Pi's own extensions are TypeScript and this one is not, because this repo is
+ * Go and plain JavaScript. Pi loads either through `-e`.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-type ToolKind = "read" | "edit" | "execute" | "fetch" | "other";
-
 const PROTOCOL = "dispatch.gate/1";
-const KINDS: ToolKind[] = ["read", "edit", "execute", "fetch", "other"];
+const KINDS = ["read", "edit", "execute", "fetch", "other"];
 
 // Pi's eight built-in tools, plus a fetch Pi does not ship. The name keeps that
 // slot reachable if an extension registers one, instead of folding it into
 // "other".
-const TOOL_KINDS: Record<string, ToolKind> = {
+const TOOL_KINDS = {
 	read: "read",
 	grep: "read",
 	find: "read",
@@ -35,7 +34,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	fetch: "fetch",
 };
 
-export default function (pi: ExtensionAPI) {
+export default function (pi) {
 	pi.on("session_start", async (event, ctx) => {
 		ctx.ui.notify(
 			JSON.stringify({ protocol: PROTOCOL, event: "ready", reason: event.reason, kinds: KINDS }),

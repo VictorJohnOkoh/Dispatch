@@ -1,10 +1,10 @@
 {
   "label": "gate-allow",
-  "captured_at": "2026-09-03T17:37:00.678842+00:00",
+  "captured_at": "2026-09-03T17:57:58.753664+00:00",
   "pi_cmd": "pi",
   "extensions": [
-    "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.ts",
-    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-probe-tools.ts"
+    "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.js",
+    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-probe-tools.js"
   ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",
@@ -19,7 +19,7 @@
   ],
   "deny_kinds": [],
   "exit_code": 0,
-  "elapsed_seconds": 25.09,
+  "elapsed_seconds": 23.79,
   "workdir_before": [
     "notes.txt",
     "scratch.txt"
@@ -38,45 +38,45 @@
   },
   "gate_decisions": [
     {
-      "seq": 56,
+      "seq": 60,
       "kind": "execute",
       "toolName": "bash",
-      "toolCallId": "681146686",
+      "toolCallId": "962416863",
       "decision": "allow"
     },
     {
-      "seq": 178,
+      "seq": 166,
       "kind": "read",
       "toolName": "read",
-      "toolCallId": "603126973",
+      "toolCallId": "510139213",
       "decision": "allow"
     },
     {
-      "seq": 272,
+      "seq": 284,
       "kind": "edit",
       "toolName": "write",
-      "toolCallId": "218554923",
+      "toolCallId": "335288718",
       "decision": "allow"
     },
     {
-      "seq": 377,
+      "seq": 365,
       "kind": "execute",
       "toolName": "bash",
-      "toolCallId": "309593635",
+      "toolCallId": "327277450",
       "decision": "allow"
     },
     {
-      "seq": 463,
+      "seq": 444,
       "kind": "fetch",
       "toolName": "fetch",
-      "toolCallId": "598898626",
+      "toolCallId": "167787997",
       "decision": "allow"
     },
     {
-      "seq": 587,
+      "seq": 564,
       "kind": "other",
       "toolName": "note",
-      "toolCallId": "799771876",
+      "toolCallId": "241358967",
       "decision": "allow"
     }
   ],
@@ -120,8 +120,8 @@
       "isCompacting": false,
       "steeringMode": "one-at-a-time",
       "followUpMode": "one-at-a-time",
-      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-gate-allow\\2026-09-03T17-36-36-058Z_01a06858-0cda-7b7e-b468-445c5e590ad9.jsonl",
-      "sessionId": "01a06858-0cda-7b7e-b468-445c5e590ad9",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-gate-allow\\2026-09-03T17-57-35-306Z_01a0686b-43ca-7dc3-b921-67f4ebcb5e69.jsonl",
+      "sessionId": "01a0686b-43ca-7dc3-b921-67f4ebcb5e69",
       "autoCompactionEnabled": true,
       "messageCount": 0,
       "pendingMessageCount": 0
@@ -134,7 +134,7 @@
     "turn_start": 12,
     "message_start": 24,
     "message_end": 24,
-    "message_update": 500,
+    "message_update": 466,
     "tool_execution_start": 6,
     "tool_execution_update": 4,
     "tool_execution_end": 6,

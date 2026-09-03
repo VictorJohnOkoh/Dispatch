@@ -1,9 +1,9 @@
 {
   "label": "broken-gate",
-  "captured_at": "2026-09-03T17:37:53.231270+00:00",
+  "captured_at": "2026-09-03T17:58:40.221907+00:00",
   "pi_cmd": "pi",
   "extensions": [
-    "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/broken-gate.ts"
+    "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/broken-gate.js"
   ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",

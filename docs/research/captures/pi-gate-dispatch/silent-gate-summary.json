@@ -1,9 +1,9 @@
 {
   "label": "silent-gate",
-  "captured_at": "2026-09-03T17:37:54.015944+00:00",
+  "captured_at": "2026-09-03T17:58:40.996464+00:00",
   "pi_cmd": "pi",
   "extensions": [
-    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-silent-gate.ts"
+    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-silent-gate.js"
   ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",
@@ -11,7 +11,7 @@
   "prompts": [],
   "deny_kinds": [],
   "exit_code": 0,
-  "elapsed_seconds": 0.59,
+  "elapsed_seconds": 0.58,
   "workdir_before": [],
   "workdir_after": [],
   "announcement": {
@@ -34,7 +34,7 @@
   "extension_errors": [
     {
       "type": "extension_error",
-      "extensionPath": "C:\\Users\\Victor\\Documents\\Projects\\Capstone\\scripts\\pi-gate-silent-gate.ts",
+      "extensionPath": "C:\\Users\\Victor\\Documents\\Projects\\Capstone\\scripts\\pi-gate-silent-gate.js",
       "event": "session_start",
       "error": "the Gate failed to announce"
     }
@@ -69,8 +69,8 @@
       "isCompacting": false,
       "steeringMode": "one-at-a-time",
       "followUpMode": "one-at-a-time",
-      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-silent-gate\\2026-09-03T17-37-53-725Z_01a06859-3c3d-776c-9968-c4e437473114.jsonl",
-      "sessionId": "01a06859-3c3d-776c-9968-c4e437473114",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-silent-gate\\2026-09-03T17-58-40-694Z_01a0686c-4336-7505-85a1-6b723f7e4bfc.jsonl",
+      "sessionId": "01a0686c-4336-7505-85a1-6b723f7e4bfc",
       "autoCompactionEnabled": true,
       "messageCount": 0,
       "pendingMessageCount": 0
