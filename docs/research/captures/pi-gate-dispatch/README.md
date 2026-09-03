@@ -1,6 +1,6 @@
 # The Dispatch Gate for Pi — 2026-09-03
 
-Four runs of `scripts/pi-gate-capture.py` against Pi 0.84.3 in `--mode rpc`, loading
+Five runs of `scripts/pi-gate-capture.py` against Pi 0.84.3 in `--mode rpc`, loading
 [`internal/harness/dispatch-gate.ts`](../../../../internal/harness/dispatch-gate.ts), the Gate the
 Daemon ships. This closes the hole [#56](https://github.com/VictorJohnOkoh/Dispatch/issues/56) named.
 
@@ -12,13 +12,14 @@ Provider `lmstudio`, model `qwen/qwen3.5-9b`, one prompt per tool.
 
 | run | extensions | decisions | outcome |
 | --- | --- | --- | --- |
-| `gate-allow-*` | Gate + probe tools | allow everything | 6 tool calls, all held, all ran. `hello.txt` written. |
-| `gate-deny-*` | Gate + probe tools | deny everything | 5 tool calls, all held, none ran. `hello.txt` absent, `scratch.txt` survived. |
-| `no-gate-*` | none | — | no announcement, `get_state` still answered. |
-| `broken-gate-*` | one unparseable `.ts` | — | Pi exited 1 before the first command. |
+| `gate-allow-*` | Gate + probe tools | allow everything | 6 tool calls, all held, all ran |
+| `gate-deny-*` | Gate + probe tools | deny everything | 6 tool calls, all held, none ran |
+| `no-gate-*` | none | — | no announcement, `get_state` still answered |
+| `broken-gate-*` | one unparseable `.ts` | — | Pi exited 1 before the first command |
+| `silent-gate-*` | a Gate that throws in `session_start` | — | Pi kept running, no announcement, `extension_error` |
 
-Files hashed at capture time (sha256, first 16):
-`dispatch-gate.ts` `3d7b487d11137da3`, `pi-gate-probe-tools.ts` `e1e36e309f104dbb`.
+Files hashed at capture time (sha256, first 16): `dispatch-gate.ts` `b87066640dbcb458`,
+`pi-gate-probe-tools.ts` `e1e36e309f104dbb`, `pi-gate-silent-gate.ts` `a2c4176f50973ba8`.
 
 ## The answer #56 asked for: yes, it announces before `Start` returns
 
@@ -36,42 +37,71 @@ very first frame on stdin and compares sequence numbers. In both gated runs the 
 ```
 
 The announcement is a `session_start` handler calling `ctx.ui.notify`, which is fire-and-forget, so it
-costs no round-trip and cannot deadlock the launch.
+costs no round-trip and cannot make the launch wait.
 
 **So the Adapter declares Gates, and a failed load fails the launch.** That is the first of ADR 0008's
-two branches, and the ugly branch is not needed.
+two branches. The second branch, no Gates and every slot forced to `auto`, is not needed.
 
-**A failed load already fails the launch on its own.** `broken-gate-*` gave Pi an unparseable
-extension and Pi exited 1 in 0.62 s, before answering anything, with the reason on stderr:
+## A failed load has two shapes, and both were captured
+
+**The extension does not parse.** `broken-gate-*`. Pi exited 1 in 0.52 s, before answering any
+command, with the reason on stderr:
 
 ```
 Error: Failed to load extension "…/broken-gate.ts": Failed to load extension: ParseError: Missing semicolon.
 Hint: Start without extensions using "pi -ne".
 ```
 
-The Daemon therefore gets two independent signals, and should use both: a Pi that exits during launch,
-and a Pi that starts but answers the probe with no `ready` frame ahead of it. `no-gate-*` is the second
-shape — `get_state` answered as frame 2 and no announcement at all.
+**The extension loads and then fails.** `silent-gate-*` uses
+[`scripts/pi-gate-silent-gate.ts`](../../../../scripts/pi-gate-silent-gate.ts), which registers its
+`tool_call` handler and throws in `session_start`. Pi kept running and answered the probe, and the
+announcement never arrived. Pi reports this as a frame of its own, which arrives before the probe
+response:
 
-## Coverage: all five ToolKinds, and nothing sails past
+```json
+<<< {"type":"extension_error","extensionPath":"…\\pi-gate-silent-gate.ts",
+     "event":"session_start","error":"the Gate failed to announce"}
+```
 
-`kinds_gated` in the two summaries:
+So the Daemon has three signals and all three are available before `Start` returns: a Pi that exits
+during launch, an `extension_error` frame, and a probe answered with no `ready` frame ahead of it. The
+third is the general one and the other two are more specific. `no-gate-*` is the third shape with no
+extension supplied at all — `get_state` answered as frame 2, no announcement.
 
-| ToolKind | allow run | deny run | tool |
+## Coverage: all five ToolKinds, and no tool call sailed past
+
+`kinds_gated` in the two gated summaries, which agree:
+
+| ToolKind | held | tool exercised | tools in the table not exercised |
 | --- | --- | --- | --- |
-| `read` | 1 | 1 | `read` |
-| `edit` | 1 | 1 | `write` |
-| `execute` | 2 | 1 | `bash` |
-| `fetch` | 1 | 1 | `fetch` |
-| `other` | 1 | 1 | `note` |
+| `read` | 1 | `read` | `grep`, `find`, `ls` |
+| `edit` | 1 | `write` | `edit` |
+| `execute` | 2 | `bash` | `powershell` |
+| `fetch` | 1 | `fetch` | — |
+| `other` | 1 | `note` | anything unnamed |
 
-`ungated_tool_calls` is empty in both. Every `tool_execution_start` was matched by a Gate request for
-the same `toolCallId`.
+`ungated_tool_calls` is empty in both runs. Every `tool_execution_start` was matched by a Gate request
+for the same `toolCallId`. The mapping is a table in one file, so an unexercised name is a table entry
+and not a separate behaviour.
 
-`fetch` and `note` come from [`scripts/pi-gate-probe-tools.ts`](../../../../scripts/pi-gate-probe-tools.ts),
-two no-op tools loaded only by the capture. Pi has eight built-in tools and none of them is a fetch,
-and none of them falls outside the Gate's table, so without those two the `fetch` and `other` slots
-could not be driven at all. They are a fixture, not something the Daemon ships.
+**`fetch` and `other` needed a fixture.** Both come from
+[`scripts/pi-gate-probe-tools.ts`](../../../../scripts/pi-gate-probe-tools.ts), two no-op tools loaded
+only by the capture. Pi has eight built-in tools and none of them is a fetch, and none of them falls
+outside the Gate's table, so against a stock Pi the `fetch` and `other` slots cannot be driven at all.
+A `fetch` Gate declared for a stock Pi is a Gate that never fires. That is a fact about Pi's tool set,
+not about the Gate.
+
+## File state settles allow against deny
+
+The summaries record the working directory before and after, because the wording of a tool result is
+weaker evidence than the files.
+
+| run | `workdir_before` | `workdir_after` |
+| --- | --- | --- |
+| `gate-allow` | `notes.txt`, `scratch.txt` | `hello.txt`, `notes.txt`, `scratch.txt` |
+| `gate-deny` | `notes.txt`, `scratch.txt` | `notes.txt`, `scratch.txt` |
+
+The deny run was told to write `hello.txt` and to `rm -rf scratch.txt`. Neither happened.
 
 ## The request frame, and the `toolCallId` the old capture lost
 
@@ -84,9 +114,9 @@ could not be driven at all. They are a fixture, not something the Daemon ships.
 ```
 
 Trap 2 in [`../pi-gate/README.md`](../pi-gate/README.md) was that Pi's UI request carries no
-`toolCallId`, so an approval could only be correlated by ordering. Putting JSON in `title` fixes it:
-`title` is the one field the extension controls, and the Daemon reads it as a payload rather than as
-prose. The same trick carries the announcement in `notify`'s `message`.
+`toolCallId`, so an approval could only be correlated by ordering. Putting JSON in `title` removes the
+problem: `title` is the one field the extension controls, and the Daemon reads it as a payload rather
+than as prose. The announcement uses `notify`'s `message` the same way.
 
 Traps 1 and 3 stand unchanged and are the Adapter's problem at
 [#57](https://github.com/VictorJohnOkoh/Dispatch/issues/57): `tool_execution_start` still fires before
@@ -107,8 +137,7 @@ still reaches the model as tool output, which is the model learning it was refus
   tool changes which tools appear, not whether they were held: the allow run answered "use the ls
   tool" with `bash`, and the Gate held that too.
 - The Gate blocks on a cancelled or timed-out dialog as well as on `deny`. Failing open would not be a
-  Gate. This is captured only for `deny`; the timeout path is untested.
-- `read`, `grep`, `find` and `ls` all map to `read`, and only `read` was exercised. The mapping is a
-  table in one file, not a per-tool behaviour.
+  Gate. Only `deny` is captured; the timeout path is untested, and Pi's dialog `timeout` field is
+  unused here.
 - The Gate is loaded with `-e`. Pi's project trust guards which extensions load, and it is not a tool
   gate — see `security.md`. Nothing here depends on it.

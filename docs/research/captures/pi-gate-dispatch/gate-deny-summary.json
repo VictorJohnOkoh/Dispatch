@@ -1,6 +1,6 @@
 {
   "label": "gate-deny",
-  "captured_at": "2026-09-03T17:30:35.822951+00:00",
+  "captured_at": "2026-09-03T17:37:43.240110+00:00",
   "pi_cmd": "pi",
   "extensions": [
     "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.ts",
@@ -8,7 +8,7 @@
   ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",
-  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/workdir-deny",
+  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/wd-gate-deny",
   "prompts": [
     "Use the read tool to read notes.txt.",
     "Use the write tool to create hello.txt containing the single word hello.",
@@ -24,7 +24,15 @@
     "read"
   ],
   "exit_code": 0,
-  "elapsed_seconds": 35.89,
+  "elapsed_seconds": 34.02,
+  "workdir_before": [
+    "notes.txt",
+    "scratch.txt"
+  ],
+  "workdir_after": [
+    "notes.txt",
+    "scratch.txt"
+  ],
   "announcement": {
     "question": "does the Gate announce itself before Start returns?",
     "start_is": "the response to the first command (start-probe, get_state)",
@@ -34,49 +42,56 @@
   },
   "gate_decisions": [
     {
-      "seq": 52,
+      "seq": 49,
       "kind": "read",
       "toolName": "read",
-      "toolCallId": "650693561",
+      "toolCallId": "155108168",
       "decision": "deny"
     },
     {
-      "seq": 197,
+      "seq": 155,
       "kind": "edit",
       "toolName": "write",
-      "toolCallId": "264582167",
+      "toolCallId": "980968032",
       "decision": "deny"
     },
     {
-      "seq": 360,
+      "seq": 218,
       "kind": "execute",
       "toolName": "bash",
-      "toolCallId": "384293142",
+      "toolCallId": "324059975",
       "decision": "deny"
     },
     {
-      "seq": 576,
+      "seq": 440,
+      "kind": "execute",
+      "toolName": "bash",
+      "toolCallId": "976305137",
+      "decision": "deny"
+    },
+    {
+      "seq": 577,
       "kind": "fetch",
       "toolName": "fetch",
-      "toolCallId": "908564272",
+      "toolCallId": "614980246",
       "decision": "deny"
     },
     {
-      "seq": 835,
+      "seq": 789,
       "kind": "other",
       "toolName": "note",
-      "toolCallId": "966376032",
+      "toolCallId": "475866739",
       "decision": "deny"
     }
   ],
   "kinds_gated": {
     "read": 1,
     "edit": 1,
-    "execute": 1,
+    "execute": 2,
     "fetch": 1,
     "other": 1
   },
-  "tool_starts": 5,
+  "tool_starts": 6,
   "ungated_tool_calls": [],
   "extension_errors": [],
   "probe_response": {
@@ -109,24 +124,24 @@
       "isCompacting": false,
       "steeringMode": "one-at-a-time",
       "followUpMode": "one-at-a-time",
-      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\sessions-deny\\2026-09-03T17-30-00-286Z_01a06852-02de-7a07-9330-c5533d28b9f9.jsonl",
-      "sessionId": "01a06852-02de-7a07-9330-c5533d28b9f9",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-gate-deny\\2026-09-03T17-37-09-556Z_01a06858-8fb4-73a0-adab-f0baa16d3754.jsonl",
+      "sessionId": "01a06858-8fb4-73a0-adab-f0baa16d3754",
       "autoCompactionEnabled": true,
       "messageCount": 0,
       "pendingMessageCount": 0
     }
   },
   "event_types": {
-    "extension_ui_request": 6,
+    "extension_ui_request": 7,
     "response": 6,
     "agent_start": 5,
-    "turn_start": 10,
-    "message_start": 20,
-    "message_end": 20,
-    "message_update": 884,
-    "tool_execution_start": 5,
-    "tool_execution_end": 5,
-    "turn_end": 10,
+    "turn_start": 11,
+    "message_start": 22,
+    "message_end": 22,
+    "message_update": 808,
+    "tool_execution_start": 6,
+    "tool_execution_end": 6,
+    "turn_end": 11,
     "agent_end": 5,
     "agent_settled": 5
   }

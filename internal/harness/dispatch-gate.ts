@@ -15,13 +15,15 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const PROTOCOL = "dispatch.gate/1";
-const KINDS = ["read", "edit", "execute", "fetch", "other"];
+type ToolKind = "read" | "edit" | "execute" | "fetch" | "other";
 
-// Pi's eight built-in tools, plus the names a fetch tool would plausibly take.
-// Pi ships no fetch tool, and listing the names keeps that slot reachable if an
-// extension registers one instead of folding it into "other".
-const TOOL_KINDS: Record<string, string> = {
+const PROTOCOL = "dispatch.gate/1";
+const KINDS: ToolKind[] = ["read", "edit", "execute", "fetch", "other"];
+
+// Pi's eight built-in tools, plus a fetch Pi does not ship. The name keeps that
+// slot reachable if an extension registers one, instead of folding it into
+// "other".
+const TOOL_KINDS: Record<string, ToolKind> = {
 	read: "read",
 	grep: "read",
 	find: "read",
@@ -31,8 +33,6 @@ const TOOL_KINDS: Record<string, string> = {
 	bash: "execute",
 	powershell: "execute",
 	fetch: "fetch",
-	webfetch: "fetch",
-	web_fetch: "fetch",
 };
 
 export default function (pi: ExtensionAPI) {

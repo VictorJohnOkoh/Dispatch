@@ -613,7 +613,7 @@ rather than infer them from the Harness's output.
 ### P8. The Gate announces before `Start` returns, and P7's trap 2 is avoidable
 
 P7 used Pi's bundled example. `internal/harness/dispatch-gate.ts` is the Gate the Daemon ships, and
-`captures/pi-gate-dispatch/` is four runs of it against Pi 0.84.3. `[capture]`
+`captures/pi-gate-dispatch/` is five runs of it against Pi 0.84.3. `[capture]`
 
 **It announces.** A `session_start` handler calls `ctx.ui.notify`, which is fire-and-forget, and the
 notification lands as frame 2 with the first command's response as frame 3. ADR 0008's requirement
@@ -627,9 +627,18 @@ rather than forcing every slot to `auto`.
 <<< {"id":"start-probe","type":"response","command":"get_state","success":true,"data":{…}}
 ```
 
-**A failed load is loud twice.** An unparseable extension makes Pi exit 1 in under a second, before
-answering any command, with the parse error on stderr. A Pi that starts but answers the probe with no
-announcement ahead of it is the other shape. Either is enough to fail the launch.
+**A failed load has three signals, and all three come before `Start` returns.** An extension that does
+not parse makes Pi exit 1 in under a second, before it answers any command, with the parse error on
+stderr. An extension that loads and then throws in `session_start` leaves Pi running, and Pi reports
+it as a frame of its own that arrives before the probe response:
+
+```json
+<<< {"type":"extension_error","extensionPath":"…\pi-gate-silent-gate.ts",
+     "event":"session_start","error":"the Gate failed to announce"}
+```
+
+A probe answered with no announcement ahead of it is the third and most general shape. Any of the
+three is enough to fail the launch.
 
 **Trap 2 is avoidable.** P7 recorded that the UI request carries no `toolCallId`, leaving correlation
 to ordering. `title` is the one field the extension controls, so the Gate puts JSON there and the
@@ -647,8 +656,12 @@ arrives as `isError: true` with free text. The text is now chosen by this repo, 
 on, which is a smaller claim than a protocol signal.
 
 **Coverage.** All five ToolKinds were held in both the allow and the deny run, and
-`ungated_tool_calls` is empty in both. `fetch` and `other` needed two no-op fixture tools
-(`scripts/pi-gate-probe-tools.ts`), because Pi's eight built-in tools reach only three of the five.
+`ungated_tool_calls` is empty in both. File state settles the pair rather than the wording: the deny
+run was told to write a file and to delete another, and its working directory is unchanged.
+
+`fetch` and `other` needed two no-op fixture tools (`scripts/pi-gate-probe-tools.ts`), because Pi's
+eight built-in tools reach `read`, `edit` and `execute` only. So a `fetch` Gate declared against a
+stock Pi is a Gate that never fires. That is a fact about Pi's tool set rather than about the Gate.
 
 ---
 

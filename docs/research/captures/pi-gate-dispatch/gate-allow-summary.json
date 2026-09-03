@@ -1,6 +1,6 @@
 {
   "label": "gate-allow",
-  "captured_at": "2026-09-03T17:29:50.515938+00:00",
+  "captured_at": "2026-09-03T17:37:00.678842+00:00",
   "pi_cmd": "pi",
   "extensions": [
     "C:/Users/Victor/Documents/Projects/Capstone/internal/harness/dispatch-gate.ts",
@@ -8,7 +8,7 @@
   ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",
-  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/workdir",
+  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/wd-gate-allow",
   "prompts": [
     "Use the ls tool to list the files in the current directory.",
     "Use the read tool to read notes.txt.",
@@ -19,7 +19,16 @@
   ],
   "deny_kinds": [],
   "exit_code": 0,
-  "elapsed_seconds": 26.91,
+  "elapsed_seconds": 25.09,
+  "workdir_before": [
+    "notes.txt",
+    "scratch.txt"
+  ],
+  "workdir_after": [
+    "hello.txt",
+    "notes.txt",
+    "scratch.txt"
+  ],
   "announcement": {
     "question": "does the Gate announce itself before Start returns?",
     "start_is": "the response to the first command (start-probe, get_state)",
@@ -29,45 +38,45 @@
   },
   "gate_decisions": [
     {
-      "seq": 69,
+      "seq": 56,
       "kind": "execute",
       "toolName": "bash",
-      "toolCallId": "796707030",
+      "toolCallId": "681146686",
       "decision": "allow"
     },
     {
-      "seq": 212,
+      "seq": 178,
       "kind": "read",
       "toolName": "read",
-      "toolCallId": "619727183",
+      "toolCallId": "603126973",
       "decision": "allow"
     },
     {
-      "seq": 319,
+      "seq": 272,
       "kind": "edit",
       "toolName": "write",
-      "toolCallId": "443926601",
+      "toolCallId": "218554923",
       "decision": "allow"
     },
     {
-      "seq": 405,
+      "seq": 377,
       "kind": "execute",
       "toolName": "bash",
-      "toolCallId": "373877289",
+      "toolCallId": "309593635",
       "decision": "allow"
     },
     {
-      "seq": 507,
+      "seq": 463,
       "kind": "fetch",
       "toolName": "fetch",
-      "toolCallId": "414916308",
+      "toolCallId": "598898626",
       "decision": "allow"
     },
     {
-      "seq": 639,
+      "seq": 587,
       "kind": "other",
       "toolName": "note",
-      "toolCallId": "179850693",
+      "toolCallId": "799771876",
       "decision": "allow"
     }
   ],
@@ -111,8 +120,8 @@
       "isCompacting": false,
       "steeringMode": "one-at-a-time",
       "followUpMode": "one-at-a-time",
-      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\sessions\\2026-09-03T17-29-24-433Z_01a06851-76d1-7639-90ab-6ed2b9d05bfa.jsonl",
-      "sessionId": "01a06851-76d1-7639-90ab-6ed2b9d05bfa",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-gate-allow\\2026-09-03T17-36-36-058Z_01a06858-0cda-7b7e-b468-445c5e590ad9.jsonl",
+      "sessionId": "01a06858-0cda-7b7e-b468-445c5e590ad9",
       "autoCompactionEnabled": true,
       "messageCount": 0,
       "pendingMessageCount": 0
@@ -125,7 +134,7 @@
     "turn_start": 12,
     "message_start": 24,
     "message_end": 24,
-    "message_update": 546,
+    "message_update": 500,
     "tool_execution_start": 6,
     "tool_execution_update": 4,
     "tool_execution_end": 6,

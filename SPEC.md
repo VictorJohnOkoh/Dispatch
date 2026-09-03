@@ -454,8 +454,9 @@ seconds while every other Host keeps working.
 
 **M8. The second Harness and the other two Vendors.** `harness/pi.go`, `vendors/lmstudio.go` and
 `vendors/llamaswap.go`, all against fixtures already in this repo, plus loading the Gate that
-`captures/pi-gate-dispatch/` settled. They are last on purpose: they are the proof the two abstractions are abstractions, and
-that proof is only worth anything once there is something for them to plug into.
+`captures/pi-gate-dispatch/` settled. They are last on purpose: they are the proof the two
+abstractions are abstractions, and that proof is only worth anything once there is something for them
+to plug into.
 *Watch:* the same Session and the same transcript rendering, with one Harness swapped in the wizard.
 And one Model list showing `Yes` from LM Studio, `Unknown` from Ollama, and `Unknown` from llama-swap
 until the Model is resident.
@@ -668,12 +669,15 @@ claim needs an empirical check before anything is designed against it.
 Named, so that nobody discovers them by being surprised.
 
 - ~~**Pi's Gate needs an extension we write, and it needs one capture.**~~ **Closed 2026-09-03.** The
-  extension is `internal/harness/dispatch-gate.ts` and the capture is
-  `captures/pi-gate-dispatch/`. It gates all five ToolKinds, no tool call sailed past it in either
-  run, and it announces before `Start` returns. A load failure is loud twice over: an unparseable
-  extension makes Pi exit 1 before it answers anything, and a Pi that starts with no announcement
-  ahead of the first command response is the other shape. So the Adapter declares Gates and a failed
-  load fails the launch, which is #57's to write.
+  extension is `internal/harness/dispatch-gate.ts` and the capture is `captures/pi-gate-dispatch/`.
+  It announces before `Start` returns, so the Adapter declares Gates and a failed load fails the
+  launch, which is #57's to write. Three signals say a load failed, and all three come before `Start`
+  returns: Pi exits 1 on an extension that does not parse, it sends an `extension_error` frame for an
+  extension that loads and then throws, and a probe answered with no announcement ahead of it is the
+  general shape. All five ToolKinds were held and no tool call sailed past, but two of the five needed
+  a fixture tool: Pi's eight built-in tools reach `read`, `edit` and `execute` only, so **a `fetch`
+  Gate declared against a stock Pi is a Gate that never fires**, which is what #57 must decide to
+  declare or not.
 - **The Vendor fixtures do not exist.** Finding R8. Tier-two tests for `vendors` need recorded bodies
   for a caller-supplied `http.RoundTripper`, and the capture that should have produced them wrote
   nothing while reporting `HTTP 200`. It is no longer the problem it was: M3 has Ollama running

@@ -1,22 +1,24 @@
 {
-  "label": "no-gate",
-  "captured_at": "2026-09-03T17:37:52.523662+00:00",
+  "label": "silent-gate",
+  "captured_at": "2026-09-03T17:37:54.015944+00:00",
   "pi_cmd": "pi",
-  "extensions": [],
+  "extensions": [
+    "C:/Users/Victor/Documents/Projects/Capstone/scripts/pi-gate-silent-gate.ts"
+  ],
   "provider": "lmstudio",
   "model": "qwen/qwen3.5-9b",
-  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/wd-no-gate",
+  "cwd": "C:/Users/Victor/AppData/Local/Temp/claude/C--Users-Victor-Documents-Projects-Capstone/8a6fa8dc-9101-4c18-9e10-984707c09f2c/scratchpad/pigate/wd-silent-gate",
   "prompts": [],
   "deny_kinds": [],
   "exit_code": 0,
-  "elapsed_seconds": 0.49,
+  "elapsed_seconds": 0.59,
   "workdir_before": [],
   "workdir_after": [],
   "announcement": {
     "question": "does the Gate announce itself before Start returns?",
     "start_is": "the response to the first command (start-probe, get_state)",
     "ready_seq": null,
-    "probe_response_seq": 2,
+    "probe_response_seq": 3,
     "answer": "no announcement arrived at all"
   },
   "gate_decisions": [],
@@ -29,7 +31,14 @@
   },
   "tool_starts": 0,
   "ungated_tool_calls": [],
-  "extension_errors": [],
+  "extension_errors": [
+    {
+      "type": "extension_error",
+      "extensionPath": "C:\\Users\\Victor\\Documents\\Projects\\Capstone\\scripts\\pi-gate-silent-gate.ts",
+      "event": "session_start",
+      "error": "the Gate failed to announce"
+    }
+  ],
   "probe_response": {
     "id": "start-probe",
     "type": "response",
@@ -60,14 +69,15 @@
       "isCompacting": false,
       "steeringMode": "one-at-a-time",
       "followUpMode": "one-at-a-time",
-      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-no-gate\\2026-09-03T17-37-52-378Z_01a06859-36fa-72f4-af71-70a45f8ab6ea.jsonl",
-      "sessionId": "01a06859-36fa-72f4-af71-70a45f8ab6ea",
+      "sessionFile": "C:\\Users\\Victor\\AppData\\Local\\Temp\\claude\\C--Users-Victor-Documents-Projects-Capstone\\8a6fa8dc-9101-4c18-9e10-984707c09f2c\\scratchpad\\pigate\\ss-silent-gate\\2026-09-03T17-37-53-725Z_01a06859-3c3d-776c-9968-c4e437473114.jsonl",
+      "sessionId": "01a06859-3c3d-776c-9968-c4e437473114",
       "autoCompactionEnabled": true,
       "messageCount": 0,
       "pendingMessageCount": 0
     }
   },
   "event_types": {
+    "extension_error": 1,
     "response": 1
   }
 }

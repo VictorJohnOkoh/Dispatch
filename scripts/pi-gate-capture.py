@@ -47,7 +47,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _payload(text: Any) -> dict[str, Any] | None:
+def _listing(path: str) -> list[str]:
+    """The working directory, so an allow and a deny are settled by file state and
+    not by the wording of a tool result."""
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        return []
+
+
+def _gate_frame(text: Any) -> dict[str, Any] | None:
     """Parse a Gate frame out of a Pi display string, or None if it is not one."""
     if not isinstance(text, str):
         return None
@@ -88,6 +97,7 @@ class PiGateCapture:
         self.probe_response: dict[str, Any] | None = None
 
         self._gated_ids: set[str] = set()
+        self.workdir_before = _listing(args.cwd)
         self.probe_answered = threading.Event()
         self.settled = threading.Event()
         self._dead = threading.Event()
@@ -131,7 +141,7 @@ class PiGateCapture:
         rid = msg.get("id")
 
         if method == "notify":
-            frame = _payload(msg.get("message"))
+            frame = _gate_frame(msg.get("message"))
             if frame and frame.get("event") == "ready" and self.ready_seq is None:
                 self.ready_seq = seq
                 print(f"  . gate ready (seq {seq}, kinds {frame.get('kinds')})")
@@ -141,7 +151,7 @@ class PiGateCapture:
             print(f"  . extension_ui_request/{method} - not a Gate frame, ignoring")
             return
 
-        frame = _payload(msg.get("title"))
+        frame = _gate_frame(msg.get("title"))
         if frame is None:
             print("  ! select with no Gate payload - cancelling")
             self.send({"type": "extension_ui_response", "id": rid, "cancelled": True})
@@ -206,7 +216,9 @@ class PiGateCapture:
 
     def _spawn(self) -> int:
         # On Windows npm installs Pi as pi.cmd, and CreateProcess cannot execute a
-        # batch file directly - it must go through cmd.exe.
+        # batch file directly - it must go through cmd.exe. Resolving with which()
+        # also keeps the arguments as a list, so paths with spaces survive without
+        # shell=True and its quoting hazards.
         argv0 = self.args.pi_cmd.split()
         resolved = shutil.which(argv0[0])
         if resolved is None:
@@ -331,6 +343,8 @@ class PiGateCapture:
             "deny_kinds": sorted(self.args.deny_kind),
             "exit_code": rc,
             "elapsed_seconds": round(time.monotonic() - self._t0, 2),
+            "workdir_before": self.workdir_before,
+            "workdir_after": _listing(self.args.cwd),
             "announcement": self._verdict(),
             "gate_decisions": self.decisions,
             "kinds_gated": {k: kinds_seen.get(k, 0) for k in KINDS},
@@ -349,6 +363,7 @@ class PiGateCapture:
         print(f"  summary: {self.summary_path}")
         print(f"  verdict: {self._verdict()['answer']}")
         print(f"  gated:   {len(self.decisions)}   ungated: {len(self._ungated())}")
+        print(f"  workdir: {self.workdir_before} -> {_listing(self.args.cwd)}")
 
 
 def main() -> int:
