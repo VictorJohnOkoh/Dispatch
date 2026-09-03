@@ -676,8 +676,9 @@ Named, so that nobody discovers them by being surprised.
   extension that loads and then throws, and a probe answered with no announcement ahead of it is the
   general shape. All five ToolKinds were held and no tool call sailed past, but two of the five needed
   a fixture tool: Pi's eight built-in tools reach `read`, `edit` and `execute` only, so **a `fetch`
-  Gate declared against a stock Pi is a Gate that never fires**, which is what #57 must decide to
-  declare or not.
+  Gate declared against a stock Pi is a Gate that never fires**. #57 declared it, along with `other`,
+  because the Gate's table covers every kind and an extension may register a tool in either: a slot
+  that is never asked about is a tool that does not exist, not a gate that failed to fire.
 - **The Vendor fixtures do not exist.** Finding R8. Tier-two tests for `vendors` need recorded bodies
   for a caller-supplied `http.RoundTripper`, and the capture that should have produced them wrote
   nothing while reporting `HTTP 200`. It is no longer the problem it was: M3 has Ollama running

@@ -3,14 +3,11 @@ package harness
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 )
 
 // The scripted transport ADR 0006 asked for. A plain byte replay is not enough,
@@ -33,17 +30,11 @@ type recorded struct {
 }
 
 type script struct {
-	t       *testing.T
-	frames  []recorded
-	pipes   Pipes
-	toAgent *io.PipeWriter
-	agent   *bufio.Scanner
+	*transport
+	frames []recorded
 
-	done chan struct{}
-
-	mu        sync.Mutex
-	sent      map[uint64]uint64 // a recorded request id, against the one that was sent
-	abandoned bool              // the test is over, so an unplayed frame is not a failure
+	mu   sync.Mutex
+	sent map[uint64]uint64 // a recorded request id, against the one that was sent
 }
 
 // newScript reads one capture and hands back the two pipes a Spawner would. The
@@ -67,42 +58,21 @@ func newScript(t *testing.T, capture string) *script {
 		frames = append(frames, r)
 	}
 
-	fromAdapter, adapterWrites := io.Pipe()
-	adapterReads, scriptWrites := io.Pipe()
 	s := &script{
-		t:       t,
-		frames:  frames,
-		pipes:   Pipes{In: adapterWrites, Out: adapterReads},
-		toAgent: scriptWrites,
-		agent:   bufio.NewScanner(fromAdapter),
-		done:    make(chan struct{}),
-		sent:    map[uint64]uint64{},
+		transport: newTransport(t),
+		frames:    frames,
+		sent:      map[uint64]uint64{},
 	}
-	s.agent.Buffer(make([]byte, 0, 64<<10), 8<<20)
-	go s.play()
-	// The play goroutine is stopped before the test ends, because a script that
-	// reported a mismatch afterwards would panic rather than fail.
-	t.Cleanup(func() {
-		s.abandon()
-		scriptWrites.Close()
-		adapterWrites.Close()
-		<-s.done
-	})
+	s.play(s.walk)
 	return s
 }
 
-// spawn is the Spawner a test hands the Adapter. No process starts.
-func (s *script) spawn() Spawner {
-	return func(context.Context, Launch) (Pipes, error) { return s.pipes, nil }
-}
-
-// play walks the capture. An in frame is written to the Adapter; an out frame is
-// the write the Adapter is expected to make next.
-func (s *script) play() {
-	defer close(s.done)
+// walk goes through the capture. An in frame is written to the Adapter; an out
+// frame is the write the Adapter is expected to make next.
+func (s *script) walk() {
 	for _, r := range s.frames {
 		if r.Dir == "in" {
-			if _, err := s.toAgent.Write(append(s.rewrite(r.Frame), '\n')); err != nil {
+			if !s.feed(s.rewrite(r.Frame)) {
 				return
 			}
 			continue
@@ -140,31 +110,17 @@ func (s *script) rewrite(recorded json.RawMessage) []byte {
 	return out
 }
 
-// abandon stops the script from judging what it has left. A test that ends the
-// Session early, and every test at its cleanup, leaves frames unplayed on purpose.
-func (s *script) abandon() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.abandoned = true
-}
-
-func (s *script) quiet() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.abandoned
-}
-
 // expect reads the Adapter's next write and checks it is the one the capture
 // recorded. A request is matched on its method and an answer on the id it answers.
 func (s *script) expect(want json.RawMessage) bool {
-	if !s.agent.Scan() {
+	got, ok := s.next()
+	if !ok {
 		if s.quiet() {
 			return false
 		}
 		s.t.Errorf("the capture expected %s and the Adapter wrote nothing more", methodOf(want))
 		return false
 	}
-	got := s.agent.Bytes()
 
 	wantMethod, wantID := methodOf(want), idOf(want)
 	gotMethod, gotID := methodOf(got), idOf(got)
@@ -185,16 +141,6 @@ func (s *script) expect(want json.RawMessage) bool {
 		s.mu.Unlock()
 	}
 	return true
-}
-
-// wait blocks until the capture is played out.
-func (s *script) wait(t *testing.T) {
-	t.Helper()
-	select {
-	case <-s.done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the capture never played out")
-	}
 }
 
 // prompt is the Prompt text the capture's own run was given, so a replay drives

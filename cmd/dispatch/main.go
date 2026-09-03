@@ -102,7 +102,8 @@ func startDaemon(ctx context.Context, path string, log *slog.Logger) error {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	harnesses, err := newHarnesses(cfg.Harnesses, log)
+	state := filepath.Dir(cfg.LogPath)
+	harnesses, err := newHarnesses(cfg.Harnesses, state, log)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
@@ -115,14 +116,14 @@ func startDaemon(ctx context.Context, path string, log *slog.Logger) error {
 
 	log.Info("dispatch starting", "role", "daemon", "vendors", len(adapters),
 		"harnesses", len(harnesses), "workspaceRoot", root, "logPath", cfg.LogPath)
-	return daemon.New(log, events, filepath.Dir(cfg.LogPath), root, adapters, harnesses, cfg.PolicyDefault).Serve(ctx, cfg.Listen)
+	return daemon.New(log, events, state, root, adapters, harnesses, cfg.PolicyDefault).Serve(ctx, cfg.Listen)
 }
 
 // newHarnesses builds one Adapter per named Harness this build knows. A Harness
 // with no Adapter yet is a milestone that has not landed, so it is a warning and
 // not a startup error: the Daemon still serves the ones it does have. A file that
 // names none of them is the error, because that Daemon can start no Session.
-func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.Harness, error) {
+func newHarnesses(profiles []config.HarnessProfile, state string, log *slog.Logger) ([]daemon.Harness, error) {
 	var out []daemon.Harness
 	for _, profile := range profiles {
 		switch profile.Name {
@@ -134,6 +135,15 @@ func newHarnesses(profiles []config.HarnessProfile, log *slog.Logger) ([]daemon.
 			out = append(out, daemon.Harness{
 				Name: profile.Name, Exe: profile.Exe, Adapter: harness.NewOpenCode(),
 			})
+		case "pi":
+			// The Pi Adapter writes the Gate it loads into the Daemon's state
+			// directory, so a Host that cannot write there starts no Pi Session and
+			// says so rather than starting an ungated one.
+			adapter, err := harness.NewPi(state)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, daemon.Harness{Name: profile.Name, Exe: profile.Exe, Adapter: adapter})
 		default:
 			log.Warn("this Harness has no Adapter yet, and no Session may name it", "harness", profile.Name)
 		}
