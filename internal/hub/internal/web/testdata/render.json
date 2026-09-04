@@ -1,7 +1,7 @@
 {
   "about": "The transcript renderer specification shared by the Hub's Go first paint and the Client's JavaScript live paint.",
   "cases": [
-    {"name":"Session started","kind":"SessionStarted","payload":{"harness":"opencode","model":"qwen3","vendor":"ollama","cwd":"/work"},"row":{"title":"Session started","detail":"opencode on qwen3 via ollama, in /work"}},
+    {"name":"Session started","kind":"SessionStarted","payload":{"harness":"opencode","model":"qwen3","vendor":"ollama","cwd":"/work"},"row":{"title":"Session started","detail":"opencode via ollama, in /work"}},
     {"name":"Session ready","kind":"SessionReady","payload":{"model":"qwen3"},"row":{"title":"Session ready","detail":"qwen3"}},
     {"name":"Approval Policy","kind":"ApprovalPolicySet","payload":{"policy":{"read":"auto","edit":"wait","execute":"wait","fetch":"refuse","other":"wait"},"setBy":"user"},"row":{"title":"Approval policy, set by user","detail":"read auto, edit wait, execute wait, fetch refuse, other wait"}},
     {"name":"Prompt","kind":"PromptSubmitted","payload":{"text":"Use the fixture"},"row":{"title":"Prompt","text":"Use the fixture"}},

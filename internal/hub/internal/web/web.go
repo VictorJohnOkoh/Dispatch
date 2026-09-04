@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
@@ -132,12 +133,15 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rail := c.rail(r.Context(), host, id)
 	state, reason := fold(events)
+	hostState, since := standing(rail, host)
 	if err := page.Execute(w, view{
 		Host:      host,
 		Session:   id,
 		Cursor:    protocol.MergedCursor{host: at}.String(),
 		State:     state.String(),
 		Reason:    string(reason),
+		HostState: hostState,
+		Since:     since,
 		Rail:      rail,
 		Rows:      rows(events),
 		Events:    payloads(events),
@@ -174,6 +178,14 @@ type view struct {
 	State  string
 	Reason string
 
+	// HostState is this page's Host, as the Hub knows it when the page is drawn.
+	// The host frame replaces it as soon as the stream says something better.
+	HostState string
+
+	// Since is when a Host that is not answering last answered, and empty for one
+	// that is. It is the Stale stamp for the first paint.
+	Since string
+
 	// Rail is every Session on every Host, which is the only place this page says
 	// that a second Host exists.
 	Rail []entry
@@ -188,6 +200,25 @@ type view struct {
 
 	// Approvals is every open question from a Session that is not on screen.
 	Approvals template.JS
+}
+
+// standing is this page's Host State for the first paint. It is the same two of
+// the four the Hosts view reports from one read: a Host that answered is Ready,
+// and one that did not is Down, stamped with when it last answered.
+func standing(rail []entry, host string) (string, string) {
+	for _, e := range rail {
+		if e.Host != host {
+			continue
+		}
+		if e.Answering {
+			return stateReady, ""
+		}
+		if e.Since.IsZero() {
+			return stateDown, ""
+		}
+		return stateDown, e.Since.Format(time.RFC3339)
+	}
+	return stateDown, ""
 }
 
 // payloads is the Events as the page carries them, in the shape the stream sends and
