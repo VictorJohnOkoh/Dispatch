@@ -20,14 +20,20 @@ open, because you need to ask twice with the ids from the first answer.
 2. On the Host, list the Daemon's children and their children:
 
    ```powershell
-   Get-CimInstance Win32_Process |
-     Where-Object { $_.ParentProcessId -eq (Get-Process dispatch).Id } |
-     Select-Object ProcessId, Name, CommandLine
+   $all = Get-CimInstance Win32_Process
+   function Descend($id) {
+     $all | Where-Object { $_.ParentProcessId -eq $id } | ForEach-Object { $_; Descend $_.ProcessId }
+   }
+   Descend (Get-Process dispatch).Id | Select-Object ProcessId, Name, CommandLine
    ```
 
    ```bash
    pstree -p $(pgrep -x dispatch)
    ```
+
+   **The PowerShell has to recurse**, which is why it is four lines and not one. Asking only for the
+   Daemon's own children lists the Harness and stops there, and the grandchild is exactly what a
+   naive kill leaves behind.
 
    Write the ids down. Every one of them, not just the Harness.
 3. Stop the Session from the Client.
@@ -54,11 +60,24 @@ VRAM while the Daemon believes the slot is free, and the Client can never show y
 ## The harder half: a Harness that will not die
 
 The ladder's later steps only run against something that ignores a polite stop. To reach them, start
-a Session and then, on the Host, suspend the Harness process so it stops answering:
+a Session and then, on the Host, suspend the Harness process so it stops answering.
+
+On Linux that is one command:
 
 ```bash
 kill -STOP <harness pid>
 ```
+
+**Windows has no equivalent in the shell.** `Suspend-Process` is not a cmdlet, and suspending a
+process needs a tool that calls the API: `pssuspend.exe` from Sysinternals does it.
+
+```powershell
+.\pssuspend.exe <harness pid>
+```
+
+Without that tool this half cannot be run on Windows. Say so in the table rather than leaving the row
+looking complete, because Windows is the OS the Job Object correction was written for and this is the
+half that reaches it.
 
 Then stop the Session from the Client. The tree still has to go, and the Daemon still has to end the
 Session rather than wait for ever.

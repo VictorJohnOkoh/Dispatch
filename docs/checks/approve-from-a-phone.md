@@ -32,8 +32,9 @@ this check, and do not leave the tunnel up afterwards.
 - The question names the tool and enough of what it would do to decide on. A question you cannot
   answer without walking to the machine is a question that failed.
 - Tapping the answer ends the hold. The Harness moves on within a second or two.
-- The `ToolCallEnded` says a human decided: the `ApprovalDecided` before it carries `by: user`, not
-  `by: policy`.
+- The Tool Call ends, and it says a human decided it: the `ApprovalDecided` before it carries
+  `by: user` and not `by: policy`, and the `ToolCallEnded` after it carries the tool's own outcome,
+  `ok` or `error`. Never `refused`, which is the Daemon's word for a call that never ran.
 - The desktop page shows the same thing, at the same time. Both readers are on one merged stream and
   neither is the owner of the decision.
 - Answer a second one with the phone screen locked and reopened first. The stream resumes from its

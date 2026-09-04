@@ -37,12 +37,16 @@ something else after one, and both answers are honest.
 
 1. Open `/new` and go to the Model step. Every Model from all three Vendors is in one list.
 2. Read the whole list.
-3. Start a Session on a Model whose Tools answer is `Unknown`.
+3. Start a Session on a **llama-swap** Model, which reads `Unknown` because nothing is running yet.
 4. Come back to `/new` and read the llama-swap Models again.
 
 ## What has to be true
 
 - All three values appear in the one list. Find a `Yes`, find a `No`, and find an `Unknown`.
+- **Read the Ollama Models on their own.** A Model `/api/tags` calls a tool user answers `Yes`, and
+  every question that list does not answer reads `Unknown`. Never `No`: the list names what a Model
+  can do and never what it cannot, so a `No` on an Ollama Model is this check failing. LM Studio
+  alone can supply a `Yes` and a `No`, so the line above passes without ever looking at Ollama.
 - `Unknown` is **drawn**. It is a word on the page, not a gap, not a dash and not a missing row.
 - A Model with `Unknown` capabilities can be chosen and the Session runs. Nothing is hidden or
   disabled for an answer nobody gave.

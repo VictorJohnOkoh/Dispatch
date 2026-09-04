@@ -28,13 +28,21 @@ prompt that asks for a page of prose is enough.
 - The assistant message that was arriving when the lid closed is there **whole**. Not half of it, and
   not twice. Deltas are never kept in the log, so what replays is the message the Daemon assembled,
   and the read path sends an open message whole.
-- The Daemon's log on the Host holds a `HubDetached` and then a `HubAttached`, in that order and one
-  each. Those two Events are the record that the Host knew it was alone.
+- The Session is unbroken across the gap. Nothing was written while the Client was away that says
+  the Session noticed, and nothing needs to be: the Daemon owns the Session and the Client is a
+  reader.
 - The Session is still the same Session. It was never `lost`, because the Daemon never restarted.
 - Submit another prompt. It works, on the Session that was already there.
 
 Two copies of the same text is the failure this check exists to catch. It means the replay started
 before the Cursor rather than after it.
+
+## What this sheet cannot check yet
+
+`HubDetached` and `HubAttached` are two of the sixteen Kinds and nothing in the build writes either.
+They are the record that the Host knew it was alone, and this is the behaviour that would produce
+them. Issue #109 is the gap. Do not look for those two lines; they are not there, and their absence
+is not this behaviour failing.
 
 ## Runs
 

@@ -14,8 +14,9 @@ Approval Policy at all, so it cannot be used here.
 ## The run
 
 1. Start a Session, and on the wizard's policy step set `execute` to `refuse`. Leave the rest alone.
-2. Submit a prompt that makes the Harness run a command. "Run `dir` and tell me what is in the
-   directory" does it.
+2. Submit a prompt that makes the Harness run a command. "List the files in this directory and tell
+   me what is here" does it, and it leaves the command to the Model, so the same prompt works on a
+   Windows Host and on a Linux one.
 3. Read the Session page, and then read the Event log.
 
 ## What has to be true

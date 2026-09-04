@@ -17,7 +17,9 @@ does it: a read, then a message about it.
 
 1. Start a Session with OpenCode, on the Model, in a directory you pick.
 2. Submit the prompt. Let it finish. Leave the page open.
-3. Start a Session with Pi. **The same Model, the same directory, the same policy.**
+3. Start a Session with Pi. **The same Host, the same Model, the same directory, the same policy.**
+   One Host, because two machines would let a difference in the Host explain a difference in the
+   page.
 4. Submit the same prompt, word for word.
 5. Put the two pages side by side.
 

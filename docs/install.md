@@ -349,10 +349,15 @@ what the Daemon believes. A shell tells you what is running.
 Start a Session, then find the Harness and the children it started. On Windows:
 
 ```powershell
-Get-CimInstance Win32_Process |
-  Where-Object { $_.ParentProcessId -eq (Get-Process dispatch).Id } |
-  Select-Object ProcessId, Name, CommandLine
+$all = Get-CimInstance Win32_Process
+function Descend($id) {
+  $all | Where-Object { $_.ParentProcessId -eq $id } | ForEach-Object { $_; Descend $_.ProcessId }
+}
+Descend (Get-Process dispatch).Id | Select-Object ProcessId, Name, CommandLine
 ```
+
+It recurses because the grandchild is the point. The Harness's own children are what a naive kill
+leaves behind, and a list of the Daemon's direct children stops before them.
 
 Note the process ids, including the ones the Harness started itself. Stop the Session from the
 Client, wait five seconds, then ask for those ids again:
