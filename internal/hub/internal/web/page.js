@@ -17,6 +17,8 @@ const promptBox = document.getElementById("prompt");
 const sendButton = document.getElementById("send");
 const stopButton = document.getElementById("stop");
 const interruptButton = document.getElementById("interrupt");
+const sendRow = sendButton.parentElement;
+const pair = stopButton.parentElement;
 const host = list.dataset.host;
 const session = list.dataset.session;
 
@@ -173,56 +175,60 @@ function answerButton(host, session, id, decision, label) {
   const button = document.createElement("button");
   button.dataset.decision = decision;
   button.textContent = label;
+  // A decision that did not land leaves the toast up and the button usable. The
+  // question is still open until an Event says otherwise, and a toast that went
+  // quiet would be the user believing they had answered. That is why this one is
+  // offered again at once, where the three on the page wait for an Event.
   button.onclick = async () => {
     button.disabled = true;
-    // A decision that did not land leaves the toast up and the button usable. The
-    // question is still open until an Event says otherwise, and a toast that went
-    // quiet would be the user believing they had answered.
-    try {
-      const resp = await fetch(`/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/approvals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolCallId: id, decision }),
-      });
-      if (resp.ok) return;
-      said(button, `${label} again: this Host answered ${resp.status}`);
-    } catch {
-      said(button, `${label} again: this Host could not be reached`);
-    }
+    const why = await post(host, session, "approvals", { toolCallId: id, decision });
+    if (why === "") return;
+    said(button, `${label} again: ${why}`);
     button.disabled = false;
   };
   return button;
 }
 
-// The three commands this Session takes. Each one posts and draws nothing: a
-// command is an intention, and what it changed comes back on the Event stream.
-// The button stays disabled after one that landed, until an Event moves the State
-// and offer() decides again.
-async function command(button, verb, body) {
-  button.disabled = true;
+// post runs one command against a Host and answers why it did not land, or "" when
+// it did. A command is an intention: what it changed comes back on the Event
+// stream, so nothing here draws a row. An Approval decision on a toast is one of
+// these too, which is why the Host and the Session are given rather than taken
+// from the page.
+async function post(host, session, route, body) {
   try {
     const resp = await fetch(
-      `/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/${verb}`,
+      `/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/${route}`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) },
     );
-    if (resp.ok) return true;
-    said(button, await why(resp));
+    if (resp.ok) return "";
+    return await refusalText(resp);
   } catch {
-    said(button, "this Host could not be reached");
+    return "this Host could not be reached";
   }
-  button.disabled = false;
-  return false;
 }
 
-// why is the Daemon's own sentence, which names the State the Session is in and
-// the one the command needed. An answer that carries no Refusal leaves the status,
-// because a number the user can quote beats a guess at what happened.
-async function why(resp) {
+// refusalText is the Daemon's own sentence, which names the State the Session is
+// in and the one the command needed. An answer carrying no Refusal leaves the
+// status, because a number the user can quote beats a guess at what happened.
+async function refusalText(resp) {
   try {
     const refusal = await resp.json();
     if (refusal?.detail) return refusal.detail;
   } catch {}
   return `this Host answered ${resp.status}`;
+}
+
+// command is one of the three this Session takes. A button that landed stays
+// disabled until an Event moves the State. One that did not is offered again for
+// the State the page is in now, and not for the State it was in when it was
+// pressed, because an Event may have arrived while the command was in flight.
+async function command(button, route, body) {
+  button.disabled = true;
+  const why = await post(host, session, route, body);
+  if (why === "") return true;
+  said(button, why);
+  offer(stateLine.dataset.sessionState);
+  return false;
 }
 
 // The Prompt is emptied out of the box only once the Host has taken it. One that
@@ -234,13 +240,21 @@ sendButton.onclick = async () => {
   if (await command(sendButton, "prompts", { text })) promptBox.value = "";
 };
 
-// Enter is a newline in a Prompt, so the shortcut is Enter with a modifier.
+// Enter is a newline in a Prompt, so the shortcut is Enter with a modifier. It
+// reads the button and not the box, because a Prompt already in flight has
+// disabled the button while the box the user is typing in stays open.
 promptBox.onkeydown = (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendButton.onclick();
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !sendButton.disabled) sendButton.onclick();
 };
 
 interruptButton.onclick = () => command(interruptButton, "interrupt");
 stopButton.onclick = () => command(stopButton, "stop");
+
+// offered is the State the commands were last drawn for. A failure is cleared when
+// the State it named has moved on, rather than on every Delta that arrives under
+// it: a line that outlived its State would be the page reporting something that is
+// no longer happening, and one cleared on the next Delta would never be read.
+let offered = "";
 
 // offer is which commands the page shows as usable, and it is the same list
 // internal/daemon/commands.go passes to allow. A command the State cannot take is
@@ -248,12 +262,13 @@ stopButton.onclick = () => command(stopButton, "stop");
 // place. The Daemon decides either way: this only spares the user a refusal.
 function offer(state) {
   promptBox.disabled = state !== "Idle";
-  // A box that is dead for a reason says the reason. Without this the user sees an
-  // empty box that will not take a Prompt and nothing that says why.
   promptBox.placeholder = state === "Idle" ? "type a Prompt" : `this Session is ${state}`;
   sendButton.disabled = state !== "Idle";
   interruptButton.disabled = state !== "Working" && state !== "Asking";
   stopButton.disabled = state === "Ended";
+  if (state === offered) return;
+  offered = state;
+  for (const row of [sendRow, pair]) row.querySelector(".why")?.remove();
 }
 
 offer(stateLine.dataset.sessionState);

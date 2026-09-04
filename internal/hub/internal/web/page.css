@@ -152,10 +152,8 @@ body { max-width: none; }
    same. */
 .pair { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.8rem; align-items: center; flex-wrap: wrap; }
 
-/* Stop and Interrupt sit with the State they act on, because whether either one
-   is offered is what the State decides. A command the Session cannot take now is
-   dimmed and stays where it was: one that moved would be one the user has to find
-   again. */
+/* Stop and Interrupt sit with the State they act on, because the State is what
+   decides whether either one is offered. */
 .pair button { font: inherit; font-size: 0.75rem; padding: 0.1rem 0.7rem; border-radius: 99px;
                border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
 .pair button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
@@ -208,8 +206,7 @@ body { max-width: none; }
 .composer .send button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
 .composer .send button:disabled { opacity: 0.4; }
 
-/* Why a command did not land, beside the button that was pressed. It is the same
-   line the toast uses, so a failure reads the same wherever it happened. */
+/* Why a command did not land, beside the button that was pressed. */
 .why { margin: 0; font-size: 0.8rem; color: #c05050; }
 
 /* The toast, and it is load-bearing. This layout hides every Session but one, so

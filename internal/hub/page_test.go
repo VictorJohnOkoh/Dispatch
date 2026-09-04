@@ -179,17 +179,17 @@ func TestTheFirstPaintCarriesTheThreeCommands(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.Code, body)
 	}
-	for _, want := range []string{
-		`id="prompt"`,
-		`id="send"`,
-		`id="stop"`,
-		`id="interrupt"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the page has no %s in it", want)
+	for _, id := range []string{"prompt", "send", "stop", "interrupt"} {
+		_, rest, found := strings.Cut(body, `id="`+id+`"`)
+		if !found {
+			t.Errorf("the page has no %s on it", id)
+			continue
 		}
-	}
-	if strings.Count(body, "disabled") != 4 {
-		t.Errorf("the page offers a command before page.js has folded the State:\n%s", body)
+		// The tag this id is in, which is where the attribute has to be. The word
+		// alone anywhere on the page would be a transcript that happened to say it.
+		tag, _, _ := strings.Cut(rest, ">")
+		if !strings.Contains(tag, "disabled") {
+			t.Errorf("%s is offered before page.js has folded the State: %s", id, tag)
+		}
 	}
 }

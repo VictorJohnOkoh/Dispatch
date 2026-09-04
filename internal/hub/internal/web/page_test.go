@@ -1009,3 +1009,55 @@ console.log(JSON.stringify(said));
 		t.Errorf("the box said %q, want %q", got, want)
 	}
 }
+
+// A failure says what was true when the command was refused, so it goes when the
+// State it named has moved on. One that stayed would be the page reporting
+// something that is no longer happening.
+func TestAFailureGoesWhenTheStateItNamedHasMovedOn(t *testing.T) {
+	var got struct {
+		Refused  string `json:"refused"`
+		StillOn  string `json:"stillOn"`
+		StateGon string `json:"stateGone"`
+	}
+	pageUnder(t, idle+`
+postAnswer = {ok: false, status: 409, json: async () => ({detail: "the Session is Idle"})};
+await dom.stopButton.onclick();
+const refused = dom.pair.textContent;
+
+// An Event that leaves the Session Idle. The refusal is still true, so it stays.
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "FutureKind", payload: {}});
+const stillOn = dom.pair.textContent;
+
+// And one that moves it, which is what the refusal was about.
+opened.send("event", {host: "desk", session: "s-1", seq: 5, kind: "PromptSubmitted", payload: {text: "go"}});
+console.log(JSON.stringify({refused, stillOn, stateGone: dom.pair.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Refused, "the Session is Idle") {
+		t.Errorf("the refusal said %q", got.Refused)
+	}
+	if !strings.Contains(got.StillOn, "the Session is Idle") {
+		t.Errorf("the refusal went while its State was still true: %q", got.StillOn)
+	}
+	if strings.Contains(got.StateGon, "the Session is Idle") {
+		t.Errorf("the refusal outlived its State: %q", got.StateGon)
+	}
+}
+
+// An Approval decision and the three commands on the page are one shape, so a
+// decision that was refused reads the Daemon's own sentence too.
+func TestADecisionCarriesTheDaemonsOwnRefusal(t *testing.T) {
+	var got string
+	pageUnder(t, `
+postAnswer = {ok: false, status: 409, json: async () => ({detail: "that Tool Call was already decided"})};
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+const toast = dom.toasts.children[0];
+await toast.children.find((c) => c.dataset.decision === "allowed").onclick();
+console.log(JSON.stringify(toast.querySelector(".why").textContent));
+`, &got)
+
+	if !strings.Contains(got, "Allow again: that Tool Call was already decided") {
+		t.Errorf("the toast says %q", got)
+	}
+}
