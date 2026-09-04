@@ -371,10 +371,11 @@ pgrep -P $(pgrep -x dispatch) -a     # before the stop
 ps -p 1234,5678                      # after it
 ```
 
-**This check needs a Harness that starts a process.** Passthrough starts none, so until the OpenCode
-Adapter lands there is nothing on the Host to look for. What stands in the meantime is
-`TestTheWholeTreeGoesWithTheHarness`, which kills a real process tree and asks the children
-themselves whether they are alive.
+**This check needs a Harness that starts a process.** Passthrough starts none, so use OpenCode, which
+resolves to a package binary that spawns a child of its own. That child is the case a naive kill gets
+wrong. `TestTheWholeTreeGoesWithTheHarness` covers the same ground from a test, on a process tree it
+builds itself, and it is not a substitute for looking: [docs/checks/kill-the-tree.md](checks/kill-the-tree.md)
+is the whole check.
 
 ## When it does not work
 
