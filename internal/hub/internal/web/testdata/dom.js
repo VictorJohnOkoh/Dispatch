@@ -54,7 +54,13 @@ hostStateElement.textContent = "Connecting";
 const hostCauseElement = new El("span");
 const hostMarkElement = new El("span");
 const staleElement = new El("span");
-const vendorsElement = new El("ul");
+// What is serving the Session, as page.html leaves it: the Vendor named by the
+// address the Event carried, which a vendors frame swaps for the Vendor's kind.
+const servingHarnessElement = new El("span");
+const servingModelElement = new El("span");
+const servingVendorElement = new El("span");
+servingVendorElement.dataset.base = "http://127.0.0.1:11434";
+servingVendorElement.textContent = "http://127.0.0.1:11434";
 
 // The three commands, as page.html leaves them. The prompt box holds the text and
 // each button carries the line that says why one did not land.
@@ -88,7 +94,9 @@ globalThis.document = {
     "host-cause": hostCauseElement,
     "host-mark": hostMarkElement,
     stale: staleElement,
-    vendors: vendorsElement,
+    "serving-harness": servingHarnessElement,
+    "serving-model": servingModelElement,
+    "serving-vendor": servingVendorElement,
     prompt: promptElement,
     send: sendElement,
     stop: stopElement,
@@ -147,7 +155,9 @@ globalThis.dom = {
   hostCauseElement,
   hostMarkElement,
   staleElement,
-  vendorsElement,
+  servingHarnessElement,
+  servingModelElement,
+  servingVendorElement,
   embedded,
   rail: railNav,
   toasts: toastRack,

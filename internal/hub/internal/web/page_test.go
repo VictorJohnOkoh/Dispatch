@@ -699,31 +699,33 @@ func TestConnectingHostsStayAtFullStrength(t *testing.T) {
 	}
 }
 
-func TestVendorFramesReplaceTheVisibleVendorState(t *testing.T) {
+// The header names what is serving this Session, and nothing else about the Host.
+// A vendors frame swaps the Vendor's address for its kind; the rest of the frame
+// belongs to the Hosts view.
+func TestTheServingLineNamesTheVendorTheSessionUses(t *testing.T) {
 	var got struct {
-		First  string `json:"first"`
-		Second string `json:"second"`
+		Vendor string `json:"vendor"`
+		Model  string `json:"model"`
 	}
 	pageUnder(t, `
-opened.send("vendors", {host: "desk", vendors: [{
-  kind: "ollama", base: "http://127.0.0.1:11434", reachable: true,
-  resident: [{modelId: "qwen3", loadedContext: 8192, vram: 1024}],
-}]});
-const first = dom.vendorsElement.textContent;
-opened.send("vendors", {host: "desk", vendors: [{
-  kind: "ollama", base: "http://127.0.0.1:11434", reachable: false, resident: [],
-}]});
-console.log(JSON.stringify({first, second: dom.vendorsElement.textContent}));
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3"}]},
+  {kind: "llama-swap", base: "http://127.0.0.1:8080", reachable: true, resident: []},
+]});
+// SessionReady is the Model the Harness reported, which is the one answering.
+opened.send("event", {host: "desk", session: "s-1", seq: 90, kind: "SessionReady",
+  payload: {model: "qwen3-coder"}});
+console.log(JSON.stringify({
+  vendor: dom.servingVendorElement.textContent,
+  model: dom.servingModelElement.textContent,
+}));
 `, &got)
 
-	if !strings.Contains(got.First, "ollama") || !strings.Contains(got.First, "qwen3") {
-		t.Errorf("the first Vendor frame drew %q", got.First)
+	if got.Vendor != "ollama" {
+		t.Errorf("the serving line names the Vendor %q, want ollama", got.Vendor)
 	}
-	if !strings.Contains(got.Second, "ollama") || !strings.Contains(got.Second, "unreachable") {
-		t.Errorf("the changed Vendor frame drew %q", got.Second)
-	}
-	if strings.Contains(got.Second, "qwen3") {
-		t.Errorf("the changed Vendor frame kept the old resident Model: %q", got.Second)
+	if got.Model != "qwen3-coder" {
+		t.Errorf("the serving line names the Model %q, want qwen3-coder", got.Model)
 	}
 }
 

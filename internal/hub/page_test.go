@@ -73,6 +73,23 @@ func TestTheFirstPaintCarriesTheHostState(t *testing.T) {
 	}
 }
 
+// The header names what is serving this Session. It is read from the Session's
+// own Events, so a Daemon that restarted and forgot its registry still names the
+// Harness, the Model and the Vendor.
+func TestTheFirstPaintNamesWhatIsServingTheSession(t *testing.T) {
+	h, _ := hostWithATranscript(t)
+
+	body, _ := get(t, h, "/hosts/desk/sessions/s-1")
+	for _, want := range []string{
+		`<span id="serving-harness">passthrough</span>`,
+		`<span id="serving-model">llama3</span>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the first paint does not carry %s", want)
+		}
+	}
+}
+
 // The Cursor the first paint was drawn at is the one the browser's stream resumes
 // on, and an EventSource can only carry it in the query.
 func TestTheStreamResumesOnTheCursorTheFirstPaintCarries(t *testing.T) {

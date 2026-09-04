@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
@@ -134,6 +135,7 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 	rail := c.rail(r.Context(), host, id)
 	state, reason := fold(events)
 	hostState, since := standing(rail, host)
+	harness, model, vendor := serving(events)
 	if err := page.Execute(w, view{
 		Host:      host,
 		Session:   id,
@@ -142,6 +144,9 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 		Reason:    string(reason),
 		HostState: hostState,
 		Since:     since,
+		Harness:   harness,
+		Model:     model,
+		Vendor:    vendor,
 		Rail:      rail,
 		Rows:      rows(events),
 		Events:    payloads(events),
@@ -186,6 +191,13 @@ type view struct {
 	// that is. It is the Stale stamp for the first paint.
 	Since string
 
+	// Harness, Model and Vendor are what is serving this Session, which is the one
+	// thing the header says about the machinery. They come from the Session's own
+	// Events, so a Daemon that restarted and forgot its registry still names them.
+	Harness string
+	Model   string
+	Vendor  string
+
 	// Rail is every Session on every Host, which is the only place this page says
 	// that a second Host exists.
 	Rail []entry
@@ -219,6 +231,25 @@ func standing(rail []entry, host string) (string, string) {
 		return stateDown, e.Since.Format(time.RFC3339)
 	}
 	return stateDown, ""
+}
+
+// serving is the Harness, the Model and the Vendor this Session runs on.
+// SessionReady carries the Model the Harness reported back, which is the one
+// actually answering, so it wins over the one the start asked for.
+func serving(events []protocol.Event) (harness, model, vendor string) {
+	for _, e := range events {
+		one, err := event.Decode(e.Seq, event.SessionID(e.Session), e.At, event.Kind(e.Kind), e.Payload)
+		if err != nil {
+			continue
+		}
+		switch p := one.Payload.(type) {
+		case *event.SessionStarted:
+			harness, model, vendor = p.Harness, p.Model, p.Vendor
+		case *event.SessionReady:
+			model = p.Model
+		}
+	}
+	return harness, model, vendor
 }
 
 // payloads is the Events as the page carries them, in the shape the stream sends and

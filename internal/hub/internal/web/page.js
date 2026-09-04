@@ -12,7 +12,9 @@ const hostStateLine = document.getElementById("host-state");
 const hostCauseLine = document.getElementById("host-cause");
 const hostMark = document.getElementById("host-mark");
 const staleStamp = document.getElementById("stale");
-const vendorList = document.getElementById("vendors");
+const servingHarness = document.getElementById("serving-harness");
+const servingModel = document.getElementById("serving-model");
+const servingVendor = document.getElementById("serving-vendor");
 const promptBox = document.getElementById("prompt");
 const sendButton = document.getElementById("send");
 const stopButton = document.getElementById("stop");
@@ -364,6 +366,20 @@ function apply(f) {
   events.set(f.seq, { kind: f.kind, payload: f.payload });
   rows.set(f.seq, el);
   remember(f.seq, el);
+  serving(f);
+}
+
+// serving keeps the header's line true. A Session that starts while its page is
+// open fills it, and SessionReady replaces the Model asked for with the one the
+// Harness reported.
+function serving(f) {
+  if (f.kind === "SessionStarted") {
+    servingHarness.textContent = f.payload?.harness ?? "";
+    servingModel.textContent = f.payload?.model ?? "";
+    servingVendor.dataset.base = f.payload?.vendor ?? "";
+    servingVendor.textContent = f.payload?.vendor ?? "";
+  }
+  if (f.kind === "SessionReady") servingModel.textContent = f.payload?.model ?? "";
 }
 
 // at is where one Sequence Number belongs in order. Events arrive in order almost
@@ -499,22 +515,17 @@ stream.addEventListener("host", (frame) => {
   }
 });
 
-// A vendors frame carries a Host's Vendor catalogue and its reachability. This
-// page shows the live list so a change does not wait for another page load.
+// The Session names its Vendor by address, because that is what the Event
+// carries. The vendors frame is the only place the Vendor's kind is spelled, so
+// the address is swapped for the name as soon as one arrives. Nothing else on
+// this page reads that frame: what a Host serves is the Hosts view's, and this
+// page shows only what is serving the Session on it.
 stream.addEventListener("vendors", (frame) => {
   const f = JSON.parse(frame.data);
   if (f.host !== host) return;
-  vendorList.replaceChildren(...(f.vendors ?? []).map(renderVendor));
+  const mine = (f.vendors ?? []).find((v) => v.base === servingVendor.dataset.base);
+  if (mine) servingVendor.textContent = mine.kind;
 });
-
-function renderVendor(vendor) {
-  const el = document.createElement("li");
-  const reachability = vendor.reachable ? "reachable" : "unreachable";
-  const resident = (vendor.resident ?? []).map((model) => model.modelId).join(", ");
-  el.append(node("span", "title", vendor.kind));
-  el.append(node("span", "detail", ` — ${reachability}${resident ? ` — ${resident}` : ""}`));
-  return el;
-}
 
 // render builds one row, matching page.html's shape element for element.
 function render(seq, kind, r) {

@@ -28,11 +28,12 @@ type fake struct {
 	block  chan struct{} // Catalogue waits on this when it is not nil
 	calls  int
 
-	loadErr error
-	mu      sync.Mutex
-	loading chan struct{} // closed when Load starts
-	gate    chan struct{} // Load waits on this when it is not nil
-	loaded  []string
+	loadErr  error
+	mu       sync.Mutex
+	loading  chan struct{} // closed when Load starts
+	gate     chan struct{} // Load waits on this when it is not nil
+	loaded   []string
+	unloaded []string
 }
 
 func (f *fake) Endpoint() vendors.Endpoint { return f.endpoint }
@@ -90,7 +91,19 @@ func (f *fake) loads() []string {
 	return slices.Clone(f.loaded)
 }
 
-func (f *fake) Unload(context.Context, string) error { return f.err }
+func (f *fake) Unload(_ context.Context, modelID string) error {
+	f.mu.Lock()
+	f.unloaded = append(f.unloaded, modelID)
+	f.mu.Unlock()
+	return f.err
+}
+
+// unloads is what Unload was called with, so far.
+func (f *fake) unloads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.unloaded)
+}
 
 // errNoModel is a Vendor refusing, which is the only Vendor failure these tests
 // need to tell apart from success.

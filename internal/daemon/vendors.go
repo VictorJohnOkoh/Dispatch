@@ -181,6 +181,18 @@ func (v *Vendors) serving(base, model string) vendors.Adapter {
 	return nil
 }
 
+// at is the Vendor with this Base, or nil when the config names none. The
+// adapters are fixed at startup, so this reads them without the mutex, which
+// guards the beats.
+func (v *Vendors) at(base string) vendors.Adapter {
+	for _, a := range v.adapters {
+		if a.Endpoint().Base == base {
+			return a
+		}
+	}
+	return nil
+}
+
 // Watch is the content of the vendors frame as it stands, and a channel the next
 // beat closes. It is reachability beside what is in memory now, pushed on the beat
 // rather than fetched, because a Resident list is worthless when old.

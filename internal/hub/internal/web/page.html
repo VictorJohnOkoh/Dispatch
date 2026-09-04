@@ -46,10 +46,11 @@
     <button type="button" id="interrupt" disabled>Interrupt</button>
     <button type="button" id="stop" disabled>Stop</button>
   </p>
-  <section class="vendors" aria-labelledby="vendors-title">
-    <h2 id="vendors-title">Vendors</h2>
-    <ul id="vendors"></ul>
-  </section>
+  <p class="serving">
+    <span id="serving-harness">{{.Harness}}</span>
+    <span id="serving-model">{{.Model}}</span>
+    <span id="serving-vendor" data-base="{{.Vendor}}">{{.Vendor}}</span>
+  </p>
 </header>
 <ol id="transcript" data-host="{{.Host}}" data-session="{{.Session}}" data-cursor="{{.Cursor}}">
 {{- range .Rows}}
