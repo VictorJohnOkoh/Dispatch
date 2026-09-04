@@ -87,13 +87,15 @@ which is one more thing to get wrong.
 ```json
 {
   "listen": "127.0.0.1:7717",
-  "workspaceRoot": "C:/Users/victor/work",
-  "logPath": "C:/Users/victor/AppData/Local/dispatch/events.db",
+  "workspaceRoot": "C:/Users/YOUR_USER/work",
+  "logPath": "C:/Users/YOUR_USER/AppData/Local/dispatch/events.db",
   "vendors": [
     {"kind": "ollama", "base": "http://127.0.0.1:11434"}
   ],
   "harnesses": [
-    {"name": "passthrough"}
+    {"name": "passthrough"},
+    {"name": "opencode", "exe": "C:/Users/YOUR_USER/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe"},
+    {"name": "pi", "exe": "C:/Users/YOUR_USER/AppData/Roaming/npm/node_modules/@earendil-works/pi-coding-agent/bin/pi.exe"}
   ],
   "policyDefault": {
     "read": "auto",
@@ -115,6 +117,60 @@ Four rules for this file:
 
 A Vendor `kind` is `ollama`, `lmstudio` or `llamaswap`, and `base` is where that Vendor already
 answers on the Host. The Daemon does not start a Vendor. It only speaks to one that is running.
+
+### The three Harnesses
+
+This build has an Adapter for three names. A name it does not know is a warning at start and not a
+stop: the Daemon serves the rest and says `this Harness has no Adapter yet` for that one.
+
+| `name` | `exe` | What it is |
+| --- | --- | --- |
+| `passthrough` | none | The Daemon talks to the Vendor itself. No process, no tools, no Approval Policy |
+| `opencode` | the OpenCode binary | Speaks ACP. It delegates its writes to the Daemon, so the Workspace Root bounds them |
+| `pi` | the Pi binary | Speaks `--mode rpc`. It runs its own tools, and Dispatch gates them with an extension it writes itself |
+
+List only the ones the Host really has. A Harness in this file whose program is not on the machine
+starts nothing until somebody picks it in the wizard, and then that one Session fails.
+
+Start with `passthrough` alone if you want the shortest install. It needs no other program and it
+proves the Daemon, the tunnel and the Event stream. Come back and add the other two after step 10
+answers.
+
+### Finding the `exe` path
+
+**`exe` is a path and never a bare name.** The Daemon spawns the program directly, and a Daemon that
+went through a shell would not own the process it has to kill. A relative path is refused at Session
+start with `the Harness path ... is not absolute`, and a bare name is refused at Daemon start with
+`exe ... is a bare name, not a path`.
+
+On Windows this is the step that catches people. `npm install -g` puts shims on the PATH, so
+`opencode` and `opencode.cmd` both answer a shell and neither can be spawned. The real binary is
+further in, under `node_modules`.
+
+`scripts/resolve-harness-exe.py` finds it. It runs on the Host and tries each candidate the way the
+Daemon will, then prints what spawned and what did not.
+
+```powershell
+python scripts/resolve-harness-exe.py opencode
+python scripts/resolve-harness-exe.py pi --package @earendil-works/pi-coding-agent
+```
+
+Put its `chosen` path in `exe`, with forward slashes. **The two paths in the example above are the
+development Host's**, so run the resolver rather than copying them.
+
+If the only thing that spawns is a `.cmd` shim, it works and it costs you something: `cmd.exe` then
+sits between the Daemon and the Harness, and the Daemon has to kill through it. That is the case
+`docs/checks/kill-the-tree.md` exists to check.
+
+### What each Harness needs beside the binary
+
+- **OpenCode** needs its own configuration for the Vendor, in OpenCode's own file on the Host.
+- **Pi** reads its providers from a `models.json` on the Host, written once at setup. Dispatch names
+  only the Model, then asks Pi which provider answered and refuses the Session if it is not this
+  Session's Vendor. So the Model id in that file has to be the id the Vendor serves, and its
+  `baseUrl` has to be the Vendor's own address.
+- **Pi** is also gated by an extension the Daemon writes into the directory that holds `logPath`,
+  at start. That directory has to be writable, or no Pi Session starts.
 
 ### A llama-swap Host needs `ttl: 0`
 
@@ -150,9 +206,9 @@ Make the three directories first. This runs from the Client machine and works wh
 Host's `sshd` starts.
 
 ```powershell
-ssh victor@192.168.1.20 "powershell -NoProfile -Command New-Item -ItemType Directory -Force C:/Users/victor/dispatch, C:/Users/victor/work, C:/Users/victor/AppData/Local/dispatch"
-scp dispatch.exe daemon.json victor@192.168.1.20:C:/Users/victor/dispatch/
-ssh victor@192.168.1.20 "powershell -NoProfile -Command (Get-FileHash C:/Users/victor/dispatch/dispatch.exe -Algorithm SHA256).Hash"
+ssh YOUR_USER@192.168.1.20 "powershell -NoProfile -Command New-Item -ItemType Directory -Force C:/Users/YOUR_USER/dispatch, C:/Users/YOUR_USER/work, C:/Users/YOUR_USER/AppData/Local/dispatch"
+scp dispatch.exe daemon.json YOUR_USER@192.168.1.20:C:/Users/YOUR_USER/dispatch/
+ssh YOUR_USER@192.168.1.20 "powershell -NoProfile -Command (Get-FileHash C:/Users/YOUR_USER/dispatch/dispatch.exe -Algorithm SHA256).Hash"
 ```
 
 **Compare that checksum with the one from step 2.** `scp` can report success and leave you with an
@@ -165,7 +221,7 @@ Sign in to the Host, open PowerShell there, and start it in the foreground. Read
 prints.
 
 ```powershell
-cd C:\Users\victor\dispatch
+cd C:\Users\YOUR_USER\dispatch
 .\dispatch.exe daemon -config daemon.json
 ```
 
@@ -195,7 +251,7 @@ cannot answer a passphrase prompt. It stops at start if the file holds either.
 
 ```powershell
 ssh-keygen -t ed25519 -f $HOME\.ssh\dispatch_hub -N '""' -C dispatch-hub
-scp $HOME\.ssh\dispatch_hub.pub victor@192.168.1.20:C:/Users/victor/dispatch_hub.pub
+scp $HOME\.ssh\dispatch_hub.pub YOUR_USER@192.168.1.20:C:/Users/YOUR_USER/dispatch_hub.pub
 ```
 
 `ssh-copy-id` is not on Windows, so install the key yourself. **Where it goes depends on the account,
@@ -220,7 +276,7 @@ token until you elevate. Reading that answer sends you to the wrong file.
 Your account in that list means an administrator. Run this on the Host, as Administrator:
 
 ```powershell
-Get-Content C:\Users\victor\dispatch_hub.pub | Add-Content -Path C:\ProgramData\ssh\administrators_authorized_keys -Encoding ascii
+Get-Content C:\Users\YOUR_USER\dispatch_hub.pub | Add-Content -Path C:\ProgramData\ssh\administrators_authorized_keys -Encoding ascii
 icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
 ```
 
@@ -230,8 +286,8 @@ says nothing about why.
 Your account absent from that list means an ordinary account. Run this on the Host instead:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\Users\victor\.ssh | Out-Null
-Get-Content C:\Users\victor\dispatch_hub.pub | Add-Content -Path C:\Users\victor\.ssh\authorized_keys -Encoding ascii
+New-Item -ItemType Directory -Force C:\Users\YOUR_USER\.ssh | Out-Null
+Get-Content C:\Users\YOUR_USER\dispatch_hub.pub | Add-Content -Path C:\Users\YOUR_USER\.ssh\authorized_keys -Encoding ascii
 ```
 
 Use `Add-Content -Encoding ascii` in both. PowerShell's `>>` puts a byte order mark at the head of a
@@ -257,7 +313,7 @@ Administrator window to read, and the line needs the Host's address written in f
 Now prove both keys work before the Hub uses them:
 
 ```powershell
-ssh -i $HOME\.ssh\dispatch_hub victor@192.168.1.20 "powershell -NoProfile -Command Write-Output ok"
+ssh -i $HOME\.ssh\dispatch_hub YOUR_USER@192.168.1.20 "powershell -NoProfile -Command Write-Output ok"
 ```
 
 This must print `ok` and ask for nothing. A password prompt means step 6 put the key in the wrong
@@ -274,9 +330,9 @@ Copy `hub.example.json` and edit it. Every path in it is a path on the **Client 
     {
       "id": "workstation",
       "address": "192.168.1.20:22",
-      "user": "victor",
-      "keyPath": "C:/Users/victor/.ssh/dispatch_hub",
-      "knownHosts": "C:/Users/victor/.ssh/known_hosts",
+      "user": "YOUR_USER",
+      "keyPath": "C:/Users/YOUR_USER/.ssh/dispatch_hub",
+      "knownHosts": "C:/Users/YOUR_USER/.ssh/known_hosts",
       "daemonPort": 7717
     }
   ]
@@ -349,10 +405,15 @@ what the Daemon believes. A shell tells you what is running.
 Start a Session, then find the Harness and the children it started. On Windows:
 
 ```powershell
-Get-CimInstance Win32_Process |
-  Where-Object { $_.ParentProcessId -eq (Get-Process dispatch).Id } |
-  Select-Object ProcessId, Name, CommandLine
+$all = Get-CimInstance Win32_Process
+function Descend($id) {
+  $all | Where-Object { $_.ParentProcessId -eq $id } | ForEach-Object { $_; Descend $_.ProcessId }
+}
+Descend (Get-Process dispatch).Id | Select-Object ProcessId, Name, CommandLine
 ```
+
+It recurses because the grandchild is the point. The Harness's own children are what a naive kill
+leaves behind, and a list of the Daemon's direct children stops before them.
 
 Note the process ids, including the ones the Harness started itself. Stop the Session from the
 Client, wait five seconds, then ask for those ids again:
@@ -371,10 +432,11 @@ pgrep -P $(pgrep -x dispatch) -a     # before the stop
 ps -p 1234,5678                      # after it
 ```
 
-**This check needs a Harness that starts a process.** Passthrough starts none, so until the OpenCode
-Adapter lands there is nothing on the Host to look for. What stands in the meantime is
-`TestTheWholeTreeGoesWithTheHarness`, which kills a real process tree and asks the children
-themselves whether they are alive.
+**This check needs a Harness that starts a process.** Passthrough starts none, so use OpenCode, which
+resolves to a package binary that spawns a child of its own. That child is the case a naive kill gets
+wrong. `TestTheWholeTreeGoesWithTheHarness` covers the same ground from a test, on a process tree it
+builds itself, and it is not a substitute for looking: [docs/checks/kill-the-tree.md](checks/kill-the-tree.md)
+is the whole check.
 
 ## When it does not work
 
@@ -409,12 +471,12 @@ Five things change. Everything else on this page is the same.
   checksum with `sha256sum` on the Host.
 
   ```powershell
-  ssh victor@192.168.1.20 "mkdir -p ~/dispatch ~/.local/state/dispatch ~/work"
-  scp dispatch daemon.json victor@192.168.1.20:~/dispatch/
-  ssh victor@192.168.1.20 "chmod +x ~/dispatch/dispatch && sha256sum ~/dispatch/dispatch"
+  ssh YOUR_USER@192.168.1.20 "mkdir -p ~/dispatch ~/.local/state/dispatch ~/work"
+  scp dispatch daemon.json YOUR_USER@192.168.1.20:~/dispatch/
+  ssh YOUR_USER@192.168.1.20 "chmod +x ~/dispatch/dispatch && sha256sum ~/dispatch/dispatch"
   ```
 
 - **Step 5** runs `./dispatch daemon -config daemon.json`. Use `tmux` to keep it alive after you log
   out, or write a `systemd` unit.
 - **Step 6** has no administrators rule and no `icacls`. The key goes in `~/.ssh/authorized_keys`, and
-  `ssh-copy-id -i $HOME\.ssh\dispatch_hub.pub victor@192.168.1.20` puts it there.
+  `ssh-copy-id -i $HOME\.ssh\dispatch_hub.pub YOUR_USER@192.168.1.20` puts it there.

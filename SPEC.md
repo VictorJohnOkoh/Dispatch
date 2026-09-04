@@ -526,6 +526,9 @@ on the Host, not a green test. Number 12 needs two builds, which is an inconveni
 difficulty, and it is the only check that the Handshake is real. Number 13 fails if the install
 instructions do not exist, which is the point of writing it as a behaviour rather than as a task.
 
+Each one has a sheet in `docs/checks/`, with the run, what has to be true, and a table of the runs so
+far. [docs/checks/README.md](docs/checks/README.md) is the index and the record of the walk.
+
 ## Decided here: five corrections to earlier ADRs
 
 Each of these contradicts or completes something an ADR already says. They live here, named, which is
