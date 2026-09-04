@@ -41,7 +41,7 @@ type Hosts interface {
 	Post(ctx context.Context, host, path string, body []byte) (*http.Response, error)
 }
 
-//go:embed page.html start.html hosts.html page.css page.js fold.js render.js hosts.js
+//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js
 var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
@@ -56,6 +56,9 @@ var page = template.Must(template.New("page.html").Funcs(funcs).ParseFS(files, "
 
 // machines is the Hosts view. It shows machines and starts nothing.
 var machines = template.Must(template.New("hosts.html").Funcs(funcs).ParseFS(files, "hosts.html"))
+
+// index is the landing page, and the only one that draws nothing live.
+var index = template.Must(template.New("index.html").Funcs(funcs).ParseFS(files, "index.html"))
 
 // start is the wizard. It is a page of its own rather than a dialog on the
 // Session page, because it is four steps and each one has an address.
@@ -106,10 +109,7 @@ func New(hosts Hosts) http.Handler {
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /hosts.js", asset("hosts.js", "text/javascript; charset=utf-8"))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprint(w, indexHint)
-	})
+	mux.HandleFunc(indexRoute, c.landing)
 	return mux
 }
 

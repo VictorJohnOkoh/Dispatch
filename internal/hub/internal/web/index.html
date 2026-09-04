@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatch</title>
+<link rel="stylesheet" href="/page.css">
+</head>
+<body>
+<main class="landing">
+<header>
+  <h1>Dispatch</h1>
+  <p class="meta">One Harness, one Model, one Host. This Hub holds {{.Hosts}} {{if eq .Hosts 1}}Host{{else}}Hosts{{end}}.</p>
+</header>
+
+<nav class="doors">
+  <a class="door" href="/new"><b>New Session</b><span class="meta">pick a Host, a Model and a Harness</span></a>
+  <a class="door" href="/hosts"><b>Hosts</b><span class="meta">the machines, and what each one serves</span></a>
+</nav>
+
+<section>
+  <h2>Sessions</h2>
+  <ul class="sessions">
+    {{- range .Running}}
+    <li>
+      <a href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}">{{.Cwd}}</a>
+      <span class="pill" data-session-state="{{.State}}">{{.State}}</span>
+      <span class="meta">{{.Harness}} on {{.Model}}, on {{.Host}}</span>
+    </li>
+    {{- else}}
+    <li class="meta">no Sessions on any Host. <a href="/new">Start one</a>.</li>
+    {{- end}}
+  </ul>
+</section>
+
+{{- if .Quiet}}
+<p class="meta quiet">
+  These Hosts did not answer, so anything running on them is not listed here:
+  {{range $i, $host := .Quiet}}{{if $i}}, {{end}}<b>{{$host}}</b>{{end}}.
+  <a href="/hosts">Hosts</a> says more.
+</p>
+{{- end}}
+</main>
+</body>
+</html>
