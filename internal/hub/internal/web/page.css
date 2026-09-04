@@ -57,6 +57,7 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
 }
 
 .rail h1 { font-size: 0.85rem; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.7; }
+.rail h1 a { color: inherit; text-decoration: none; }
 
 .rrow {
   display: flex;
@@ -87,6 +88,25 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
 }
 
 .desk { margin-left: 17rem; padding: 0 1.5rem 4rem; }
+
+/* The landing page. Two doors and a list, and it draws nothing live. */
+.landing { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
+.doors { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.2rem 0 2rem; }
+.door {
+  flex: 1 1 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 7px;
+  text-decoration: none;
+  color: inherit;
+}
+.door:hover { background: rgba(128, 128, 128, 0.12); }
+.landing .sessions { list-style: none; padding: 0; margin: 0.4rem 0 0; }
+.landing .sessions li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.35rem 0; }
+.quiet { margin-top: 2rem; }
 
 /* The Hosts view. One card per machine, and no machine is ever hidden. */
 .machines { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
