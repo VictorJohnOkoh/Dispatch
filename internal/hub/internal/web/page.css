@@ -104,8 +104,12 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
   color: inherit;
 }
 .door:hover { background: rgba(128, 128, 128, 0.12); }
+.landing h2 { font: inherit; font-weight: 600; margin: 0 0 0.2rem; }
 .landing .sessions { list-style: none; padding: 0; margin: 0.4rem 0 0; }
 .landing .sessions li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.35rem 0; }
+/* The empty row is a sentence and not a row of parts, so it flows as text and
+   its full stop stays against the link. */
+.landing .sessions li.meta { display: block; }
 .quiet { margin-top: 2rem; }
 
 /* The Hosts view. One card per machine, and no machine is ever hidden. */
