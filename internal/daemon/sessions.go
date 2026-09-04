@@ -235,7 +235,15 @@ func (d *Daemon) release(s *Session) {
 	if d.sessions.stillServing(s) {
 		return
 	}
-	vendor := d.vendors.at(s.vendor)
+	d.unload(s.id, s.model, s.vendor)
+}
+
+// unload asks one Vendor to make one Model not resident. The boot sweep calls it
+// too, for the Sessions the last run left loaded, so it takes the three strings
+// rather than a Session: a swept Session belongs to a run that is over and is
+// never in this run's registry.
+func (d *Daemon) unload(id event.SessionID, model, base string) {
+	vendor := d.vendors.at(base)
 	if vendor == nil {
 		return
 	}
@@ -243,9 +251,9 @@ func (d *Daemon) release(s *Session) {
 	defer cancel()
 	// A Model the Vendor does not have is a Model that is not resident, which is
 	// what this asked for. Only a Vendor that failed some other way is news.
-	if err := vendor.Unload(ctx, s.model); err != nil && !errors.Is(err, vendors.ErrModelNotFound) {
+	if err := vendor.Unload(ctx, model); err != nil && !errors.Is(err, vendors.ErrModelNotFound) {
 		d.log.Warn("the Model stayed resident after its Session ended",
-			"session", s.id, "model", s.model, "vendor", s.vendor, "err", err)
+			"session", id, "model", model, "vendor", base, "err", err)
 	}
 }
 

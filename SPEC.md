@@ -568,8 +568,11 @@ that `Unload` stays on the interface and v1 never calls it. Turning the evictor 
 life and then never turning it back on is not a policy, it is a leak: the Model holds VRAM until
 somebody restarts the Vendor. The end of the Session is the end of that life, so it is where the
 Model comes back. A Model another live Session on the same Vendor is using stays, because the Vendor
-serves both from one copy. The VRAM policy that decides whether a load may happen at all is still out
-of v1; this is only the other half of a call v1 already makes.
+serves both from one copy. The boot sweep does the same for the Sessions the last run left open: it
+reads the Model and the Vendor out of each one's `SessionStarted` and gives the Model back, because a
+run that died never unloaded anything and ending those Sessions in the log alone would be half an
+ending. The VRAM policy that decides whether a load may happen at all is still out of v1; this is
+only the other half of a call v1 already makes.
 
 **ADR 0005 asked for transcript retention and no ticket picked it up.** Its Consequences say the raw
 transcript "needs its own rotation and retention. It is not covered by #10's log retention." ADR 0009
