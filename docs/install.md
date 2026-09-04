@@ -93,7 +93,9 @@ which is one more thing to get wrong.
     {"kind": "ollama", "base": "http://127.0.0.1:11434"}
   ],
   "harnesses": [
-    {"name": "passthrough"}
+    {"name": "passthrough"},
+    {"name": "opencode", "exe": "C:/Users/YOUR_USER/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe"},
+    {"name": "pi", "exe": "C:/Users/YOUR_USER/AppData/Roaming/npm/node_modules/@earendil-works/pi-coding-agent/bin/pi.exe"}
   ],
   "policyDefault": {
     "read": "auto",
@@ -115,6 +117,60 @@ Four rules for this file:
 
 A Vendor `kind` is `ollama`, `lmstudio` or `llamaswap`, and `base` is where that Vendor already
 answers on the Host. The Daemon does not start a Vendor. It only speaks to one that is running.
+
+### The three Harnesses
+
+This build has an Adapter for three names. A name it does not know is a warning at start and not a
+stop: the Daemon serves the rest and says `this Harness has no Adapter yet` for that one.
+
+| `name` | `exe` | What it is |
+| --- | --- | --- |
+| `passthrough` | none | The Daemon talks to the Vendor itself. No process, no tools, no Approval Policy |
+| `opencode` | the OpenCode binary | Speaks ACP. It delegates its writes to the Daemon, so the Workspace Root bounds them |
+| `pi` | the Pi binary | Speaks `--mode rpc`. It runs its own tools, and Dispatch gates them with an extension it writes itself |
+
+List only the ones the Host really has. A Harness in this file whose program is not on the machine
+starts nothing until somebody picks it in the wizard, and then that one Session fails.
+
+Start with `passthrough` alone if you want the shortest install. It needs no other program and it
+proves the Daemon, the tunnel and the Event stream. Come back and add the other two after step 10
+answers.
+
+### Finding the `exe` path
+
+**`exe` is a path and never a bare name.** The Daemon spawns the program directly, and a Daemon that
+went through a shell would not own the process it has to kill. A relative path is refused at Session
+start with `the Harness path ... is not absolute`, and a bare name is refused at Daemon start with
+`exe ... is a bare name, not a path`.
+
+On Windows this is the step that catches people. `npm install -g` puts shims on the PATH, so
+`opencode` and `opencode.cmd` both answer a shell and neither can be spawned. The real binary is
+further in, under `node_modules`.
+
+`scripts/resolve-harness-exe.py` finds it. It runs on the Host and tries each candidate the way the
+Daemon will, then prints what spawned and what did not.
+
+```powershell
+python scripts/resolve-harness-exe.py opencode
+python scripts/resolve-harness-exe.py pi --package @earendil-works/pi-coding-agent
+```
+
+Put its `chosen` path in `exe`, with forward slashes. **The two paths in the example above are the
+development Host's**, so run the resolver rather than copying them.
+
+If the only thing that spawns is a `.cmd` shim, it works and it costs you something: `cmd.exe` then
+sits between the Daemon and the Harness, and the Daemon has to kill through it. That is the case
+`docs/checks/kill-the-tree.md` exists to check.
+
+### What each Harness needs beside the binary
+
+- **OpenCode** needs its own configuration for the Vendor, in OpenCode's own file on the Host.
+- **Pi** reads its providers from a `models.json` on the Host, written once at setup. Dispatch names
+  only the Model, then asks Pi which provider answered and refuses the Session if it is not this
+  Session's Vendor. So the Model id in that file has to be the id the Vendor serves, and its
+  `baseUrl` has to be the Vendor's own address.
+- **Pi** is also gated by an extension the Daemon writes into the directory that holds `logPath`,
+  at start. That directory has to be writable, or no Pi Session starts.
 
 ### A llama-swap Host needs `ttl: 0`
 
