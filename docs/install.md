@@ -87,8 +87,8 @@ which is one more thing to get wrong.
 ```json
 {
   "listen": "127.0.0.1:7717",
-  "workspaceRoot": "C:/Users/victor/work",
-  "logPath": "C:/Users/victor/AppData/Local/dispatch/events.db",
+  "workspaceRoot": "C:/Users/YOUR_USER/work",
+  "logPath": "C:/Users/YOUR_USER/AppData/Local/dispatch/events.db",
   "vendors": [
     {"kind": "ollama", "base": "http://127.0.0.1:11434"}
   ],
@@ -150,9 +150,9 @@ Make the three directories first. This runs from the Client machine and works wh
 Host's `sshd` starts.
 
 ```powershell
-ssh victor@192.168.1.20 "powershell -NoProfile -Command New-Item -ItemType Directory -Force C:/Users/victor/dispatch, C:/Users/victor/work, C:/Users/victor/AppData/Local/dispatch"
-scp dispatch.exe daemon.json victor@192.168.1.20:C:/Users/victor/dispatch/
-ssh victor@192.168.1.20 "powershell -NoProfile -Command (Get-FileHash C:/Users/victor/dispatch/dispatch.exe -Algorithm SHA256).Hash"
+ssh YOUR_USER@192.168.1.20 "powershell -NoProfile -Command New-Item -ItemType Directory -Force C:/Users/YOUR_USER/dispatch, C:/Users/YOUR_USER/work, C:/Users/YOUR_USER/AppData/Local/dispatch"
+scp dispatch.exe daemon.json YOUR_USER@192.168.1.20:C:/Users/YOUR_USER/dispatch/
+ssh YOUR_USER@192.168.1.20 "powershell -NoProfile -Command (Get-FileHash C:/Users/YOUR_USER/dispatch/dispatch.exe -Algorithm SHA256).Hash"
 ```
 
 **Compare that checksum with the one from step 2.** `scp` can report success and leave you with an
@@ -165,7 +165,7 @@ Sign in to the Host, open PowerShell there, and start it in the foreground. Read
 prints.
 
 ```powershell
-cd C:\Users\victor\dispatch
+cd C:\Users\YOUR_USER\dispatch
 .\dispatch.exe daemon -config daemon.json
 ```
 
@@ -195,7 +195,7 @@ cannot answer a passphrase prompt. It stops at start if the file holds either.
 
 ```powershell
 ssh-keygen -t ed25519 -f $HOME\.ssh\dispatch_hub -N '""' -C dispatch-hub
-scp $HOME\.ssh\dispatch_hub.pub victor@192.168.1.20:C:/Users/victor/dispatch_hub.pub
+scp $HOME\.ssh\dispatch_hub.pub YOUR_USER@192.168.1.20:C:/Users/YOUR_USER/dispatch_hub.pub
 ```
 
 `ssh-copy-id` is not on Windows, so install the key yourself. **Where it goes depends on the account,
@@ -220,7 +220,7 @@ token until you elevate. Reading that answer sends you to the wrong file.
 Your account in that list means an administrator. Run this on the Host, as Administrator:
 
 ```powershell
-Get-Content C:\Users\victor\dispatch_hub.pub | Add-Content -Path C:\ProgramData\ssh\administrators_authorized_keys -Encoding ascii
+Get-Content C:\Users\YOUR_USER\dispatch_hub.pub | Add-Content -Path C:\ProgramData\ssh\administrators_authorized_keys -Encoding ascii
 icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
 ```
 
@@ -230,8 +230,8 @@ says nothing about why.
 Your account absent from that list means an ordinary account. Run this on the Host instead:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\Users\victor\.ssh | Out-Null
-Get-Content C:\Users\victor\dispatch_hub.pub | Add-Content -Path C:\Users\victor\.ssh\authorized_keys -Encoding ascii
+New-Item -ItemType Directory -Force C:\Users\YOUR_USER\.ssh | Out-Null
+Get-Content C:\Users\YOUR_USER\dispatch_hub.pub | Add-Content -Path C:\Users\YOUR_USER\.ssh\authorized_keys -Encoding ascii
 ```
 
 Use `Add-Content -Encoding ascii` in both. PowerShell's `>>` puts a byte order mark at the head of a
@@ -257,7 +257,7 @@ Administrator window to read, and the line needs the Host's address written in f
 Now prove both keys work before the Hub uses them:
 
 ```powershell
-ssh -i $HOME\.ssh\dispatch_hub victor@192.168.1.20 "powershell -NoProfile -Command Write-Output ok"
+ssh -i $HOME\.ssh\dispatch_hub YOUR_USER@192.168.1.20 "powershell -NoProfile -Command Write-Output ok"
 ```
 
 This must print `ok` and ask for nothing. A password prompt means step 6 put the key in the wrong
@@ -274,9 +274,9 @@ Copy `hub.example.json` and edit it. Every path in it is a path on the **Client 
     {
       "id": "workstation",
       "address": "192.168.1.20:22",
-      "user": "victor",
-      "keyPath": "C:/Users/victor/.ssh/dispatch_hub",
-      "knownHosts": "C:/Users/victor/.ssh/known_hosts",
+      "user": "YOUR_USER",
+      "keyPath": "C:/Users/YOUR_USER/.ssh/dispatch_hub",
+      "knownHosts": "C:/Users/YOUR_USER/.ssh/known_hosts",
       "daemonPort": 7717
     }
   ]
@@ -415,12 +415,12 @@ Five things change. Everything else on this page is the same.
   checksum with `sha256sum` on the Host.
 
   ```powershell
-  ssh victor@192.168.1.20 "mkdir -p ~/dispatch ~/.local/state/dispatch ~/work"
-  scp dispatch daemon.json victor@192.168.1.20:~/dispatch/
-  ssh victor@192.168.1.20 "chmod +x ~/dispatch/dispatch && sha256sum ~/dispatch/dispatch"
+  ssh YOUR_USER@192.168.1.20 "mkdir -p ~/dispatch ~/.local/state/dispatch ~/work"
+  scp dispatch daemon.json YOUR_USER@192.168.1.20:~/dispatch/
+  ssh YOUR_USER@192.168.1.20 "chmod +x ~/dispatch/dispatch && sha256sum ~/dispatch/dispatch"
   ```
 
 - **Step 5** runs `./dispatch daemon -config daemon.json`. Use `tmux` to keep it alive after you log
   out, or write a `systemd` unit.
 - **Step 6** has no administrators rule and no `icacls`. The key goes in `~/.ssh/authorized_keys`, and
-  `ssh-copy-id -i $HOME\.ssh\dispatch_hub.pub victor@192.168.1.20` puts it there.
+  `ssh-copy-id -i $HOME\.ssh\dispatch_hub.pub YOUR_USER@192.168.1.20` puts it there.
