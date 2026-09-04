@@ -150,7 +150,15 @@ body { max-width: none; }
 /* The pair. Session State beside Host State, because Working on a Ready Host and
    Working on a Host that stopped answering mean different things and look the
    same. */
-.pair { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.8rem; }
+.pair { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.8rem; align-items: center; flex-wrap: wrap; }
+
+/* Stop and Interrupt sit with the State they act on, because the State is what
+   decides whether either one is offered. */
+.pair button { font: inherit; font-size: 0.75rem; padding: 0.1rem 0.7rem; border-radius: 99px;
+               border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
+.pair button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
+.pair button:disabled { opacity: 0.4; }
+#stop:enabled { border-color: #c05050; }
 
 .pill {
   font-size: 0.75rem;
@@ -176,6 +184,30 @@ body { max-width: none; }
 .row[data-tone="bad"] { border-left-color: #c05050; }
 .row[data-tone="unknown"] { border-left-color: rgba(128, 128, 128, 0.6); }
 .row[data-tone="asking"] { border-left-color: #b8860b; }
+
+/* The composer. It is the only way to say anything to a Session, so it sits under
+   the transcript and stays there rather than following the last row. */
+.composer { margin-top: 1.2rem; }
+.composer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  resize: vertical;
+}
+.composer textarea:disabled { opacity: 0.5; }
+.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0; }
+.composer .send button { font: inherit; padding: 0.4rem 1.1rem; border-radius: 7px;
+                         border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
+.composer .send button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
+.composer .send button:disabled { opacity: 0.4; }
+
+/* Why a command did not land, beside the button that was pressed. */
+.why { margin: 0; font-size: 0.8rem; color: #c05050; }
 
 /* The toast, and it is load-bearing. This layout hides every Session but one, so
    a question from any other Session has no other way to reach the user. Two

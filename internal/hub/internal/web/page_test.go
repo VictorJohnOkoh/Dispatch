@@ -42,7 +42,7 @@ func pageUnderSetup(t *testing.T, setup, script string, into any) {
 	program.WriteString("\n")
 	// The script runs after the page's own load() has settled, because that one is
 	// asynchronous and everything a test asserts on comes after it.
-	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
+	program.WriteString("setTimeout(async () => {\n" + script + "\n}, 0);")
 
 	path := filepath.Join(t.TempDir(), "page.js")
 	if err := os.WriteFile(path, []byte(program.String()), 0o600); err != nil {
@@ -838,5 +838,226 @@ func TestTheSessionHeaderCarriesNoFrozenHostPill(t *testing.T) {
 	}
 	if strings.Contains(header, "data-host-answering") {
 		t.Error("the header still draws a Host pill the stream never writes")
+	}
+}
+
+// The three commands, which are the whole of what a user can say to a Session.
+// Each one posts to its own route and draws nothing: what it changed comes back
+// on the Event stream.
+
+// sent is one POST as the stub recorded it.
+type sent struct {
+	URL  string `json:"url"`
+	Body string `json:"body"`
+}
+
+// idle drives the page to Idle, which is the State a Prompt is taken in.
+const idle = `
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "SessionReady", payload: {model: "m"}});
+`
+
+func TestSendingAPromptPostsItAndEmptiesTheBox(t *testing.T) {
+	var got struct {
+		Posted []sent `json:"posted"`
+		Left   string `json:"left"`
+	}
+	pageUnder(t, idle+`
+dom.promptBox.value = "  count to three  ";
+await dom.sendButton.onclick();
+console.log(JSON.stringify({posted, left: dom.promptBox.value}));
+`, &got)
+
+	if len(got.Posted) != 1 {
+		t.Fatalf("posted %v", got.Posted)
+	}
+	if got.Posted[0].URL != "/v1/hosts/desk/sessions/s-1/prompts" {
+		t.Errorf("the Prompt went to %q", got.Posted[0].URL)
+	}
+	if got.Posted[0].Body != `{"text":"count to three"}` {
+		t.Errorf("the Prompt was sent as %q", got.Posted[0].Body)
+	}
+	if got.Left != "" {
+		t.Errorf("the box still holds %q", got.Left)
+	}
+}
+
+// A Prompt the Host would not take stays in the box, so the user's words are not
+// lost, and the Daemon's own sentence says why.
+func TestAPromptTheHostRefusedStaysInTheBoxAndSaysWhy(t *testing.T) {
+	var got struct {
+		Left string `json:"left"`
+		Why  string `json:"why"`
+	}
+	pageUnder(t, idle+`
+postAnswer = {ok: false, status: 409, json: async () => ({detail: "the Session is Working"})};
+dom.promptBox.value = "go";
+await dom.sendButton.onclick();
+console.log(JSON.stringify({left: dom.promptBox.value, why: dom.sendRow.textContent}));
+`, &got)
+
+	if got.Left != "go" {
+		t.Errorf("the box holds %q", got.Left)
+	}
+	if !strings.Contains(got.Why, "the Session is Working") {
+		t.Errorf("the page said %q", got.Why)
+	}
+}
+
+// A Host that could not be reached is a different sentence from one that answered,
+// because they are different things to do something about.
+func TestAPromptToAHostThatIsNotThereSaysSo(t *testing.T) {
+	var got string
+	pageUnder(t, idle+`
+postAnswer = "unreachable";
+dom.promptBox.value = "go";
+await dom.sendButton.onclick();
+console.log(JSON.stringify(dom.sendRow.textContent));
+`, &got)
+
+	if !strings.Contains(got, "could not be reached") {
+		t.Errorf("the page said %q", got)
+	}
+}
+
+func TestStopAndInterruptPostToTheirOwnRoutes(t *testing.T) {
+	var got []sent
+	pageUnder(t, `
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "SessionReady", payload: {model: "m"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "PromptSubmitted", payload: {text: "go"}});
+await dom.interruptButton.onclick();
+await dom.stopButton.onclick();
+console.log(JSON.stringify(posted));
+`, &got)
+
+	if len(got) != 2 {
+		t.Fatalf("posted %v", got)
+	}
+	if got[0].URL != "/v1/hosts/desk/sessions/s-1/interrupt" {
+		t.Errorf("the interrupt went to %q", got[0].URL)
+	}
+	if got[1].URL != "/v1/hosts/desk/sessions/s-1/stop" {
+		t.Errorf("the stop went to %q", got[1].URL)
+	}
+}
+
+// offered is the three commands, in the order the page shows them, for one State.
+type offered struct {
+	Prompt    bool `json:"prompt"`
+	Interrupt bool `json:"interrupt"`
+	Stop      bool `json:"stop"`
+}
+
+// Only the commands the Daemon takes in a State are offered in it. These are the
+// same lists internal/daemon/commands.go passes to allow, and a page that offered
+// more would send the user commands that can only be refused.
+func TestOnlyTheCommandsTheStateTakesAreOffered(t *testing.T) {
+	var got map[string]offered
+	pageUnder(t, `
+const frames = [
+  [null, "Starting"],
+  [{seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}}, "Starting"],
+  [{seq: 3, kind: "SessionReady", payload: {model: "m"}}, "Idle"],
+  [{seq: 4, kind: "PromptSubmitted", payload: {text: "go"}}, "Working"],
+  [{seq: 5, kind: "ToolCallRequested", payload: {toolCallId: "c1", name: "bash"}}, "Working"],
+  [{seq: 6, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "run"}}, "Asking"],
+  [{seq: 7, kind: "SessionEnded", payload: {reason: "stopped"}}, "Ended"],
+];
+const seen = {};
+for (const [frame, state] of frames) {
+  if (frame) opened.send("event", {host: "desk", session: "s-1", ...frame});
+  seen[state] = {
+    prompt: !dom.sendButton.disabled,
+    interrupt: !dom.interruptButton.disabled,
+    stop: !dom.stopButton.disabled,
+  };
+}
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := map[string]offered{
+		"Starting": {Stop: true},
+		"Idle":     {Prompt: true, Stop: true},
+		"Working":  {Interrupt: true, Stop: true},
+		"Asking":   {Interrupt: true, Stop: true},
+		"Ended":    {},
+	}
+	for state, want := range want {
+		if got[state] != want {
+			t.Errorf("%s offers %+v, want %+v", state, got[state], want)
+		}
+	}
+}
+
+// A box that will not take a Prompt says why, so a dimmed composer is an answer
+// rather than a page that looks broken.
+func TestTheBoxSaysWhyItWillNotTakeAPrompt(t *testing.T) {
+	var got []string
+	pageUnder(t, `
+const said = [dom.promptBox.placeholder];
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "SessionReady", payload: {model: "m"}});
+said.push(dom.promptBox.placeholder);
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "PromptSubmitted", payload: {text: "go"}});
+said.push(dom.promptBox.placeholder);
+console.log(JSON.stringify(said));
+`, &got)
+
+	want := []string{"this Session is Starting", "type a Prompt", "this Session is Working"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("the box said %q, want %q", got, want)
+	}
+}
+
+// A failure says what was true when the command was refused, so it goes when the
+// State it named has moved on. One that stayed would be the page reporting
+// something that is no longer happening.
+func TestAFailureGoesWhenTheStateItNamedHasMovedOn(t *testing.T) {
+	var got struct {
+		Refused  string `json:"refused"`
+		StillOn  string `json:"stillOn"`
+		StateGon string `json:"stateGone"`
+	}
+	pageUnder(t, idle+`
+postAnswer = {ok: false, status: 409, json: async () => ({detail: "the Session is Idle"})};
+await dom.stopButton.onclick();
+const refused = dom.pair.textContent;
+
+// An Event that leaves the Session Idle. The refusal is still true, so it stays.
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "FutureKind", payload: {}});
+const stillOn = dom.pair.textContent;
+
+// And one that moves it, which is what the refusal was about.
+opened.send("event", {host: "desk", session: "s-1", seq: 5, kind: "PromptSubmitted", payload: {text: "go"}});
+console.log(JSON.stringify({refused, stillOn, stateGone: dom.pair.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Refused, "the Session is Idle") {
+		t.Errorf("the refusal said %q", got.Refused)
+	}
+	if !strings.Contains(got.StillOn, "the Session is Idle") {
+		t.Errorf("the refusal went while its State was still true: %q", got.StillOn)
+	}
+	if strings.Contains(got.StateGon, "the Session is Idle") {
+		t.Errorf("the refusal outlived its State: %q", got.StateGon)
+	}
+}
+
+// An Approval decision and the three commands on the page are one shape, so a
+// decision that was refused reads the Daemon's own sentence too.
+func TestADecisionCarriesTheDaemonsOwnRefusal(t *testing.T) {
+	var got string
+	pageUnder(t, `
+postAnswer = {ok: false, status: 409, json: async () => ({detail: "that Tool Call was already decided"})};
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+const toast = dom.toasts.children[0];
+await toast.children.find((c) => c.dataset.decision === "allowed").onclick();
+console.log(JSON.stringify(toast.querySelector(".why").textContent));
+`, &got)
+
+	if !strings.Contains(got, "Allow again: that Tool Call was already decided") {
+		t.Errorf("the toast says %q", got)
 	}
 }
