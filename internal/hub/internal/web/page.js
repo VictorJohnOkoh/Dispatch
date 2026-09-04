@@ -13,6 +13,10 @@ const hostCauseLine = document.getElementById("host-cause");
 const hostMark = document.getElementById("host-mark");
 const staleStamp = document.getElementById("stale");
 const vendorList = document.getElementById("vendors");
+const promptBox = document.getElementById("prompt");
+const sendButton = document.getElementById("send");
+const stopButton = document.getElementById("stop");
+const interruptButton = document.getElementById("interrupt");
 const host = list.dataset.host;
 const session = list.dataset.session;
 
@@ -190,14 +194,78 @@ function answerButton(host, session, id, decision, label) {
   return button;
 }
 
-// said puts what went wrong on the toast the button is in, replacing whatever it
-// said before, so two failed tries do not read as two problems.
-function said(button, why) {
-  const toast = button.parentElement;
-  if (!toast) return;
-  const line = toast.querySelector(".why") ?? node("p", "why", "");
-  line.textContent = why;
-  if (!line.parentElement) toast.append(line);
+// The three commands this Session takes. Each one posts and draws nothing: a
+// command is an intention, and what it changed comes back on the Event stream.
+// The button stays disabled after one that landed, until an Event moves the State
+// and offer() decides again.
+async function command(button, verb, body) {
+  button.disabled = true;
+  try {
+    const resp = await fetch(
+      `/v1/hosts/${encodeURIComponent(host)}/sessions/${encodeURIComponent(session)}/${verb}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) },
+    );
+    if (resp.ok) return true;
+    said(button, await why(resp));
+  } catch {
+    said(button, "this Host could not be reached");
+  }
+  button.disabled = false;
+  return false;
+}
+
+// why is the Daemon's own sentence, which names the State the Session is in and
+// the one the command needed. An answer that carries no Refusal leaves the status,
+// because a number the user can quote beats a guess at what happened.
+async function why(resp) {
+  try {
+    const refusal = await resp.json();
+    if (refusal?.detail) return refusal.detail;
+  } catch {}
+  return `this Host answered ${resp.status}`;
+}
+
+// The Prompt is emptied out of the box only once the Host has taken it. One that
+// was refused is still the user's words, and a box that cleared itself would lose
+// them.
+sendButton.onclick = async () => {
+  const text = promptBox.value.trim();
+  if (!text) return;
+  if (await command(sendButton, "prompts", { text })) promptBox.value = "";
+};
+
+// Enter is a newline in a Prompt, so the shortcut is Enter with a modifier.
+promptBox.onkeydown = (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendButton.onclick();
+};
+
+interruptButton.onclick = () => command(interruptButton, "interrupt");
+stopButton.onclick = () => command(stopButton, "stop");
+
+// offer is which commands the page shows as usable, and it is the same list
+// internal/daemon/commands.go passes to allow. A command the State cannot take is
+// disabled rather than hidden, so what a Session can do next is always in one
+// place. The Daemon decides either way: this only spares the user a refusal.
+function offer(state) {
+  promptBox.disabled = state !== "Idle";
+  // A box that is dead for a reason says the reason. Without this the user sees an
+  // empty box that will not take a Prompt and nothing that says why.
+  promptBox.placeholder = state === "Idle" ? "type a Prompt" : `this Session is ${state}`;
+  sendButton.disabled = state !== "Idle";
+  interruptButton.disabled = state !== "Working" && state !== "Asking";
+  stopButton.disabled = state === "Ended";
+}
+
+offer(stateLine.dataset.sessionState);
+
+// said puts what went wrong beside the button that was pressed, replacing whatever
+// it said before, so two failed tries do not read as two problems.
+function said(button, text) {
+  const where = button.parentElement;
+  if (!where) return;
+  const line = where.querySelector(".why") ?? node("p", "why", "");
+  line.textContent = text;
+  if (!line.parentElement) where.append(line);
 }
 
 function takeDown(at) {
@@ -298,6 +366,7 @@ function refold() {
   const view = foldSession(order.map((seq) => events.get(seq)));
   stateLine.dataset.sessionState = view.state;
   stateLine.textContent = view.reason ? `${view.state} ${view.reason}` : view.state;
+  offer(view.state);
 }
 
 // load reads this Session whole and applies it. Only a resync calls it: the first

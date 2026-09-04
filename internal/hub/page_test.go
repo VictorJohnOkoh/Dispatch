@@ -167,3 +167,29 @@ func attribute(t *testing.T, page, name string) string {
 	value, _, _ := strings.Cut(after, `"`)
 	return value
 }
+
+// The three commands are on the page the server drew, which is what makes a
+// Session something a person can use rather than only watch. They arrive disabled
+// and page.js offers the ones the State takes, so a browser with no JS shows no
+// command it could not send.
+func TestTheFirstPaintCarriesTheThreeCommands(t *testing.T) {
+	h, _ := hostWithATranscript(t)
+
+	body, resp := get(t, h, "/hosts/desk/sessions/s-1")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.Code, body)
+	}
+	for _, want := range []string{
+		`id="prompt"`,
+		`id="send"`,
+		`id="stop"`,
+		`id="interrupt"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the page has no %s in it", want)
+		}
+	}
+	if strings.Count(body, "disabled") != 4 {
+		t.Errorf("the page offers a command before page.js has folded the State:\n%s", body)
+	}
+}

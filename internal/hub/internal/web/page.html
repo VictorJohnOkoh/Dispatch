@@ -43,6 +43,8 @@
     <span class="pill" id="state" data-session-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</span>
     <span class="pill host" id="host-state" data-host-state="Connecting">Connecting</span>
     <span id="host-cause"></span>
+    <button type="button" id="interrupt" disabled>Interrupt</button>
+    <button type="button" id="stop" disabled>Stop</button>
   </p>
   <section class="vendors" aria-labelledby="vendors-title">
     <h2 id="vendors-title">Vendors</h2>
@@ -62,6 +64,10 @@
   </li>
 {{- end}}
 </ol>
+<div class="composer">
+  <textarea id="prompt" rows="3" placeholder="{{if eq .State "Idle"}}type a Prompt{{else}}this Session is {{.State}}{{end}}" disabled></textarea>
+  <p class="send"><button type="button" id="send" disabled>Send</button></p>
+</div>
 </main>
 <div class="toasts" id="toasts"></div>
 <script type="application/json" id="events">{{.Events}}</script>

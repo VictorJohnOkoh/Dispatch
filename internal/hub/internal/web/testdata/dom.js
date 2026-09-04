@@ -56,6 +56,17 @@ const hostMarkElement = new El("span");
 const staleElement = new El("span");
 const vendorsElement = new El("ul");
 
+// The three commands, as page.html leaves them. The prompt box holds the text and
+// each button carries the line that says why one did not land.
+const promptElement = new El("textarea");
+const sendRowElement = new El("p");
+const sendElement = new El("button");
+sendRowElement.append(sendElement);
+const pairElement = new El("p");
+const stopElement = new El("button");
+const interruptElement = new El("button");
+pairElement.append(interruptElement, stopElement);
+
 // The toast rack, empty until a question from another Session raises one.
 const toastRack = new El("div");
 
@@ -78,6 +89,10 @@ globalThis.document = {
     "host-mark": hostMarkElement,
     stale: staleElement,
     vendors: vendorsElement,
+    prompt: promptElement,
+    send: sendElement,
+    stop: stopElement,
+    interrupt: interruptElement,
   })[id] ?? null,
   createElement: (tag) => new El(tag),
   body,
@@ -109,9 +124,10 @@ globalThis.posted = [];
 globalThis.fetch = async (url, options) => {
   if (options?.method === "POST") {
     posted.push({ url, body: options.body });
-    const answer = globalThis.postAnswer ?? { ok: true, status: 202 };
+    const answer = globalThis.postAnswer ?? {};
     if (answer === "unreachable") throw new Error("no route to that Host");
-    return { ...answer, json: async () => ({}) };
+    // The test's own answer wins, so one that carries a Refusal body keeps it.
+    return { ok: true, status: 202, json: async () => ({}), ...answer };
   }
   fetched.push(url);
   if (url.startsWith("/rail/")) {
@@ -137,4 +153,10 @@ globalThis.dom = {
   toasts: toastRack,
   body,
   row,
+  promptBox: promptElement,
+  sendButton: sendElement,
+  sendRow: sendRowElement,
+  stopButton: stopElement,
+  interruptButton: interruptElement,
+  pair: pairElement,
 };
