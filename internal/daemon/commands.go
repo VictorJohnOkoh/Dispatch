@@ -124,6 +124,7 @@ func (d *Daemon) stopSession(w http.ResponseWriter, r *http.Request) {
 	// it: there is nothing to say goodbye to and nothing open to close.
 	d.ladder(s, run)
 	d.write(s, event.KindSessionEnded, &event.SessionEnded{Reason: event.EndStopped})
+	d.release(s)
 	s.cancel()
 
 	w.WriteHeader(protocol.StatusAccepted)

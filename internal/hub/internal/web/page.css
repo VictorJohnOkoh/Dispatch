@@ -13,6 +13,14 @@ h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
 .mark, #stale { margin-left: 0.35rem; }
 .mark { font-weight: 600; }
 
+/* What is serving this Session: the Harness, the Model and the Vendor. It is the
+   whole of what the header says about the machinery, and what a Host serves
+   besides is the Hosts view's. */
+.serving { margin: 0.4rem 0 0.8rem; font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.8; }
+.serving span + span::before { content: " · "; opacity: 0.6; }
+
+/* The Vendor row on the Hosts view, which is a different thing: what a machine
+   serves, rather than what one Session is using. */
 .vendors { margin: 0.4rem 0 0.8rem; }
 .vendors h2 { display: inline; font: inherit; font-weight: 600; }
 .vendors ul { display: inline; margin: 0; padding: 0; list-style: none; }
@@ -87,7 +95,7 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
   border-radius: 6px;
 }
 
-.desk { margin-left: 17rem; padding: 0 1.5rem 4rem; }
+.desk { margin-left: 17rem; padding: 0 1.5rem; }
 
 /* The landing page. Two doors and a list, and it draws nothing live. */
 .landing { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
@@ -185,9 +193,17 @@ body { max-width: none; }
 .row[data-tone="unknown"] { border-left-color: rgba(128, 128, 128, 0.6); }
 .row[data-tone="asking"] { border-left-color: #b8860b; }
 
-/* The composer. It is the only way to say anything to a Session, so it sits under
-   the transcript and stays there rather than following the last row. */
-.composer { margin-top: 1.2rem; }
+/* The composer. It is the only way to say anything to a Session, so it sticks to
+   the bottom of the window rather than sitting under the last row: a long
+   transcript would otherwise scroll it off the screen, and a page with no visible
+   box reads as a page you can only watch. */
+.composer {
+  position: sticky;
+  bottom: 0;
+  margin-top: 1.2rem;
+  padding: 0.8rem 0;
+  background: Canvas;
+}
 .composer textarea {
   width: 100%;
   box-sizing: border-box;

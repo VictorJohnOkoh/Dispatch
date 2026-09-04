@@ -38,7 +38,7 @@ func TestTheFirstPaintCarriesTheTranscript(t *testing.T) {
 		t.Errorf("Content-Type = %q, want HTML", got)
 	}
 	for _, want := range []string{
-		"Session started", "passthrough on llama3 via ollama",
+		"Session started", "passthrough via ollama",
 		"Prompt", "what is the time",
 		"Assistant", torn,
 		"FutureKind", "from tomorrow",
@@ -54,6 +54,39 @@ func TestTheFirstPaintCarriesTheTranscript(t *testing.T) {
 	cursor := attribute(t, body, "data-cursor")
 	if want := "desk=" + protocol.Cursor(open-1).String(); cursor != want {
 		t.Errorf("data-cursor = %q, want %q", cursor, want)
+	}
+}
+
+// The first paint says what the Hub knows about this Host, and not one fixed
+// word. A Host that answered this read is Ready, and a page that opened with
+// "Connecting" on a Host that had already answered was the page saying something
+// that was not true until the first host frame arrived.
+func TestTheFirstPaintCarriesTheHostState(t *testing.T) {
+	h, _ := hostWithATranscript(t)
+
+	body, _ := get(t, h, "/hosts/desk/sessions/s-1")
+	if got := attribute(t, body, "data-host-state"); got != "Ready" {
+		t.Errorf("data-host-state = %q, want Ready", got)
+	}
+	if strings.Contains(body, "Connecting") {
+		t.Error("the first paint says Connecting on a Host that answered")
+	}
+}
+
+// The header names what is serving this Session. It is read from the Session's
+// own Events, so a Daemon that restarted and forgot its registry still names the
+// Harness, the Model and the Vendor.
+func TestTheFirstPaintNamesWhatIsServingTheSession(t *testing.T) {
+	h, _ := hostWithATranscript(t)
+
+	body, _ := get(t, h, "/hosts/desk/sessions/s-1")
+	for _, want := range []string{
+		`<span id="serving-harness">passthrough</span>`,
+		`<span id="serving-model">llama3</span>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the first paint does not carry %s", want)
+		}
 	}
 }
 

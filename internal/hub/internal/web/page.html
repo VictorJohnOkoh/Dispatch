@@ -6,7 +6,7 @@
 <title>{{.Session}} on {{.Host}}</title>
 <link rel="stylesheet" href="/page.css">
 </head>
-<body data-host-state="Connecting">
+<body data-host-state="{{.HostState}}">
 <nav class="rail">
   <h1><a href="/">Dispatch</a></h1>
   <div id="rail">
@@ -36,20 +36,21 @@
   <h1>{{.Session}}</h1>
   <p class="host">
     on {{.Host}}
-    <span class="mark" id="host-mark">connecting</span>
-    <time id="stale"></time>
+    <span class="mark" id="host-mark"></span>
+    <time id="stale"{{if .Since}} datetime="{{.Since}}"{{end}}>{{if .Since}}Stale since {{.Since}}{{end}}</time>
   </p>
   <p class="pair">
     <span class="pill" id="state" data-session-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</span>
-    <span class="pill host" id="host-state" data-host-state="Connecting">Connecting</span>
+    <span class="pill host" id="host-state" data-host-state="{{.HostState}}">{{.HostState}}</span>
     <span id="host-cause"></span>
     <button type="button" id="interrupt" disabled>Interrupt</button>
     <button type="button" id="stop" disabled>Stop</button>
   </p>
-  <section class="vendors" aria-labelledby="vendors-title">
-    <h2 id="vendors-title">Vendors</h2>
-    <ul id="vendors"></ul>
-  </section>
+  <p class="serving">
+    <span id="serving-harness">{{.Harness}}</span>
+    <span id="serving-model">{{.Model}}</span>
+    <span id="serving-vendor" data-base="{{.Vendor}}">{{.Vendor}}</span>
+  </p>
 </header>
 <ol id="transcript" data-host="{{.Host}}" data-session="{{.Session}}" data-cursor="{{.Cursor}}">
 {{- range .Rows}}

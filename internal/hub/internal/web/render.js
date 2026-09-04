@@ -10,7 +10,7 @@
 function draw(kind, p) {
   switch (kind) {
     case "SessionStarted":
-      return { title: "Session started", detail: `${p.harness} on ${p.model} via ${p.vendor}, in ${p.cwd}` };
+      return { title: "Session started", detail: `${p.harness} via ${p.vendor}, in ${p.cwd}` };
     case "SessionReady":
       return { title: "Session ready", detail: p.model };
     case "ApprovalPolicySet":

@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,10 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 )
+
+type piWriter func([]byte) (int, error)
+
+func (w piWriter) Write(p []byte) (int, error) { return w(p) }
 
 // piVendor is one Session's Vendor and the Model on it, which travel together
 // through every replay because the launch checks them together.
@@ -290,6 +295,34 @@ func TestAnotherPiExtensionsFailureIsNotTheGates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "announce") {
 		t.Errorf("the launch failed with %q, which does not say the Gate was missing", err)
+	}
+}
+
+// Pi may answer the start probe and then close stdout before Start gets CPU.
+// The answer arrived first, so the launch decision must use it.
+func TestPiLaunchKeepsAProbeAnswerThatArrivedBeforeExit(t *testing.T) {
+	for range 100 {
+		r := &piRun{
+			name:    "pi",
+			spec:    SessionSpec{Model: lmstudio.model, Vendor: lmstudio.vendor},
+			ready:   true,
+			stopped: make(chan struct{}),
+			gone:    make(chan struct{}),
+		}
+		r.in = piWriter(func(p []byte) (int, error) {
+			r.answered(piFrame{
+				ID:      startProbe,
+				Success: true,
+				Data: json.RawMessage(`{"model":{"id":"qwen/qwen3.5-9b",` +
+					`"provider":"lmstudio","baseUrl":"http://127.0.0.1:1234/v1"}}`),
+			})
+			close(r.gone)
+			return len(p), nil
+		})
+
+		if err := r.checkLaunch(t.Context()); err != nil {
+			t.Fatalf("a start-probe answer was lost behind process exit: %v", err)
+		}
 	}
 }
 
