@@ -73,7 +73,22 @@ h2 {
 .meta { color: var(--mist-dim); font-size: 14px; }
 
 .host { margin: 0.4rem 0; color: var(--mist); }
-.mark, #stale { margin-left: 0.35rem; }
+.mark, #stale, .host .id { margin-left: 0.35rem; }
+
+/* The name is the heading, so it is drawn as the user typed it. Every other
+   heading on the page is a word this build chose and can shout; this one is not. */
+#name { text-transform: none; }
+
+/* The name is the heading, so renaming is typing in it. The affordance is the
+   rule under it: grey when the pointer is on it, orchid while it is being typed
+   in. A box beside the heading would be a second name. */
+#name { cursor: text; border-bottom: 1px solid transparent; }
+#name:hover { border-bottom-color: var(--rule); }
+#name:focus { outline: none; border-bottom-color: var(--orchid); }
+
+/* The id, which is the name every Host uses. The name above it is this browser's
+   own, so the id stays on the page. */
+.host .id { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist-dim); }
 .mark { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
 #stale { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--amber); }
 
@@ -157,7 +172,9 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
   margin-top: 0.35rem;
 }
 
-.rrow b { flex: 1; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The name takes the row's first line to itself. It is the part a person reads
+   the rail by, and a name sharing a line with three chips is a name cut short. */
+.rrow b { flex: 1 0 100%; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rrow:hover { background: var(--slab); }
 .rrow.on { background: var(--slab-2); border-color: var(--rule); color: #ede9f4; }
 
@@ -219,6 +236,26 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
 .landing .sessions li.meta { display: block; background: none; border: 0; padding: 0; }
 .quiet { margin-top: 2rem; }
 
+/* A link that starts something is drawn as a button. A page reads the shape of
+   its actions before it reads their words. */
+.actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 1.1rem 0 0; }
+.button {
+  display: inline-block;
+  padding: 11px 18px;
+  background: #fff;
+  color: #000;
+  border: 1px solid #fff;
+  border-radius: 16px;
+  corner-shape: squircle;
+  font: 700 12px/1 var(--display);
+  text-decoration: none;
+}
+.button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
+
+/* The way back is not the way on, so it carries the outline and not the fill. */
+.button.quiet { background: none; color: var(--mist); border-color: var(--rule); }
+.button.quiet:hover { border-color: var(--orchid); color: #ede9f4; box-shadow: none; }
+
 /* The Hosts view. One card per machine, and no machine is ever hidden. */
 .machines { max-width: 1180px; margin: 0 auto; padding: 34px 24px 80px; }
 .card {
@@ -251,6 +288,20 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
 .card[data-host-state="Connecting"] { box-shadow: inset 2px 0 0 var(--amber); }
 .card[data-host-state="Incompatible"] { box-shadow: inset 2px 0 0 var(--orchid); }
 .stamp { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--red); }
+
+/* RAM and VRAM. Nothing reads them from a Host yet, so the track is drawn empty
+   and the row says so. A bar at a made-up level would be a reading. */
+.gauges { margin: 0.2rem 0 0.9rem; }
+.card .gauges li { gap: 0.6rem; }
+.gauges .kind { min-width: 3.4rem; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
+.gauges .track {
+  flex: 1;
+  min-width: 6rem;
+  height: 6px;
+  border: 1px solid var(--rule);
+  border-radius: 99px;
+  background: repeating-linear-gradient(100deg, transparent 0 6px, rgba(177, 92, 255, 0.12) 6px 12px);
+}
 .vendors [data-reachable="false"] { opacity: 0.7; }
 
 /* The wizard. Four steps, each one an address of its own. */
@@ -375,8 +426,6 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 .composer {
   position: sticky;
   bottom: 0;
-  margin-top: 1.2rem;
-  padding: 0.8rem 0;
   padding: 0.8rem 0 1.4rem;
   max-width: 72ch;
   margin: 1.2rem auto 0;

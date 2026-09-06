@@ -21,6 +21,7 @@ type running struct {
 	Host    string
 	Session string
 	Cwd     string
+	Name    string
 	Harness string
 	Model   string
 	State   string
@@ -46,7 +47,7 @@ func (c *client) landing(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		view.Running = append(view.Running, running{
-			Host: e.Host, Session: e.Session, Cwd: e.Cwd,
+			Host: e.Host, Session: e.Session, Cwd: e.Cwd, Name: e.Name,
 			Harness: e.Harness, Model: e.Model, State: e.SessionState,
 		})
 	}

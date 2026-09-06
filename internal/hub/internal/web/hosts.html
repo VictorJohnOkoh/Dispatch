@@ -10,7 +10,8 @@
 <main class="machines">
 <header>
   <h1>Hosts</h1>
-  <p class="meta">This view shows machines. Starting a Session is the wizard's, at <a href="/new">New Session</a>.</p>
+  <p class="meta">This view shows machines. Starting a Session is the wizard's.</p>
+  <p class="actions"><a class="button" href="/new">New Session</a></p>
 </header>
 
 {{- range .Cards}}
@@ -24,6 +25,15 @@
     <span class="stamp">asked at {{.Asked}}, and it did not answer</span>
     {{- end}}
   </header>
+
+  {{- /* RAM and VRAM are not read from a Host yet. The row is drawn empty rather
+         than left out, so the card keeps the shape it will have when the reading
+         arrives, and nobody reads a card with no memory row as a machine with no
+         memory. */}}
+  <ul class="gauges">
+    <li><span class="kind">RAM</span><span class="track"></span><span class="meta">not measured yet</span></li>
+    <li><span class="kind">VRAM</span><span class="track"></span><span class="meta">not measured yet</span></li>
+  </ul>
 
   {{- /* The Vendor row is filled from the vendors frame, which carries
          reachability beside the resident list. An unreachable Vendor empties it
@@ -40,7 +50,9 @@
   <ul class="sessions">
     {{- range .Sessions}}
     <li>
-      <a href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}">{{.Cwd}}</a>
+      <a href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}"
+         data-name-host="{{.Host}}" data-name-session="{{.Session}}"
+         title="{{.Cwd}}">{{.Name}}</a>
       <span class="pill" data-session-state="{{.SessionState}}">{{.SessionState}}</span>
     </li>
     {{- else}}
@@ -50,8 +62,9 @@
 </section>
 {{- end}}
 
-<p><a href="/">Back to Dispatch</a></p>
+<p class="actions"><a class="button quiet" href="/">Back to Dispatch</a></p>
 </main>
+<script src="/names.js"></script>
 <script src="/hosts.js"></script>
 </body>
 </html>

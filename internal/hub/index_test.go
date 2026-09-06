@@ -44,9 +44,10 @@ func TestTheLandingPageLinksEverySessionThatIsRunning(t *testing.T) {
 			t.Errorf("no way in to %s: %s", want, body)
 		}
 	}
-	// The Session's working directory is what a person recognises. An id is what
-	// the address needs and not what they remember.
-	if !strings.Contains(body, "/home/victor/s-1") {
+	// A Session is drawn by name, which starts as the last part of its working
+	// directory. The whole directory stays on the link, because the last part alone
+	// does not tell two checkouts apart.
+	if !strings.Contains(body, `title="/home/victor/s-1"`) {
 		t.Errorf("a Session is drawn with nothing a person would recognise: %s", body)
 	}
 	if !strings.Contains(body, "Working") {

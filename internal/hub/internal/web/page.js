@@ -332,7 +332,7 @@ function drawRail(entries) {
     if (e.Session) {
       row.dataset.sessionRow = e.Session;
       row.href = `/hosts/${encodeURIComponent(e.Host)}/sessions/${encodeURIComponent(e.Session)}`;
-      row.append(node("b", "", e.Cwd));
+      row.append(named(e));
     }
     row.append(node("span", "meta", e.Host));
     if (e.Session) {
@@ -347,6 +347,43 @@ function drawRail(entries) {
   }
   rail.replaceChildren(...drawn);
 }
+
+// named is the rail's label for one Session: the name typed in this browser, or
+// the work directory the Hub drew when nobody has typed one.
+function named(e) {
+  const b = node("b", "", givenName(e.Host, e.Session, e.Name));
+  b.dataset.nameHost = e.Host;
+  b.dataset.nameSession = e.Session;
+  return b;
+}
+
+// The name on the desk is the one place a Session is renamed. It is the heading
+// itself rather than a box beside it, because the name is what the heading says
+// and two of them would be two names.
+//
+// Enter ends the edit and Escape abandons it. An empty name is not a name, so it
+// gives the work directory back.
+const heading = document.getElementById("name");
+heading.onkeydown = (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault?.();
+    heading.blur();
+  } else if (e.key === "Escape") {
+    heading.textContent = givenName(host, session, heading.dataset.drawn);
+    heading.blur();
+  }
+};
+
+heading.onblur = () => {
+  const given = heading.textContent.trim();
+  renameSession(host, session, given === heading.dataset.drawn ? "" : given);
+  heading.textContent = givenName(host, session, heading.dataset.drawn);
+  document.title = `${heading.textContent} on ${host}`;
+  // The rail carries the same name, and it is on the page already. Redrawing it
+  // from the Hub would put a read in flight to learn something this browser is the
+  // only holder of.
+  drawNames();
+};
 
 // apply puts one Event on the page, replacing the row it already had rather than
 // doubling it, so a replayed Event costs a redrawn row and nothing else. A row is

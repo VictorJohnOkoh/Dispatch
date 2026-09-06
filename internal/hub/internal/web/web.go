@@ -46,7 +46,7 @@ type Hosts interface {
 // The three faces ship in the binary. A Hub on a machine with no internet is the
 // normal case, and a page that reaches out for its fonts loses its look there.
 //
-//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js fonts/*.woff2
+//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js names.js fonts/*.woff2
 var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
@@ -114,6 +114,7 @@ func New(hosts Hosts) http.Handler {
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /hosts.js", asset("hosts.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /names.js", asset("names.js", "text/javascript; charset=utf-8"))
 	for _, face := range []string{"archivo", "karla", "martian-mono"} {
 		name := "fonts/" + face + ".woff2"
 		mux.HandleFunc("GET /"+name, asset(name, "font/woff2"))
@@ -146,6 +147,7 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 	if err := page.Execute(w, view{
 		Host:      host,
 		Session:   id,
+		Name:      named(rail, host, id),
 		Cursor:    protocol.MergedCursor{host: at}.String(),
 		State:     state.String(),
 		Reason:    string(reason),
@@ -183,6 +185,10 @@ type view struct {
 	Host    string
 	Session string
 	Cursor  string
+
+	// Name is what this Session is called on screen, which the browser may replace
+	// with one the user typed over it.
+	Name string
 
 	// State is the Session's, folded here for the first paint. The browser folds it
 	// again from the same Events and keeps folding as they arrive, which is why
@@ -266,10 +272,11 @@ func serving(events []protocol.Event) (harness, model, vendor string) {
 // inside a payload it is passing through, so nothing a Harness writes can close
 // the tag.
 func payloads(value any) template.JS {
+	// Nothing here can fail that the page can do anything about, and a Session with
+	// no Events marshals to null, which the loop that reads this stops on. Both are
+	// a page that folds from the stream alone, so both are the empty list.
 	raw, err := json.Marshal(value)
-	if err != nil {
-		// Nothing here can fail that the page can do anything about, and an empty
-		// list is a page that folds from the stream alone.
+	if err != nil || string(raw) == "null" {
 		return template.JS("[]")
 	}
 	return template.JS(raw)

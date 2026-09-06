@@ -226,3 +226,18 @@ func TestTheFirstPaintCarriesTheThreeCommands(t *testing.T) {
 		}
 	}
 }
+
+// A Session with no Events yet is a page with nothing to fold, not a page with
+// nothing working. It once carried null, and the loop that reads it stopped there,
+// which left the whole page dead.
+func TestASessionWithNoEventsCarriesAnEmptyList(t *testing.T) {
+	body := railPage(t, map[hostset.HostID]http.Handler{"desk": railHost("s-1 Starting")},
+		"/hosts/desk/sessions/s-1")
+
+	if strings.Contains(body, ">null<") {
+		t.Errorf("the first paint carries null: %s", body)
+	}
+	if !strings.Contains(body, `id="events">[]<`) {
+		t.Errorf("the first paint does not carry an empty list: %s", body)
+	}
+}

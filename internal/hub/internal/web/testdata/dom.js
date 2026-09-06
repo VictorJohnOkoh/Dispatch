@@ -73,6 +73,12 @@ const stopElement = new El("button");
 const interruptElement = new El("button");
 pairElement.append(interruptElement, stopElement);
 
+// The heading, which is the Session's name and the one place it is renamed. The
+// server drew the work directory into it.
+const nameElement = new El("h1");
+nameElement.dataset.drawn = "w";
+nameElement.textContent = "w";
+
 // The toast rack, empty until a question from another Session raises one.
 const toastRack = new El("div");
 
@@ -82,6 +88,11 @@ approvals.textContent = "[]";
 
 const body = new El("body");
 
+// The whole page, so a sweep for the elements that print a Session name has
+// somewhere to start.
+const page = new El("div");
+page.append(nameElement, railNav);
+
 globalThis.document = {
   getElementById: (id) => ({
     transcript,
@@ -90,6 +101,7 @@ globalThis.document = {
     approvals,
     rail: railNav,
     toasts: toastRack,
+    name: nameElement,
     "host-state": hostStateElement,
     "host-cause": hostCauseElement,
     "host-mark": hostMarkElement,
@@ -103,7 +115,17 @@ globalThis.document = {
     interrupt: interruptElement,
   })[id] ?? null,
   createElement: (tag) => new El(tag),
+  querySelectorAll: (selector) => page.querySelectorAll(selector),
   body,
+};
+
+// The browser's own store, which is where a rename lives and the only place it
+// ever lives.
+const kept = new Map();
+globalThis.localStorage = {
+  getItem: (key) => kept.get(key) ?? null,
+  setItem: (key, value) => kept.set(key, String(value)),
+  removeItem: (key) => kept.delete(key),
 };
 
 // EventSource, as one page holds one of. The test dispatches frames into it.
@@ -161,6 +183,8 @@ globalThis.dom = {
   embedded,
   rail: railNav,
   toasts: toastRack,
+  name: nameElement,
+  kept,
   body,
   row,
   promptBox: promptElement,

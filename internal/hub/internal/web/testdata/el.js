@@ -39,6 +39,12 @@ class El {
     }
   }
 
+  // The page calls this to end an edit, and the handler it runs is the one the
+  // browser would run.
+  blur() {
+    this.onblur?.();
+  }
+
   before(el) {
     el.parent = this.parent;
     this.parent.children.splice(this.parent.children.indexOf(this), 0, el);
@@ -63,6 +69,17 @@ class El {
   replaceWith(el) {
     el.parent = this.parent;
     this.parent.children[this.parent.children.indexOf(this)] = el;
+  }
+
+  // querySelectorAll answers the one selector names.js asks for, which is the
+  // attribute a Session name is marked with.
+  querySelectorAll(selector) {
+    const found = [];
+    for (const c of this.children) {
+      if (selector === "[data-name-host]" && c.dataset.nameHost !== undefined) found.push(c);
+      found.push(...c.querySelectorAll(selector));
+    }
+    return found;
   }
 
   // querySelector answers the one selector page.js asks for, which is a class.
