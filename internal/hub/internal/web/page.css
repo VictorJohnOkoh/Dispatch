@@ -80,13 +80,13 @@ h2 {
 /* What is serving this Session: the Harness, the Model and the Vendor. It is the
    whole of what the header says about the machinery, and what a Host serves
    besides is the Hosts view's. */
-.serving { margin: 0.4rem 0 0.8rem; font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.8; }
-.serving span + span::before { content: " · "; opacity: 0.6; }
+.serving { margin: 0.6rem 0 0.8rem; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
+.serving span + span::before { content: " · "; color: var(--mist-dim); }
 
 /* The Vendor row on the Hosts view, which is a different thing: what a machine
    serves, rather than what one Session is using. */
 .vendors { margin: 0.4rem 0 0.8rem; }
-.vendors h2 { display: inline; font: inherit; font-weight: 600; }
+.vendors h2 { display: inline; margin: 0; }
 .vendors ul { display: inline; margin: 0; padding: 0; list-style: none; }
 .vendors li { display: inline; margin-left: 0.5rem; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
 .vendors .detail { display: inline; }
@@ -179,7 +179,8 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
 }
 .rail .new:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 
-.desk { margin-left: 17rem; padding: 0 1.5rem; }
+.desk { margin-left: 18rem; padding: 1.6rem 1.8rem 0; }
+.desk > header { max-width: 72ch; margin: 0 auto 1.6rem; }
 
 /* The landing page. Two doors and a list, and it draws nothing live. */
 .landing { max-width: 1180px; margin: 0 auto; padding: 34px 24px 80px; }
@@ -328,11 +329,11 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 
 /* Stop and Interrupt sit with the State they act on, because the State is what
    decides whether either one is offered. */
-.pair button { font: inherit; font-size: 0.75rem; padding: 0.1rem 0.7rem; border-radius: 99px;
-               border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
-.pair button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
+.pair button { font: 400 11px/1 var(--mono); letter-spacing: -0.03em; padding: 6px 11px; border-radius: 99px;
+               border: 1px solid var(--rule); background: none; color: var(--mist); }
+.pair button:hover:enabled { border-color: var(--orchid); color: #ede9f4; box-shadow: none; }
 .pair button:disabled { opacity: 0.4; }
-#stop:enabled { border-color: #c05050; }
+#stop:enabled { border-color: var(--red); }
 
 .pill {
   display: inline-flex;
@@ -376,28 +377,24 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
   bottom: 0;
   margin-top: 1.2rem;
   padding: 0.8rem 0;
-  background: Canvas;
+  padding: 0.8rem 0 1.4rem;
+  max-width: 72ch;
+  margin: 1.2rem auto 0;
+  background: var(--ink);
 }
 .composer textarea {
   width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-  padding: 0.6rem;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 7px;
-  background: none;
-  color: inherit;
+  padding: 14px 18px;
+  border-radius: 22px;
+  corner-shape: squircle;
   resize: vertical;
 }
 .composer textarea:disabled { opacity: 0.5; }
-.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0; }
-.composer .send button { font: inherit; padding: 0.4rem 1.1rem; border-radius: 7px;
-                         border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
-.composer .send button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
-.composer .send button:disabled { opacity: 0.4; }
+.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.6rem 0 0; }
+.composer .send button:disabled { opacity: 0.35; box-shadow: none; cursor: not-allowed; }
 
 /* Why a command did not land, beside the button that was pressed. */
-.why { margin: 0; font-size: 0.8rem; color: #c05050; }
+.why { margin: 0; font: 400 11px/1.4 var(--mono); letter-spacing: -0.04em; color: var(--red); }
 
 /* The toast, and it is load-bearing. This layout hides every Session but one, so
    a question from any other Session has no other way to reach the user. Two
