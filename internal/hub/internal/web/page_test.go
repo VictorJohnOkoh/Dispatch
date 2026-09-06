@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -838,5 +839,27 @@ func TestTheSessionHeaderCarriesNoFrozenHostPill(t *testing.T) {
 	}
 	if strings.Contains(header, "data-host-answering") {
 		t.Error("the header still draws a Host pill the stream never writes")
+	}
+}
+
+// The three faces ship in the binary, so the look survives a Hub with no
+// internet. A face the stylesheet names and the binary does not carry is the
+// same outage with an extra step.
+func TestEveryFaceTheStylesheetNamesShipsInTheBinary(t *testing.T) {
+	css, err := files.ReadFile("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(css), "fonts.googleapis.com") || strings.Contains(string(css), "fonts.gstatic.com") {
+		t.Error("the stylesheet still fetches a font over the internet")
+	}
+	faces := regexp.MustCompile(`url\("(/fonts/[^"]+)"\)`).FindAllStringSubmatch(string(css), -1)
+	if len(faces) != 3 {
+		t.Fatalf("the stylesheet names %d faces", len(faces))
+	}
+	for _, face := range faces {
+		if _, err := files.ReadFile(strings.TrimPrefix(face[1], "/")); err != nil {
+			t.Errorf("%s is named and not carried: %v", face[1], err)
+		}
 	}
 }
