@@ -167,8 +167,8 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 // Load is called here, before SessionReady, so the wait for a cold Model is inside
 // a state the user can see and cancel. It also disables the Vendor's own evictor
 // for the Session's life, which is what makes Idle mean idle rather than a Prompt
-// that costs twenty seconds. Nothing calls Unload: that is reserved for the VRAM
-// policy which is out of v1.
+// that costs twenty seconds. release() is the other half: the Session's life ends
+// somewhere, and the Model has to come back with it.
 func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vendors.Adapter) {
 	if err := vendor.Load(ctx, s.model); err != nil {
 		d.endFailed(s, event.ErrVendor, fmt.Sprintf("the Model %s would not load: %v", s.model, err))
@@ -214,7 +214,47 @@ func (d *Daemon) endFailed(s *Session, code event.ErrorCode, msg string) {
 	// A Harness that died still has a group, and on Windows that group is a handle
 	// that a child of its own may still be living inside.
 	d.kill(s)
+	d.release(s)
 	s.cancel()
+}
+
+// unloadWait bounds the Unload one ending Session runs.
+const unloadWait = 5 * time.Second
+
+// release gives the Model back. Load turned the Vendor's own evictor off for the
+// Session's life, so a Session that ends and unloads nothing leaves the Model in
+// VRAM until somebody restarts the Vendor.
+//
+// A Model another live Session is using stays. The Vendor serves both Sessions
+// from one copy, so unloading it here would take it from under that one.
+//
+// The Session's own context is already cancelled or about to be, so this runs on
+// one of its own: the Model has to come back even when the reason the Session
+// ended was that everything about it was cancelled.
+func (d *Daemon) release(s *Session) {
+	if d.sessions.stillServing(s) {
+		return
+	}
+	d.unload(s.id, s.model, s.vendor)
+}
+
+// unload asks one Vendor to make one Model not resident. The boot sweep calls it
+// too, for the Sessions the last run left loaded, so it takes the three strings
+// rather than a Session: a swept Session belongs to a run that is over and is
+// never in this run's registry.
+func (d *Daemon) unload(id event.SessionID, model, base string) {
+	vendor := d.vendors.at(base)
+	if vendor == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(d.base), unloadWait)
+	defer cancel()
+	// A Model the Vendor does not have is a Model that is not resident, which is
+	// what this asked for. Only a Vendor that failed some other way is news.
+	if err := vendor.Unload(ctx, model); err != nil && !errors.Is(err, vendors.ErrModelNotFound) {
+		d.log.Warn("the Model stayed resident after its Session ended",
+			"session", id, "model", model, "vendor", base, "err", err)
+	}
 }
 
 // ladder is ADR 0008's shutdown ladder, in order. Steps 1 and 2 free a Harness
@@ -584,6 +624,22 @@ func (r *sessions) endOnce(s *Session) bool {
 	}
 	s.ending = true
 	return true
+}
+
+// stillServing reports whether a Session other than this one is live on the same
+// Vendor and the same Model.
+func (r *sessions) stillServing(s *Session) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, other := range r.all {
+		if other == s || other.vendor != s.vendor || other.model != s.model {
+			continue
+		}
+		if state, _ := session.Fold(other.events); state != session.Ended {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *sessions) setRun(s *Session, run harness.Run) {

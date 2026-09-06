@@ -10,6 +10,12 @@ class El {
     this.children = [];
     this.parent = null;
     this._text = "";
+
+    // What the page writes on a control: the text in the prompt box, and whether
+    // a command is offered. Both are read back by the tests.
+    this.value = "";
+    this.disabled = false;
+    this.placeholder = "";
   }
 
   // textContent is this element's own text and its children's, in order, which is

@@ -180,6 +180,13 @@ func (r *piRun) checkLaunch(ctx context.Context) error {
 	case got := <-answered:
 		return r.accept(got)
 	case <-r.gone:
+		// The reader sends the probe answer before it closes gone. Both may be
+		// ready before this goroutine runs, so keep the answer that arrived first.
+		select {
+		case got := <-answered:
+			return r.accept(got)
+		default:
+		}
 		// Pi exits 1 on an extension that does not parse, before it answers anything.
 		return fmt.Errorf("%s: the Harness ended before it answered the start probe", r.name)
 	case <-r.stopped:

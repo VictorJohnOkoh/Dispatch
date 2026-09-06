@@ -388,6 +388,21 @@ func TestStopEndsTheSessionWithReasonStopped(t *testing.T) {
 	h.idle(t)
 }
 
+// Load turned the Vendor's evictor off for the Session's life, so the end of that
+// life is where the Model comes back. Without this the Model sits in VRAM until
+// somebody restarts the Vendor.
+func TestAStoppedSessionGivesItsModelBack(t *testing.T) {
+	h := newHost(t)
+	id := h.idle(t)
+
+	h.command(t, id, "stop", "")
+	h.waitState(t, id, "Ended")
+
+	if got := h.vendor.unloads(); len(got) != 1 || got[0] != "qwen3:8b" {
+		t.Errorf("Unload was called with %v, want [qwen3:8b]", got)
+	}
+}
+
 // A stop on a Session that is still Starting ends it as stopped, and the launch it
 // cancelled does not write a second end.
 func TestStopWhileStartingEndsTheSessionOnce(t *testing.T) {

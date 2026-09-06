@@ -92,7 +92,10 @@ func draw(e event.Event) row {
 	switch p := e.Payload.(type) {
 	case *event.SessionStarted:
 		r.Title = "Session started"
-		r.Detail = fmt.Sprintf("%s on %s via %s, in %s", p.Harness, p.Model, p.Vendor, p.Cwd)
+		// The Model is not here. SessionReady names the one the Harness reported,
+		// and the two are the same Model almost always, so naming it twice reads as
+		// two Models.
+		r.Detail = fmt.Sprintf("%s via %s, in %s", p.Harness, p.Vendor, p.Cwd)
 	case *event.SessionReady:
 		r.Title = "Session ready"
 		r.Detail = p.Model

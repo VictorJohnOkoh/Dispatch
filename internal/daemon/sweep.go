@@ -65,7 +65,28 @@ func (d *Daemon) endLost(id event.SessionID) error {
 		w.write(event.KindToolCallEnded, &event.ToolCallEnded{ToolCallID: call, Outcome: outcome})
 	}
 	w.write(event.KindSessionEnded, &event.SessionEnded{Reason: event.EndLost})
-	return w.err
+	if w.err != nil {
+		return w.err
+	}
+	// The Model this Session loaded is still resident: the run that loaded it died
+	// without unloading it, and Load turned the Vendor's evictor off. Ending the
+	// Session in the log and leaving the Model in VRAM would be half an ending.
+	if model, base, found := loaded(events); found {
+		d.unload(id, model, base)
+	}
+	return nil
+}
+
+// loaded is the Model one swept Session was running and the Vendor that served
+// it, read from its SessionStarted. A Session with no SessionStarted never
+// reached a Load and has nothing to give back.
+func loaded(events []event.Event) (model, base string, found bool) {
+	for _, e := range events {
+		if started, ok := e.Payload.(*event.SessionStarted); ok {
+			return started.Model, started.Vendor, true
+		}
+	}
+	return "", "", false
 }
 
 // lost appends one abandoned Session's ending Events in order, keeping the first

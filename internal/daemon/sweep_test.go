@@ -8,6 +8,7 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 	"github.com/VictorJohnOkoh/Dispatch/internal/session"
+	"github.com/VictorJohnOkoh/Dispatch/internal/vendors"
 )
 
 // killed is what a Daemon that died and came back is: a second Daemon over the
@@ -23,7 +24,11 @@ func killed(t *testing.T, h *host) *Daemon {
 	}
 	t.Cleanup(func() { events.Close() })
 
-	d := New(slog.New(slog.NewTextHandler(h.lines, nil)), events, h.root, h.Daemon.root, nil, nil, event.Policy{})
+	// The same Vendors the dead run was configured with, because the config does
+	// not change when a Daemon restarts, and the sweep gives back the Models that
+	// run left resident.
+	d := New(slog.New(slog.NewTextHandler(h.lines, nil)), events, h.root, h.Daemon.root,
+		[]vendors.Adapter{h.vendor}, nil, event.Policy{})
 	if err := d.sweep(); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -68,6 +73,21 @@ func TestADaemonKilledUnderALiveSessionEndsItLostOnTheNextBoot(t *testing.T) {
 		if after[i].Seq != was.Seq || after[i].Kind != was.Kind {
 			t.Fatalf("Event %d changed: %+v, was %+v", i, after[i], was)
 		}
+	}
+}
+
+// A Daemon that died left its Model resident, because Load turned the Vendor's
+// evictor off and the run that owned the Session never came back to turn it on.
+// Ending the Session in the log and leaving the Model in VRAM is half an ending.
+func TestTheSweepGivesBackTheModelALostSessionLeftLoaded(t *testing.T) {
+	h := newHost(t)
+	id := h.started(t, h.post(t, "/v1/sessions", startBody)).Session
+	h.waitState(t, id, "Idle")
+
+	killed(t, h)
+
+	if got := h.vendor.unloads(); len(got) != 1 || got[0] != "qwen3:8b" {
+		t.Errorf("the sweep unloaded %v, want [qwen3:8b]", got)
 	}
 }
 

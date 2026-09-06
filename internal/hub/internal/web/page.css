@@ -77,8 +77,16 @@ h2 {
 .mark { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
 #stale { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--amber); }
 
-.vendors { margin: 0.6rem 0 0.8rem; }
-.vendors h2 { display: inline; margin: 0; }
+/* What is serving this Session: the Harness, the Model and the Vendor. It is the
+   whole of what the header says about the machinery, and what a Host serves
+   besides is the Hosts view's. */
+.serving { margin: 0.4rem 0 0.8rem; font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.8; }
+.serving span + span::before { content: " · "; opacity: 0.6; }
+
+/* The Vendor row on the Hosts view, which is a different thing: what a machine
+   serves, rather than what one Session is using. */
+.vendors { margin: 0.4rem 0 0.8rem; }
+.vendors h2 { display: inline; font: inherit; font-weight: 600; }
 .vendors ul { display: inline; margin: 0; padding: 0; list-style: none; }
 .vendors li { display: inline; margin-left: 0.5rem; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
 .vendors .detail { display: inline; }
@@ -171,8 +179,7 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
 }
 .rail .new:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 
-.desk { margin-left: 18rem; padding: 1.6rem 1.8rem 4rem; }
-.desk > header { max-width: 72ch; margin: 0 auto 1.6rem; }
+.desk { margin-left: 17rem; padding: 0 1.5rem; }
 
 /* The landing page. Two doors and a list, and it draws nothing live. */
 .landing { max-width: 1180px; margin: 0 auto; padding: 34px 24px 80px; }
@@ -317,7 +324,15 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 /* The pair. Session State beside Host State, because Working on a Ready Host and
    Working on a Host that stopped answering mean different things and look the
    same. */
-.pair { display: flex; gap: 0.4rem; margin: 0.6rem 0 0.9rem; align-items: center; }
+.pair { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.8rem; align-items: center; flex-wrap: wrap; }
+
+/* Stop and Interrupt sit with the State they act on, because the State is what
+   decides whether either one is offered. */
+.pair button { font: inherit; font-size: 0.75rem; padding: 0.1rem 0.7rem; border-radius: 99px;
+               border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
+.pair button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
+.pair button:disabled { opacity: 0.4; }
+#stop:enabled { border-color: #c05050; }
 
 .pill {
   display: inline-flex;
@@ -351,6 +366,38 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 .row[data-tone="bad"] { border-left-color: var(--red); }
 .row[data-tone="unknown"] { border-left-color: var(--mist-dim); }
 .row[data-tone="asking"] { border-left-color: var(--amber); }
+
+/* The composer. It is the only way to say anything to a Session, so it sticks to
+   the bottom of the window rather than sitting under the last row: a long
+   transcript would otherwise scroll it off the screen, and a page with no visible
+   box reads as a page you can only watch. */
+.composer {
+  position: sticky;
+  bottom: 0;
+  margin-top: 1.2rem;
+  padding: 0.8rem 0;
+  background: Canvas;
+}
+.composer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  resize: vertical;
+}
+.composer textarea:disabled { opacity: 0.5; }
+.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0; }
+.composer .send button { font: inherit; padding: 0.4rem 1.1rem; border-radius: 7px;
+                         border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
+.composer .send button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
+.composer .send button:disabled { opacity: 0.4; }
+
+/* Why a command did not land, beside the button that was pressed. */
+.why { margin: 0; font-size: 0.8rem; color: #c05050; }
 
 /* The toast, and it is load-bearing. This layout hides every Session but one, so
    a question from any other Session has no other way to reach the user. Two
