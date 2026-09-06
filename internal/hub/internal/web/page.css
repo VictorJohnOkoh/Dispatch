@@ -431,16 +431,59 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
   margin: 1.2rem auto 0;
   background: var(--ink);
 }
-.composer textarea {
-  width: 100%;
-  padding: 14px 18px;
+
+/* The box holds the words and the one button, and it is the box that carries the
+   border. A box and a button with an edge each would read as two controls. */
+.box {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 8px 8px 8px 18px;
+  background: var(--slab);
+  border: 1px solid var(--rule);
   border-radius: 22px;
   corner-shape: squircle;
-  resize: vertical;
+  transition: border-color 0.12s ease;
 }
-.composer textarea:disabled { opacity: 0.5; }
-.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.6rem 0 0; }
-.composer .send button:disabled { opacity: 0.35; box-shadow: none; cursor: not-allowed; }
+.box:focus-within { border-color: var(--orchid); }
+
+#prompt {
+  flex: 1;
+  padding: 10px 0;
+  max-height: 200px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  font: 400 16px/1.5 var(--body);
+}
+#prompt::placeholder { color: var(--mist-dim); }
+.box:has(#prompt:disabled) { opacity: 0.5; }
+
+/* One button sends and stops, because a Prompt in flight is the only thing there
+   is to stop. The arrow and the square are both in the page and the mode picks
+   one, so the swap costs no drawing. */
+#send {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  corner-shape: round;
+  background: #fff;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+#send:hover:enabled { transform: scale(1.06); box-shadow: none; }
+#send:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+#send svg { width: 20px; height: 20px; fill: none; stroke: #000; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+#send .halt { fill: #000; stroke: none; }
+#send[data-mode="send"] .halt, #send[data-mode="stop"] .arrow { display: none; }
+
+.hint { margin: 8px 0 0; font-size: 12px; color: var(--mist-dim); }
 
 /* Why a command did not land, beside the button that was pressed. */
 .why { margin: 0; font: 400 11px/1.4 var(--mono); letter-spacing: -0.04em; color: var(--red); }

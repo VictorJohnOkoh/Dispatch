@@ -16,6 +16,20 @@ class El {
     this.value = "";
     this.disabled = false;
     this.placeholder = "";
+
+    // What the composer writes on the box as it grows, and the attributes the
+    // page sets by name rather than by property.
+    this.style = {};
+    this.scrollHeight = 0;
+    this.attrs = {};
+  }
+
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+  }
+
+  getAttribute(name) {
+    return this.attrs[name] ?? null;
   }
 
   // textContent is this element's own text and its children's, in order, which is

@@ -19,7 +19,7 @@ const promptBox = document.getElementById("prompt");
 const sendButton = document.getElementById("send");
 const stopButton = document.getElementById("stop");
 const interruptButton = document.getElementById("interrupt");
-const sendRow = sendButton.parentElement;
+const sendRow = document.getElementById("composer");
 const pair = stopButton.parentElement;
 const host = list.dataset.host;
 const session = list.dataset.session;
@@ -233,21 +233,41 @@ async function command(button, route, body) {
   return false;
 }
 
+// One button sends and stops, because a Prompt in flight is the only thing there
+// is to stop. Stopping one ends the answer and not the Session: the Session keeps
+// its transcript and takes the next Prompt, which is what interrupt does and stop
+// does not.
+//
 // The Prompt is emptied out of the box only once the Host has taken it. One that
 // was refused is still the user's words, and a box that cleared itself would lose
 // them.
 sendButton.onclick = async () => {
+  if (sendButton.dataset.mode === "stop") return command(sendButton, "interrupt");
   const text = promptBox.value.trim();
   if (!text) return;
-  if (await command(sendButton, "prompts", { text })) promptBox.value = "";
+  if (await command(sendButton, "prompts", { text })) {
+    promptBox.value = "";
+    grow();
+  }
 };
 
-// Enter is a newline in a Prompt, so the shortcut is Enter with a modifier. It
-// reads the button and not the box, because a Prompt already in flight has
-// disabled the button while the box the user is typing in stays open.
+// Enter sends and Shift with it starts a new line. It reads the button and not the
+// box, because a Prompt already in flight has disabled the button while the box
+// the user is typing in stays open.
 promptBox.onkeydown = (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !sendButton.disabled) sendButton.onclick();
+  if (e.key !== "Enter" || e.shiftKey) return;
+  e.preventDefault?.();
+  if (sendButton.dataset.mode === "send" && !sendButton.disabled) sendButton.onclick();
 };
+
+// The box starts one line high and grows with what is typed, up to the height the
+// stylesheet allows. A composer that took the window would leave no transcript.
+function grow() {
+  promptBox.style.height = "auto";
+  promptBox.style.height = `${promptBox.scrollHeight}px`;
+}
+
+promptBox.oninput = grow;
 
 interruptButton.onclick = () => command(interruptButton, "interrupt");
 stopButton.onclick = () => command(stopButton, "stop");
@@ -263,10 +283,16 @@ let offered = "";
 // disabled rather than hidden, so what a Session can do next is always in one
 // place. The Daemon decides either way: this only spares the user a refusal.
 function offer(state) {
+  const answering = state === "Working" || state === "Asking";
   promptBox.disabled = state !== "Idle";
   promptBox.placeholder = state === "Idle" ? "type a Prompt" : `this Session is ${state}`;
-  sendButton.disabled = state !== "Idle";
-  interruptButton.disabled = state !== "Working" && state !== "Asking";
+  // The one button follows the State: it sends while the Session waits and stops
+  // while it answers.
+  sendButton.dataset.mode = answering ? "stop" : "send";
+  sendButton.title = answering ? "Interrupt" : "Send";
+  sendButton.setAttribute("aria-label", sendButton.title);
+  sendButton.disabled = answering ? false : state !== "Idle";
+  interruptButton.disabled = !answering;
   stopButton.disabled = state === "Ended";
   if (state === offered) return;
   offered = state;
@@ -385,11 +411,30 @@ heading.onblur = () => {
   drawNames();
 };
 
+// The transcript grows at the bottom while it is being read, so the window follows
+// it. A reader who has scrolled up to something older is left there: a page that
+// pulled the view back would take away the thing being read.
+//
+// slack is how far off the bottom still counts as reading the end, because a
+// browser rounds and a sticky composer covers the last line or two.
+const slack = 120;
+
+function atTheEnd() {
+  const page = document.documentElement;
+  if (!page || !window) return false;
+  return window.innerHeight + window.scrollY >= page.scrollHeight - slack;
+}
+
+function keepUp(was) {
+  if (was) window.scrollTo(0, document.documentElement.scrollHeight);
+}
+
 // apply puts one Event on the page, replacing the row it already had rather than
 // doubling it, so a replayed Event costs a redrawn row and nothing else. A row is
 // put where its Sequence Number belongs, because a refetch that lands behind a
 // live Event would otherwise draw the transcript out of order.
 function apply(f) {
+  const end = atTheEnd();
   const el = render(f.seq, f.kind, draw(f.kind, f.payload));
   const old = rows.get(f.seq);
   if (old) {
@@ -404,6 +449,7 @@ function apply(f) {
   rows.set(f.seq, el);
   remember(f.seq, el);
   serving(f);
+  keepUp(end);
 }
 
 // serving keeps the header's line true. A Session that starts while its page is
@@ -505,12 +551,14 @@ stream.addEventListener("delta", (frame) => {
 function applyDelta(f, target) {
   const text = target ?? rows.get(f.seq)?.querySelector(".text");
   if (!text) return;
+  const end = atTheEnd();
   const next = deltaText(text.textContent, held.get(f.seq), f);
   // Appending touches only the new text, which is what keeps a message arriving
   // in a thousand Deltas from being copied whole a thousand times.
   if (next.append !== undefined) text.append(next.append);
   else text.textContent = next.text;
   held.set(f.seq, next.held);
+  keepUp(end);
 }
 
 // A resync says this page's Cursor is outside the log, or that the log it came
