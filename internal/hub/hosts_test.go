@@ -219,3 +219,28 @@ func TestReloadingTheHostsViewKeepsTheStaleSessionAndItsStamp(t *testing.T) {
 		}
 	}
 }
+
+// Every card keeps a row for RAM and VRAM. Nothing reads either from a Host yet,
+// so the row is drawn empty and says so: a card with no memory row would read as a
+// machine with no memory, and a bar at a made-up level would read as a reading.
+func TestEveryCardKeepsARowForMemoryAndSaysItIsNotMeasured(t *testing.T) {
+	body := machines(t)
+
+	for _, want := range []string{`class="gauges"`, ">RAM<", ">VRAM<", "not measured yet"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the card says nothing about %s", want)
+		}
+	}
+}
+
+// The two ways off this page are actions, so they are drawn as buttons. A page
+// reads the shape of its actions before it reads their words.
+func TestTheWayOnAndTheWayBackAreDrawnAsButtons(t *testing.T) {
+	body := machines(t)
+
+	for _, want := range []string{`<a class="button" href="/new">`, `<a class="button quiet" href="/">`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s is not drawn as a button", want)
+		}
+	}
+}

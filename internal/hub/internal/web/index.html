@@ -10,7 +10,7 @@
 <main class="landing">
 <header>
   <h1>Dispatch</h1>
-  <p class="meta">One Harness, one Model, one Host. This Hub holds {{.Hosts}} {{if eq .Hosts 1}}Host{{else}}Hosts{{end}}.</p>
+  <p class="meta">Currently {{.Hosts}} {{if eq .Hosts 1}}Host{{else}}Hosts{{end}} available.</p>
 </header>
 
 <nav class="doors">
@@ -23,7 +23,9 @@
   <ul class="sessions">
     {{- range .Running}}
     <li>
-      <a href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}">{{.Cwd}}</a>
+      <a href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}"
+         data-name-host="{{.Host}}" data-name-session="{{.Session}}"
+         title="{{.Cwd}}">{{.Name}}</a>
       <span class="pill" data-session-state="{{.State}}">{{.State}}</span>
       <span class="meta">{{.Harness}} on {{.Model}}, on {{.Host}}</span>
     </li>
@@ -41,5 +43,6 @@
 </p>
 {{- end}}
 </main>
+<script src="/names.js"></script>
 </body>
 </html>

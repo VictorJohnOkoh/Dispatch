@@ -31,6 +31,10 @@ type entry struct {
 	Harness string
 	Model   string
 
+	// Name is what this Session is called on screen. It is drawn from the work
+	// directory here and the browser may replace it with one the user typed.
+	Name string
+
 	// SessionState is the Session's own, folded from its Events by the Daemon that
 	// holds them. Neither it nor the Host half alone labels a row, which is the
 	// whole reason both are here.
@@ -203,6 +207,7 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 		}
 		out = append(out, entry{
 			Host: host, Session: s.ID, Cwd: s.Cwd, Harness: s.Harness, Model: s.Model,
+			Name:         sessionName(s.Cwd, s.ID),
 			SessionState: state, Answering: true, At: body.Cursor,
 		})
 	}

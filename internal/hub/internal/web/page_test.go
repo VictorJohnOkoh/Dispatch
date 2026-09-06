@@ -25,7 +25,7 @@ func pageUnderSetup(t *testing.T, setup, script string, into any) {
 	node := findNode(t)
 
 	var program strings.Builder
-	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js"} {
+	for _, name := range []string{"testdata/el.js", "testdata/dom.js", "fold.js", "render.js", "names.js"} {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -231,8 +231,8 @@ func TestAnEventOnAnotherHostRedrawsTheRail(t *testing.T) {
 	}
 	pageUnder(t, `
 railAnswer = [
-  {Host: "desk", Session: "s-1", Cwd: "/w", SessionState: "Working", Answering: true, On: true},
-  {Host: "attic", Session: "s-9", Cwd: "/other", SessionState: "Asking", Answering: true},
+  {Host: "desk", Session: "s-1", Cwd: "/w", Name: "w", SessionState: "Working", Answering: true, On: true},
+  {Host: "attic", Session: "s-9", Cwd: "/other", Name: "other", SessionState: "Asking", Answering: true},
   {Host: "shed", Answering: false},
 ];
 opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "ApprovalRequested", payload: {toolCallId: "c1"}});
@@ -250,7 +250,7 @@ setTimeout(() => {
 	if len(got.Rows) != 3 {
 		t.Fatalf("the rail holds %v", got.Rows)
 	}
-	if !strings.Contains(got.Rows[1], "Asking") || !strings.Contains(got.Rows[1], "/other") {
+	if !strings.Contains(got.Rows[1], "Asking") || !strings.Contains(got.Rows[1], "other") {
 		t.Errorf("the other Host's Session reads %q", got.Rows[1])
 	}
 	// The pair, on a row for a Session this page is not drawing.
@@ -1084,5 +1084,72 @@ func TestEveryFaceTheStylesheetNamesShipsInTheBinary(t *testing.T) {
 		if _, err := files.ReadFile(strings.TrimPrefix(face[1], "/")); err != nil {
 			t.Errorf("%s is named and not carried: %v", face[1], err)
 		}
+	}
+}
+
+// A Session has no name on any Host, so the name a user gives one is kept in the
+// browser and drawn over the work directory the Hub sent. Every place the name
+// appears reads the same store, so the rail follows the heading.
+func TestRenamingASessionKeepsTheNameInTheBrowser(t *testing.T) {
+	var got struct {
+		Heading string   `json:"heading"`
+		Title   string   `json:"title"`
+		Rows    []string `json:"rows"`
+		Kept    []string `json:"kept"`
+	}
+	pageUnder(t, `
+railAnswer = [{Host: "desk", Session: "s-1", Cwd: "/w", Name: "w", SessionState: "Idle", Answering: true, On: true}];
+opened.send("event", {host: "attic", session: "s-9", seq: 4, kind: "SessionReady", payload: {}});
+setTimeout(() => {
+  dom.name.textContent = "the capstone";
+  dom.name.onblur();
+}, 0);
+setTimeout(() => {
+  console.log(JSON.stringify({
+    heading: dom.name.textContent,
+    title: document.title,
+    rows: dom.rail.children.map((r) => r.textContent),
+    kept: [...kept.keys()],
+  }));
+}, 0);
+`, &got)
+
+	if got.Heading != "the capstone" {
+		t.Errorf("the heading reads %q", got.Heading)
+	}
+	if !strings.Contains(got.Title, "the capstone") {
+		t.Errorf("the tab reads %q", got.Title)
+	}
+	if len(got.Rows) != 1 || !strings.Contains(got.Rows[0], "the capstone") {
+		t.Errorf("the rail still reads %v", got.Rows)
+	}
+	if len(got.Kept) != 1 || !strings.Contains(got.Kept[0], "desk/s-1") {
+		t.Errorf("the name is kept as %v", got.Kept)
+	}
+}
+
+// An empty name is not a name. It gives the Session the work directory back
+// rather than leaving a heading with nothing in it.
+func TestClearingTheNameGivesTheWorkDirectoryBack(t *testing.T) {
+	var got struct {
+		Heading string   `json:"heading"`
+		Kept    []string `json:"kept"`
+	}
+	pageUnder(t, `
+railAnswer = [];
+dom.name.textContent = "the capstone";
+dom.name.onblur();
+dom.name.textContent = "   ";
+dom.name.onblur();
+setTimeout(() => {
+  console.log(JSON.stringify({heading: dom.name.textContent, kept: [...kept.keys()]}));
+}, 0);
+`, &got)
+
+	if got.Heading != "w" {
+		t.Errorf("the heading reads %q", got.Heading)
+	}
+	if len(got.Kept) != 0 {
+		t.Errorf("a cleared name is still kept as %v", got.Kept)
 	}
 }
