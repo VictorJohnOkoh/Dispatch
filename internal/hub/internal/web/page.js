@@ -18,7 +18,6 @@ const servingVendor = document.getElementById("serving-vendor");
 const promptBox = document.getElementById("prompt");
 const sendButton = document.getElementById("send");
 const stopButton = document.getElementById("stop");
-const interruptButton = document.getElementById("interrupt");
 const sendRow = document.getElementById("composer");
 const pair = stopButton.parentElement;
 const host = list.dataset.host;
@@ -269,7 +268,8 @@ function grow() {
 
 promptBox.oninput = grow;
 
-interruptButton.onclick = () => command(interruptButton, "interrupt");
+// End is the other command, and it is the whole Session. The composer's own
+// button ends the answer; this ends the thing the answer was part of.
 stopButton.onclick = () => command(stopButton, "stop");
 
 // offered is the State the commands were last drawn for. A failure is cleared when
@@ -292,7 +292,6 @@ function offer(state) {
   sendButton.title = answering ? "Interrupt" : "Send";
   sendButton.setAttribute("aria-label", sendButton.title);
   sendButton.disabled = answering ? false : state !== "Idle";
-  interruptButton.disabled = !answering;
   stopButton.disabled = state === "Ended";
   if (state === offered) return;
   offered = state;

@@ -73,8 +73,7 @@ const sendRowElement = new El("div");
 sendRowElement.append(boxElement);
 const pairElement = new El("p");
 const stopElement = new El("button");
-const interruptElement = new El("button");
-pairElement.append(interruptElement, stopElement);
+pairElement.append(stopElement);
 
 // The heading, which is the Session's name and the one place it is renamed. The
 // server drew the work directory into it.
@@ -116,7 +115,6 @@ globalThis.document = {
     composer: sendRowElement,
     send: sendElement,
     stop: stopElement,
-    interrupt: interruptElement,
   })[id] ?? null,
   createElement: (tag) => new El(tag),
   querySelectorAll: (selector) => page.querySelectorAll(selector),
@@ -212,6 +210,5 @@ globalThis.dom = {
   sendButton: sendElement,
   sendRow: sendRowElement,
   stopButton: stopElement,
-  interruptButton: interruptElement,
   pair: pairElement,
 };

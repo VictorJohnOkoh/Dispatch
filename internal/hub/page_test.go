@@ -212,7 +212,7 @@ func TestTheFirstPaintCarriesTheThreeCommands(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.Code, body)
 	}
-	for _, id := range []string{"prompt", "send", "stop", "interrupt"} {
+	for _, id := range []string{"prompt", "send", "stop"} {
 		_, rest, found := strings.Cut(body, `id="`+id+`"`)
 		if !found {
 			t.Errorf("the page has no %s on it", id)

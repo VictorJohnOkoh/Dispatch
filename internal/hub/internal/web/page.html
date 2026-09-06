@@ -46,8 +46,7 @@
     <span class="pill" id="state" data-session-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</span>
     <span class="pill host" id="host-state" data-host-state="{{.HostState}}">{{.HostState}}</span>
     <span id="host-cause"></span>
-    <button type="button" id="interrupt" disabled>Interrupt</button>
-    <button type="button" id="stop" disabled>Stop</button>
+    <button type="button" id="stop" disabled>End</button>
   </p>
   <p class="serving">
     <span id="serving-harness">{{.Harness}}</span>

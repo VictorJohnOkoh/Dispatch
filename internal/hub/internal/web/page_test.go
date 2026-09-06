@@ -923,25 +923,22 @@ console.log(JSON.stringify(dom.sendRow.textContent));
 	}
 }
 
-func TestStopAndInterruptPostToTheirOwnRoutes(t *testing.T) {
+// End is the whole Session, and it is the only thing in the header that is. What
+// ends one answer is the composer's own button, which posts elsewhere.
+func TestEndPostsToTheStopRoute(t *testing.T) {
 	var got []sent
 	pageUnder(t, `
 opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}});
 opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "SessionReady", payload: {model: "m"}});
-opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "PromptSubmitted", payload: {text: "go"}});
-await dom.interruptButton.onclick();
 await dom.stopButton.onclick();
 console.log(JSON.stringify(posted));
 `, &got)
 
-	if len(got) != 2 {
+	if len(got) != 1 {
 		t.Fatalf("posted %v", got)
 	}
-	if got[0].URL != "/v1/hosts/desk/sessions/s-1/interrupt" {
-		t.Errorf("the interrupt went to %q", got[0].URL)
-	}
-	if got[1].URL != "/v1/hosts/desk/sessions/s-1/stop" {
-		t.Errorf("the stop went to %q", got[1].URL)
+	if got[0].URL != "/v1/hosts/desk/sessions/s-1/stop" {
+		t.Errorf("End went to %q", got[0].URL)
 	}
 }
 
@@ -954,8 +951,9 @@ type offered struct {
 
 // Only the commands the Daemon takes in a State are offered in it. These are the
 // same lists internal/daemon/commands.go passes to allow, and a page that offered
-// more would send the user commands that can only be refused. The one button in
-// the composer counts as a Prompt only while it is the one that sends.
+// more would send the user commands that can only be refused. The composer holds
+// one button for two of the three: it counts as a Prompt while it sends and as an
+// interrupt while it stops.
 func TestOnlyTheCommandsTheStateTakesAreOffered(t *testing.T) {
 	var got map[string]offered
 	pageUnder(t, `
@@ -973,7 +971,7 @@ for (const [frame, state] of frames) {
   if (frame) opened.send("event", {host: "desk", session: "s-1", ...frame});
   seen[state] = {
     prompt: dom.sendButton.dataset.mode === "send" && !dom.sendButton.disabled,
-    interrupt: !dom.interruptButton.disabled,
+    interrupt: dom.sendButton.dataset.mode === "stop" && !dom.sendButton.disabled,
     stop: !dom.stopButton.disabled,
   };
 }
