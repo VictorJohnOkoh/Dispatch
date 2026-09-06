@@ -43,7 +43,10 @@ type Hosts interface {
 	Post(ctx context.Context, host, path string, body []byte) (*http.Response, error)
 }
 
-//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js
+// The three faces ship in the binary. A Hub on a machine with no internet is the
+// normal case, and a page that reaches out for its fonts loses its look there.
+//
+//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js fonts/*.woff2
 var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
@@ -111,6 +114,10 @@ func New(hosts Hosts) http.Handler {
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /hosts.js", asset("hosts.js", "text/javascript; charset=utf-8"))
+	for _, face := range []string{"archivo", "karla", "martian-mono"} {
+		name := "fonts/" + face + ".woff2"
+		mux.HandleFunc("GET /"+name, asset(name, "font/woff2"))
+	}
 	mux.HandleFunc(indexRoute, c.landing)
 	return mux
 }

@@ -1,30 +1,94 @@
-:root { color-scheme: light dark; }
-
-body {
-  margin: 0 auto;
-  padding: 1.5rem;
-  max-width: 48rem;
-  font: 15px/1.5 system-ui, sans-serif;
+/* Each face is one variable file, so the weights the page uses cost nothing more
+   than the weight it starts with. */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-stretch: 100%;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/archivo.woff2") format("woff2");
 }
 
-header { border-bottom: 1px solid currentColor; margin-bottom: 1rem; }
-h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
-.host { margin: 0.2rem 0; opacity: 0.7; }
+@font-face {
+  font-family: "Karla";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/fonts/karla.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/martian-mono.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: dark;
+  --ink: #07060a;
+  --slab: #120e1a;
+  --slab-2: #191225;
+  --rule: rgba(177, 92, 255, 0.18);
+  --orchid: #b15cff;
+  --mist: #b0a8c2;
+  --mist-dim: #6f6885;
+  --amber: #e8a33d;
+  --red: #d4536b;
+  --green: #4fbe87;
+  --display: "Archivo", system-ui, sans-serif;
+  --body: "Karla", system-ui, sans-serif;
+  --mono: "Martian Mono", ui-monospace, monospace;
+  --squircle: 26px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ink);
+  color: #ede9f4;
+  font: 16px/1.55 var(--body);
+}
+
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--orchid); outline-offset: 3px; border-radius: 6px; }
+
+header { border-bottom: 1px solid var(--rule); margin-bottom: 1.4rem; padding-bottom: 1rem; }
+h1 {
+  margin: 0;
+  font: 800 clamp(30px, 5vw, 46px)/1 var(--display);
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+}
+h2 {
+  margin: 0 0 0.9rem;
+  font: 700 11px/1 var(--display);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--mist-dim);
+}
+.meta { color: var(--mist-dim); font-size: 14px; }
+
+.host { margin: 0.4rem 0; color: var(--mist); }
 .mark, #stale { margin-left: 0.35rem; }
-.mark { font-weight: 600; }
+.mark { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
+#stale { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--amber); }
 
 /* What is serving this Session: the Harness, the Model and the Vendor. It is the
    whole of what the header says about the machinery, and what a Host serves
    besides is the Hosts view's. */
-.serving { margin: 0.4rem 0 0.8rem; font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.8; }
-.serving span + span::before { content: " · "; opacity: 0.6; }
+.serving { margin: 0.6rem 0 0.8rem; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
+.serving span + span::before { content: " · "; color: var(--mist-dim); }
 
 /* The Vendor row on the Hosts view, which is a different thing: what a machine
    serves, rather than what one Session is using. */
 .vendors { margin: 0.4rem 0 0.8rem; }
-.vendors h2 { display: inline; font: inherit; font-weight: 600; }
+.vendors h2 { display: inline; margin: 0; }
 .vendors ul { display: inline; margin: 0; padding: 0; list-style: none; }
-.vendors li { display: inline; margin-left: 0.5rem; }
+.vendors li { display: inline; margin-left: 0.5rem; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
 .vendors .detail { display: inline; }
 
 /* A Host that is not answering dims its page and keeps showing what it last knew,
@@ -33,18 +97,24 @@ h1 { font-size: 1.1rem; font-family: ui-monospace, monospace; margin: 0; }
    is usually over before the wait that makes it Down, so its content stays at
    full strength and its edge carries the mark. */
 body[data-host-state="Down"] { opacity: 0.6; }
-body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
+body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
 
-#transcript { list-style: none; margin: 0; padding: 0; }
+#transcript { list-style: none; margin: 0 auto; padding: 0; max-width: 72ch; }
 
-.row { padding: 0.6rem 0; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
-.title { margin: 0; font-weight: 600; }
-.detail { margin: 0.3rem 0 0; opacity: 0.7; font-family: ui-monospace, monospace; }
+.row { padding: 1rem 0; border-bottom: 1px solid rgba(177, 92, 255, 0.09); }
+.title {
+  margin: 0;
+  font: 700 10px/1 var(--display);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--orchid);
+}
+.detail { margin: 0.4rem 0 0; font: 400 11px/1.6 var(--mono); letter-spacing: -0.05em; color: var(--mist-dim); }
 
 /* A transcript is mostly text a Harness wrote, so it keeps its own line breaks
    and wraps rather than scrolling sideways. */
 .text {
-  margin: 0.3rem 0 0;
+  margin: 0.4rem 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
@@ -58,14 +128,20 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
   left: 0;
   top: 0;
   bottom: 0;
-  width: 17rem;
+  width: 18rem;
   overflow: auto;
-  padding: 1rem;
-  border-right: 1px solid rgba(128, 128, 128, 0.3);
+  padding: 0.9rem;
+  background: #0b0910;
+  border-right: 1px solid var(--rule);
 }
 
-.rail h1 { font-size: 0.85rem; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.7; }
-.rail h1 a { color: inherit; text-decoration: none; }
+.rail h1 {
+  font: 800 20px/1 var(--display);
+  letter-spacing: -0.03em;
+  padding: 0.4rem 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--rule);
+}
+.rail h1 a { text-decoration: none; }
 
 .rrow {
   display: flex;
@@ -73,14 +149,17 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
   flex-wrap: wrap;
   align-items: center;
   text-decoration: none;
-  color: inherit;
-  padding: 0.5rem;
-  border-radius: 6px;
-  margin-top: 0.4rem;
+  color: var(--mist);
+  padding: 0.6rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  corner-shape: squircle;
+  margin-top: 0.35rem;
 }
 
-.rrow b { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rrow.on { background: rgba(128, 128, 128, 0.18); }
+.rrow b { flex: 1; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rrow:hover { background: var(--slab); }
+.rrow.on { background: var(--slab-2); border-color: var(--rule); color: #ede9f4; }
 
 /* Stale: last-known content, kept in place and marked. A Host is never hidden for
    being unreachable, so the row stays and says so. */
@@ -88,72 +167,160 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 #b8860b; }
 
 .rail .new {
   display: block;
-  margin-top: 1rem;
-  padding: 0.5rem;
+  margin-top: 0.7rem;
+  padding: 0.7rem;
   text-align: center;
-  border: 1px solid rgba(128, 128, 128, 0.5);
-  border-radius: 6px;
+  background: #fff;
+  color: #000;
+  border-radius: 13px;
+  corner-shape: squircle;
+  font: 700 12px/1 var(--display);
+  text-decoration: none;
 }
+.rail .new:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 
-.desk { margin-left: 17rem; padding: 0 1.5rem; }
+.desk { margin-left: 18rem; padding: 1.6rem 1.8rem 0; }
+.desk > header { max-width: 72ch; margin: 0 auto 1.6rem; }
 
 /* The landing page. Two doors and a list, and it draws nothing live. */
-.landing { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
-.doors { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.2rem 0 2rem; }
+.landing { max-width: 1180px; margin: 0 auto; padding: 34px 24px 80px; }
+.doors { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.4rem 0 2.4rem; }
 .door {
-  flex: 1 1 14rem;
+  flex: 1 1 16rem;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 7px;
+  gap: 0.35rem;
+  padding: 1.1rem 1.2rem;
+  background: var(--slab);
+  border: 1px solid var(--rule);
+  border-radius: var(--squircle);
+  corner-shape: squircle;
   text-decoration: none;
   color: inherit;
 }
-.door:hover { background: rgba(128, 128, 128, 0.12); }
-.landing h2 { font: inherit; font-weight: 600; margin: 0 0 0.2rem; }
-.landing .sessions { list-style: none; padding: 0; margin: 0.4rem 0 0; }
-.landing .sessions li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.35rem 0; }
+.door b { font: 700 15px/1 var(--display); letter-spacing: 0.01em; }
+.door:hover { border-color: var(--orchid); background: var(--slab-2); }
+.landing h2 { margin: 0 0 0.6rem; }
+.landing .sessions { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.landing .sessions li {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  background: var(--slab);
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  corner-shape: squircle;
+}
+.landing .sessions a { text-decoration: none; }
 /* The empty row is a sentence and not a row of parts, so it flows as text and
    its full stop stays against the link. */
-.landing .sessions li.meta { display: block; }
+.landing .sessions li.meta { display: block; background: none; border: 0; padding: 0; }
 .quiet { margin-top: 2rem; }
 
 /* The Hosts view. One card per machine, and no machine is ever hidden. */
-.machines { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
-.card { border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 7px; padding: 0.8rem; margin: 1rem 0; }
-.card header { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; border: 0; margin: 0 0 0.5rem; }
-.card ul { list-style: none; padding: 0; margin: 0.4rem 0 0; }
-.card li { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; padding: 0.2rem 0; }
+.machines { max-width: 1180px; margin: 0 auto; padding: 34px 24px 80px; }
+.card {
+  background: var(--slab);
+  border: 1px solid var(--rule);
+  border-radius: var(--squircle);
+  corner-shape: squircle;
+  padding: 22px 24px 20px;
+  margin: 1.1rem 0;
+}
+.card header { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; border: 0; margin: 0 0 0.8rem; padding: 0; }
+.card header b { font: 700 19px/1.1 var(--mono); letter-spacing: -0.06em; }
+.card ul { list-style: none; padding: 0; margin: 0.6rem 0 0; display: grid; gap: 8px; }
+.card li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.card .sessions li {
+  background: var(--slab-2);
+  border: 1px solid transparent;
+  border-radius: 16px;
+  corner-shape: squircle;
+  padding: 11px 14px;
+}
+.card .sessions li:hover { border-color: var(--orchid); background: #20182e; }
+.card .sessions a { text-decoration: none; }
+.card .sessions li.meta { background: none; border: 0; padding: 0; }
 
 /* Down dims and stamps: this machine is gone, and what is on screen is the last
    thing it said. Connecting keeps its content at full strength and marks its
    edge, because the blink is usually over before it becomes Down. */
-.card[data-host-state="Down"] { opacity: 0.55; }
-.card[data-host-state="Connecting"] { box-shadow: inset 2px 0 0 #b8860b; }
-.card[data-host-state="Incompatible"] { box-shadow: inset 2px 0 0 #8b5cf6; }
-.stamp { font-size: 0.75rem; border: 1px dashed rgba(184, 134, 11, 0.7); border-radius: 4px; padding: 0 0.4rem; }
+.card[data-host-state="Down"] { opacity: 0.55; background: #0d0a12; border-color: rgba(212, 83, 107, 0.28); }
+.card[data-host-state="Connecting"] { box-shadow: inset 2px 0 0 var(--amber); }
+.card[data-host-state="Incompatible"] { box-shadow: inset 2px 0 0 var(--orchid); }
+.stamp { font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--red); }
 .vendors [data-reachable="false"] { opacity: 0.7; }
 
 /* The wizard. Four steps, each one an address of its own. */
-.wizard { max-width: 44rem; margin: 0 auto; padding: 1.5rem; }
-.steps { display: flex; gap: 1rem; list-style: none; padding: 0; margin: 0.5rem 0; }
-.steps li { opacity: 0.5; }
-.steps li.on { opacity: 1; font-weight: 600; }
+.wizard { max-width: 44rem; margin: 0 auto; padding: 34px 24px 80px; }
+.steps {
+  display: flex;
+  gap: 1.2rem;
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0.8rem;
+  font: 700 10px/1 var(--display);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--mist-dim);
+}
+.steps li.on { color: var(--orchid); }
 .chosen { display: flex; gap: 0.4rem; margin: 0.4rem 0 1rem; }
 
-.choices { list-style: none; padding: 0; }
-.choices li { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.5rem 0; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
-.choices .off { opacity: 0.5; }
-.choices .kind { min-width: 5rem; font-family: ui-monospace, monospace; }
+.choices { list-style: none; padding: 0; margin: 1.2rem 0; display: grid; gap: 8px; }
+.choices li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--slab);
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  corner-shape: squircle;
+}
+.choices a { text-decoration: none; }
+.choices .off { color: var(--mist-dim); }
+.choices .kind { min-width: 7rem; font: 400 12px/1 var(--mono); letter-spacing: -0.05em; }
 .pill.cap { opacity: 0.75; }
+
+.policy label { display: block; margin: 1rem 0; color: var(--mist); }
+input, select, textarea {
+  font: 400 14px/1.4 var(--body);
+  color: #ede9f4;
+  background: var(--slab-2);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  corner-shape: squircle;
+  padding: 9px 12px;
+}
+input:focus, select:focus { border-color: var(--orchid); outline: none; }
+
+button {
+  background: #fff;
+  color: #000;
+  border: 0;
+  border-radius: 16px;
+  corner-shape: squircle;
+  padding: 12px 18px;
+  cursor: pointer;
+  font: 700 14px/1 var(--display);
+}
+button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 
 /* The Host saying no. It names the Session holding the slot and offers to stop
    it, and it never shows a queue position, because there is no queue. */
-.refusal { border: 1px solid #c05050; border-radius: 7px; padding: 0.8rem; margin: 1rem 0; }
-.refusal p { margin: 0 0 0.6rem; }
-body { max-width: none; }
+.refusal {
+  border: 1px solid rgba(212, 83, 107, 0.5);
+  border-radius: var(--squircle);
+  corner-shape: squircle;
+  background: #0d0a12;
+  padding: 1.1rem 1.2rem;
+  margin: 1.2rem 0;
+}
+.refusal p { margin: 0 0 0.8rem; }
 
 /* The pair. Session State beside Host State, because Working on a Ready Host and
    Working on a Host that stopped answering mean different things and look the
@@ -162,36 +329,44 @@ body { max-width: none; }
 
 /* Stop and Interrupt sit with the State they act on, because the State is what
    decides whether either one is offered. */
-.pair button { font: inherit; font-size: 0.75rem; padding: 0.1rem 0.7rem; border-radius: 99px;
-               border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
-.pair button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
+.pair button { font: 400 11px/1 var(--mono); letter-spacing: -0.03em; padding: 6px 11px; border-radius: 99px;
+               border: 1px solid var(--rule); background: none; color: var(--mist); }
+.pair button:hover:enabled { border-color: var(--orchid); color: #ede9f4; box-shadow: none; }
 .pair button:disabled { opacity: 0.4; }
-#stop:enabled { border-color: #c05050; }
+#stop:enabled { border-color: var(--red); }
 
 .pill {
-  font-size: 0.75rem;
-  padding: 0.05rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 11px/1 var(--mono);
+  letter-spacing: -0.03em;
+  color: var(--mist);
+  background: rgba(177, 92, 255, 0.1);
+  border: 1px solid var(--rule);
   border-radius: 99px;
-  border: 1px solid rgba(128, 128, 128, 0.5);
+  padding: 6px 11px;
   white-space: nowrap;
 }
 
-.pill[data-session-state^="Asking"] { border-color: #b8860b; font-weight: 600; }
+.pill[data-session-state^="Asking"] { border-color: var(--amber); color: #ede9f4; }
 .pill[data-session-state^="Ended"] { opacity: 0.6; }
-.pill.host[data-host-state="Down"], .pill.host[data-host-state="Incompatible"] { border-color: #c05050; }
-.pill.host[data-host-answering="false"] { border-color: #c05050; }
+.pill.host[data-host-state="Down"], .pill.host[data-host-state="Incompatible"] { border-color: var(--red); }
+.pill.host[data-host-answering="false"] { border-color: var(--red); }
 
 /* A Tool Call, its question, its answer and its end belong to the Prompt above
    them. That is the second and last level: ToolCallRequested carries no parent id,
    so a Tool Call inside another one would be a relation no Event states. */
-.row.inset { margin-left: 1.4rem; border-left: 2px solid rgba(128, 128, 128, 0.4); padding-left: 0.7rem; }
+.row.inset { margin-left: 1.4rem; border-left: 2px solid var(--rule); padding-left: 1rem; }
+.row.inset .title { color: var(--mist); }
+.row.inset .text { font: 400 12px/1.5 var(--mono); letter-spacing: -0.05em; }
 
 /* An outcome nobody reported is grey, not red. It means the Harness went quiet,
    which is not a failure and is not the user's to fix. */
-.row[data-tone="ok"] { border-left-color: #3f9e6a; }
-.row[data-tone="bad"] { border-left-color: #c05050; }
-.row[data-tone="unknown"] { border-left-color: rgba(128, 128, 128, 0.6); }
-.row[data-tone="asking"] { border-left-color: #b8860b; }
+.row[data-tone="ok"] { border-left-color: var(--green); }
+.row[data-tone="bad"] { border-left-color: var(--red); }
+.row[data-tone="unknown"] { border-left-color: var(--mist-dim); }
+.row[data-tone="asking"] { border-left-color: var(--amber); }
 
 /* The composer. It is the only way to say anything to a Session, so it sticks to
    the bottom of the window rather than sitting under the last row: a long
@@ -202,28 +377,24 @@ body { max-width: none; }
   bottom: 0;
   margin-top: 1.2rem;
   padding: 0.8rem 0;
-  background: Canvas;
+  padding: 0.8rem 0 1.4rem;
+  max-width: 72ch;
+  margin: 1.2rem auto 0;
+  background: var(--ink);
 }
 .composer textarea {
   width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-  padding: 0.6rem;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 7px;
-  background: none;
-  color: inherit;
+  padding: 14px 18px;
+  border-radius: 22px;
+  corner-shape: squircle;
   resize: vertical;
 }
 .composer textarea:disabled { opacity: 0.5; }
-.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0; }
-.composer .send button { font: inherit; padding: 0.4rem 1.1rem; border-radius: 7px;
-                         border: 1px solid rgba(128, 128, 128, 0.5); background: none; color: inherit; }
-.composer .send button:hover:enabled { background: rgba(128, 128, 128, 0.15); }
-.composer .send button:disabled { opacity: 0.4; }
+.composer .send { display: flex; justify-content: flex-end; align-items: center; gap: 0.6rem; margin: 0.6rem 0 0; }
+.composer .send button:disabled { opacity: 0.35; box-shadow: none; cursor: not-allowed; }
 
 /* Why a command did not land, beside the button that was pressed. */
-.why { margin: 0; font-size: 0.8rem; color: #c05050; }
+.why { margin: 0; font: 400 11px/1.4 var(--mono); letter-spacing: -0.04em; color: var(--red); }
 
 /* The toast, and it is load-bearing. This layout hides every Session but one, so
    a question from any other Session has no other way to reach the user. Two
@@ -241,26 +412,27 @@ body { max-width: none; }
 
 .toast {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
   align-items: center;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid #b8860b;
-  border-radius: 7px;
-  background: Canvas;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  padding: 14px 18px;
+  background: var(--slab);
+  border: 1px solid var(--amber);
+  border-radius: 18px;
+  corner-shape: squircle;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
 }
 
-.toast .where { flex-basis: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
-.toast .title { flex: 1; margin: 0; min-width: 8rem; }
-.toast button { padding: 0.4rem 0.8rem; }
+.toast .where { flex-basis: 100%; font: 400 11px/1 var(--mono); letter-spacing: -0.04em; color: var(--mist-dim); }
+.toast .title { flex: 1; min-width: 8rem; color: #ede9f4; }
+.toast button { padding: 9px 13px; font-size: 12px; border-radius: 13px; }
 
 /* Behaviour 3 asks for this from a phone over the tunnel, so the rail folds away
    and the toast takes the width it needs. A question the user cannot read on the
    screen they have is a question that did not reach them. */
 @media (max-width: 40rem) {
-  .rail { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
-  .desk { margin-left: 0; }
+  .rail { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .desk { margin-left: 0; padding: 1.2rem 1rem 3rem; }
   .toasts { left: 1rem; right: 1rem; max-width: none; }
-  .toast button { flex: 1; padding: 0.6rem; }
+  .toast button { flex: 1; }
 }
