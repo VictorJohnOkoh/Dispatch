@@ -63,15 +63,17 @@ servingVendorElement.dataset.base = "http://127.0.0.1:11434";
 servingVendorElement.textContent = "http://127.0.0.1:11434";
 
 // The three commands, as page.html leaves them. The prompt box holds the text and
-// each button carries the line that says why one did not land.
+// the composer carries the line that says why one did not land.
 const promptElement = new El("textarea");
-const sendRowElement = new El("p");
 const sendElement = new El("button");
-sendRowElement.append(sendElement);
+sendElement.dataset.mode = "send";
+const boxElement = new El("div");
+boxElement.append(promptElement, sendElement);
+const sendRowElement = new El("div");
+sendRowElement.append(boxElement);
 const pairElement = new El("p");
 const stopElement = new El("button");
-const interruptElement = new El("button");
-pairElement.append(interruptElement, stopElement);
+pairElement.append(stopElement);
 
 // The heading, which is the Session's name and the one place it is renamed. The
 // server drew the work directory into it.
@@ -110,13 +112,30 @@ globalThis.document = {
     "serving-model": servingModelElement,
     "serving-vendor": servingVendorElement,
     prompt: promptElement,
+    composer: sendRowElement,
     send: sendElement,
     stop: stopElement,
-    interrupt: interruptElement,
   })[id] ?? null,
   createElement: (tag) => new El(tag),
   querySelectorAll: (selector) => page.querySelectorAll(selector),
   body,
+};
+
+// The window the transcript is read in. The page follows the text as it arrives,
+// so a test can put the reader at the end or part way up and see whether it does.
+// The page is as tall as the transcript is long, so text arriving makes it grow
+// the way it does in a browser.
+document.documentElement = {
+  get scrollHeight() {
+    return 400 + transcript.textContent.length * 10;
+  },
+};
+globalThis.window = {
+  innerHeight: 400,
+  scrollY: 0,
+  scrollTo: (_, y) => {
+    globalThis.window.scrollY = y - globalThis.window.innerHeight;
+  },
 };
 
 // The browser's own store, which is where a rename lives and the only place it
@@ -191,6 +210,5 @@ globalThis.dom = {
   sendButton: sendElement,
   sendRow: sendRowElement,
   stopButton: stopElement,
-  interruptButton: interruptElement,
   pair: pairElement,
 };

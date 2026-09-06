@@ -923,25 +923,22 @@ console.log(JSON.stringify(dom.sendRow.textContent));
 	}
 }
 
-func TestStopAndInterruptPostToTheirOwnRoutes(t *testing.T) {
+// End is the whole Session, and it is the only thing in the header that is. What
+// ends one answer is the composer's own button, which posts elsewhere.
+func TestEndPostsToTheStopRoute(t *testing.T) {
 	var got []sent
 	pageUnder(t, `
 opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}});
 opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "SessionReady", payload: {model: "m"}});
-opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "PromptSubmitted", payload: {text: "go"}});
-await dom.interruptButton.onclick();
 await dom.stopButton.onclick();
 console.log(JSON.stringify(posted));
 `, &got)
 
-	if len(got) != 2 {
+	if len(got) != 1 {
 		t.Fatalf("posted %v", got)
 	}
-	if got[0].URL != "/v1/hosts/desk/sessions/s-1/interrupt" {
-		t.Errorf("the interrupt went to %q", got[0].URL)
-	}
-	if got[1].URL != "/v1/hosts/desk/sessions/s-1/stop" {
-		t.Errorf("the stop went to %q", got[1].URL)
+	if got[0].URL != "/v1/hosts/desk/sessions/s-1/stop" {
+		t.Errorf("End went to %q", got[0].URL)
 	}
 }
 
@@ -954,7 +951,9 @@ type offered struct {
 
 // Only the commands the Daemon takes in a State are offered in it. These are the
 // same lists internal/daemon/commands.go passes to allow, and a page that offered
-// more would send the user commands that can only be refused.
+// more would send the user commands that can only be refused. The composer holds
+// one button for two of the three: it counts as a Prompt while it sends and as an
+// interrupt while it stops.
 func TestOnlyTheCommandsTheStateTakesAreOffered(t *testing.T) {
 	var got map[string]offered
 	pageUnder(t, `
@@ -971,8 +970,8 @@ const seen = {};
 for (const [frame, state] of frames) {
   if (frame) opened.send("event", {host: "desk", session: "s-1", ...frame});
   seen[state] = {
-    prompt: !dom.sendButton.disabled,
-    interrupt: !dom.interruptButton.disabled,
+    prompt: dom.sendButton.dataset.mode === "send" && !dom.sendButton.disabled,
+    interrupt: dom.sendButton.dataset.mode === "stop" && !dom.sendButton.disabled,
     stop: !dom.stopButton.disabled,
   };
 }
@@ -1151,5 +1150,120 @@ setTimeout(() => {
 	}
 	if len(got.Kept) != 0 {
 		t.Errorf("a cleared name is still kept as %v", got.Kept)
+	}
+}
+
+// One button sends and stops. A Prompt in flight is the only thing there is to
+// stop, so the button becomes the stop while the Session answers and goes back to
+// being the send when it stops answering.
+func TestTheSendButtonBecomesTheStopWhileTheSessionAnswers(t *testing.T) {
+	var got []string
+	pageUnder(t, `
+const frames = [
+  [{seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}}],
+  [{seq: 3, kind: "SessionReady", payload: {model: "m"}}],
+  [{seq: 4, kind: "PromptSubmitted", payload: {text: "go"}}],
+  [{seq: 5, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "run"}}],
+  [{seq: 6, kind: "SessionEnded", payload: {reason: "stopped"}}],
+];
+const seen = [];
+for (const [frame] of frames) {
+  opened.send("event", {host: "desk", session: "s-1", ...frame});
+  seen.push(dom.sendButton.dataset.mode + " " + dom.sendButton.title);
+}
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := []string{"send Send", "send Send", "stop Interrupt", "stop Interrupt", "send Send"}
+	for i, want := range want {
+		if got[i] != want {
+			t.Errorf("after frame %d the button is %q, want %q", i, got[i], want)
+		}
+	}
+}
+
+// The stop half ends the answer and not the Session. A Session that was stopped
+// outright would lose the next Prompt, and the transcript with it.
+func TestTheStopHalfInterruptsRatherThanEndingTheSession(t *testing.T) {
+	var got []sent
+	pageUnder(t, `
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionStarted", payload: {harness: "opencode"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "SessionReady", payload: {model: "m"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "PromptSubmitted", payload: {text: "go"}});
+await dom.sendButton.onclick();
+console.log(JSON.stringify(posted));
+`, &got)
+
+	if len(got) != 1 {
+		t.Fatalf("posted %v", got)
+	}
+	if got[0].URL != "/v1/hosts/desk/sessions/s-1/interrupt" {
+		t.Errorf("the button went to %q, want the interrupt", got[0].URL)
+	}
+}
+
+// Enter sends. Shift with it starts a new line, which is what the hint under the
+// box says and what every other box like it does.
+func TestEnterSendsAndShiftEnterDoesNot(t *testing.T) {
+	var got struct {
+		Posted   []sent `json:"posted"`
+		Stopped  bool   `json:"stopped"`
+		Newlines int    `json:"newlines"`
+	}
+	pageUnder(t, idle+`
+let stopped = 0;
+dom.promptBox.value = "count to three";
+dom.promptBox.onkeydown({key: "Enter", shiftKey: true, preventDefault: () => stopped++});
+const after = posted.length;
+dom.promptBox.onkeydown({key: "Enter", shiftKey: false, preventDefault: () => stopped++});
+setTimeout(() => {
+  console.log(JSON.stringify({posted, stopped: stopped === 1, newlines: after}));
+}, 0);
+`, &got)
+
+	if got.Newlines != 0 {
+		t.Error("Shift and Enter sent the Prompt")
+	}
+	if !got.Stopped {
+		t.Error("Shift and Enter did not start a new line, or Enter did")
+	}
+	if len(got.Posted) != 1 || got.Posted[0].URL != "/v1/hosts/desk/sessions/s-1/prompts" {
+		t.Errorf("Enter posted %v", got.Posted)
+	}
+}
+
+// A transcript grows at the bottom while it is read, so the window follows it. A
+// reader who has scrolled up to something older is left there, because a page that
+// pulled the view back would take away what they are reading.
+func TestTheViewFollowsTheTextUnlessTheReaderScrolledUp(t *testing.T) {
+	var got struct {
+		Before    int `json:"before"`
+		Following int `json:"following"`
+		Grown     int `json:"grown"`
+		LeftAlone int `json:"leftAlone"`
+	}
+	pageUnder(t, `
+const end = () => document.documentElement.scrollHeight - window.innerHeight;
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "AssistantMessage", payload: {text: "one"}});
+const before = end();
+window.scrollY = before;
+opened.send("delta", {host: "desk", seq: 2, append: " two and a good deal more text than that"});
+const following = window.scrollY;
+const grown = end();
+window.scrollY = 0;
+opened.send("delta", {host: "desk", seq: 2, append: " three and more again"});
+setTimeout(() => {
+  console.log(JSON.stringify({before, following, grown, leftAlone: window.scrollY}));
+}, 0);
+`, &got)
+
+	if got.Grown <= got.Before {
+		t.Fatalf("the page did not grow: %d then %d", got.Before, got.Grown)
+	}
+	if got.Following != got.Grown {
+		t.Errorf("a reader at the end sits at %d, and the page ends at %d", got.Following, got.Grown)
+	}
+	if got.LeftAlone != 0 {
+		t.Errorf("a reader part way up was moved to %d, want 0", got.LeftAlone)
 	}
 }

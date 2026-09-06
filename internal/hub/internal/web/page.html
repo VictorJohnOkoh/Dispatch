@@ -46,8 +46,7 @@
     <span class="pill" id="state" data-session-state="{{.State}}">{{.State}}{{if .Reason}} {{.Reason}}{{end}}</span>
     <span class="pill host" id="host-state" data-host-state="{{.HostState}}">{{.HostState}}</span>
     <span id="host-cause"></span>
-    <button type="button" id="interrupt" disabled>Interrupt</button>
-    <button type="button" id="stop" disabled>Stop</button>
+    <button type="button" id="stop" disabled>End</button>
   </p>
   <p class="serving">
     <span id="serving-harness">{{.Harness}}</span>
@@ -68,9 +67,15 @@
   </li>
 {{- end}}
 </ol>
-<div class="composer">
-  <textarea id="prompt" rows="3" disabled></textarea>
-  <p class="send"><button type="button" id="send" disabled>Send</button></p>
+<div class="composer" id="composer">
+  <div class="box">
+    <textarea id="prompt" rows="1" disabled></textarea>
+    <button type="button" id="send" data-mode="send" title="Send" aria-label="Send" disabled>
+      <svg class="arrow" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      <svg class="halt" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
+    </button>
+  </div>
+  <p class="hint">Enter sends. Shift + Enter starts a new line.</p>
 </div>
 </main>
 <div class="toasts" id="toasts"></div>
