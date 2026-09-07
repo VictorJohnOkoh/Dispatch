@@ -28,9 +28,11 @@ instructions do not exist.
 | 12 | Break the Handshake on purpose | [handshake.md](handshake.md) | 2026-09-02 | built, not run |
 | 13 | Put a Daemon on a Host that has never had one | [first-host.md](first-host.md) | not run | cannot hold yet |
 
-**Number 13 cannot hold yet.** It is `dispatch host add`, and that command is not in the build; issues
-#80 to #83 are the work. Its sheet measures the manual fallback in the meantime and records the run
-as not held. v1 is not done until that one holds with the rest.
+**Number 13 cannot hold yet.** It is `dispatch host add`. The command is in the build for a standard
+local Windows account (#80); an administrator account, the interactive prompts and the run on real
+Windows accounts are #81 to #83. Until those land, the sheet records the run as not held for an
+administrator account and measures the manual fallback. v1 is not done until that one holds with the
+rest.
 
 **Number 2 has a hole in it.** `HubDetached` and `HubAttached` are declared and nothing writes either,
 which is issue #109. The sheet says what not to look for. The rest of that behaviour is checkable now.

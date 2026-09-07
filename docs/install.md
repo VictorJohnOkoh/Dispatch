@@ -3,9 +3,13 @@
 This is the v1 install. You copy two files to the Host and start the Daemon yourself. The Hub does
 not install anything, and nothing here runs from the Client.
 
-ADR 0013 specifies `dispatch host add` for automatic Host Registration, but that command is not in
-the current build yet. Until it lands, steps 6 to 8 are the supported manual fallback. The command
-will automate those steps without changing the `hub.json` format.
+ADR 0013 specifies `dispatch host add` for automatic Host Registration. The command is in the build
+for a **standard local Windows account**, and it does steps 6, 7 and 8 for you. Read
+[Steps 6 to 8, in one command](#steps-6-to-8-in-one-command) after step 5.
+
+An administrator account still does steps 6 to 8 by hand, because that account uses a shared key file
+with an ACL of its own and the command does not write that one yet. Either way the `hub.json` format
+is the same.
 
 Follow this page from the top and type nothing from memory. `SPEC.md` behaviour 13 is a person doing
 exactly that on a machine that has never had a Daemon.
@@ -240,6 +244,42 @@ curl.exe http://127.0.0.1:7717/v1/sessions
 
 A Host with no Session yet answers `{"sessions":[],"cursor":0}`. If this fails, the problem is on the
 Host and not in the tunnel. Fix it here before you go back to the Client machine.
+
+## Steps 6 to 8, in one command
+
+Skip this section if the Host account is an administrator. Everybody else runs one command on the
+Client machine and then goes to step 9.
+
+```powershell
+.\dispatch.exe host add -id workstation -address 192.168.1.20 -user YOUR_USER
+```
+
+It shows you the Host's key fingerprint and waits. **Read it on a network you trust**, because this
+first look is the only proof that this is your machine: every later connection refuses a Host whose
+key changed, and none of them can prove the first one. Type `yes`, then type the account password
+once. The password goes to one login, stays in memory and is written nowhere.
+
+Run it at a terminal. The password is typed and never piped, so a redirected input stops the command
+rather than reading a password out of a file.
+
+The command then does the three steps by itself:
+
+- makes the Hub's own ed25519 key under `%LOCALAPPDATA%\Dispatch\ssh`, the first time it runs, and
+  uses that same key for every Host after it;
+- puts the public key in that account's own `authorized_keys` on the Host;
+- proves key-only SSH, the tunnel and the Handshake, then writes the Host into `hub.json`.
+
+Nothing is written until every check passes. A check that fails takes the key back off the Host and
+leaves `hub.json` alone, so a second attempt starts where the first one did.
+
+Two flags cover the rest. `-daemon-port` is the port from the Host's `listen`, and it is 7717 unless
+you say otherwise. `-config` is the file to write, and it is `hub.json` beside you. An address with no
+port is port 22. A `hub.json` that is not there is made, listening on `127.0.0.1:7700`.
+
+The command adds a Host and never replaces one, so an id the file already holds is refused, and so is
+the same address on the same Daemon port under a second name.
+
+`hub.json` is read at start and not while the Hub runs. **Restart the Hub** to reach the new Host.
 
 ## 6. Give the Hub a key
 

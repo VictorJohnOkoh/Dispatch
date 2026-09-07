@@ -1,5 +1,6 @@
 // Package config holds the two files this program reads at start, daemon.json
-// and hub.json, and the loader that turns each into values.
+// and hub.json, and the loader that turns each into values. It writes one of
+// them: Host Registration adds a Host to hub.json, and SaveHub is that write.
 //
 // The traffic goes one way. Nothing under internal/ imports this package:
 // main.go reads the file, validates it and hands plain values down, so no
@@ -123,6 +124,31 @@ func LoadHub(path string) (Hub, error) {
 		return Hub{}, fmt.Errorf("config: %s: %w", path, err)
 	}
 	return h, nil
+}
+
+// SaveHub writes hub.json, and it is the one thing here that writes a file. Host
+// Registration adds a Host to a file the Hub may be reading, so the file is
+// replaced whole rather than opened and rewritten: a reader sees the old file or
+// the new one and never a half of either.
+func SaveHub(path string, h Hub) error {
+	if err := h.Validate(); err != nil {
+		return fmt.Errorf("config: %s: %w", path, err)
+	}
+	body, err := json.MarshalIndent(h, "", "  ")
+	if err != nil {
+		return fmt.Errorf("config: %s: %w", path, err)
+	}
+	// The temporary file is beside the real one, because a rename is atomic only
+	// inside one filesystem.
+	temp := path + ".new"
+	if err := os.WriteFile(temp, append(body, '\n'), 0o600); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	if err := os.Rename(temp, path); err != nil {
+		os.Remove(temp)
+		return fmt.Errorf("config: %w", err)
+	}
+	return nil
 }
 
 func (d Daemon) Validate() error {

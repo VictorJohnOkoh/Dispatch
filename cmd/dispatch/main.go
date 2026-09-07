@@ -30,7 +30,7 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/workspace"
 )
 
-const usage = "usage: dispatch <daemon|hub> [-config path]"
+const usage = "usage: dispatch <daemon|hub> [-config path]\n       " + hostUsage
 
 // sshTimeout bounds the TCP connect and the handshake, so a Host that accepts a
 // connection and then says nothing fails instead of holding the request open.
@@ -54,6 +54,12 @@ func run(ctx context.Context, args []string, errOut io.Writer) int {
 	// The operational log is stderr. It holds what the Event log cannot: a process,
 	// a socket, and a decision that produced no Session.
 	log := slog.New(slog.NewTextHandler(errOut, nil))
+
+	// host add is a command and not a role: it registers one Host and ends, and
+	// nothing it does needs a log or a signal.
+	if args[0] == "host" {
+		return runHost(ctx, args[1:], errOut)
+	}
 
 	role := args[0]
 	var path string
