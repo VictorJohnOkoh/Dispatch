@@ -11,7 +11,9 @@ Good Example:
 Bad Example:
 - For a function that adds 3 numbers together "Takes in 3 integers, performs the addition operation and returns the result as an integer" 
 When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language
-When adding a new feature to an existing codebase publish your changes to a branch and open a Pull Request instead of just comminting to main 
+When adding a new feature to an existing codebase publish your changes to a branch and open a Pull Request instead of just comminting to main <br>
+Refrain from overengineering a feature or fix
+Structure code in a human-readable manner (e.g. rather than squashing multiple lines together or trying to write an entire function in one-line space it out). This isn't a command to completely refrain from cutting down on some jargon with one line still do so if the code fragment is short enough 
 ## Agent skills
 
 ### Issue tracker
