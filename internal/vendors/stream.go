@@ -77,9 +77,10 @@ const maxLine = 1 << 20
 // none can misfire on a well-formed stream. ADR 0007 states the five rules.
 func ReadStream(r io.Reader, out func(Frame)) {
 	var (
-		stop  string
-		usage Usage
-		done  bool
+		stop   string
+		usage  Usage
+		done   bool
+		framed bool
 	)
 
 	lines := bufio.NewScanner(r)
@@ -107,6 +108,13 @@ func ReadStream(r io.Reader, out func(Frame)) {
 		// is what lets one reader serve three Vendors and their extensions.
 		var c chunk
 		if err := json.Unmarshal([]byte(line), &c); err != nil {
+			// Rule 2 again, with no JSON at all. LM Studio answers a routing miss
+			// with a bare sentence under HTTP 200. Only a body that has carried no
+			// frame can be read this way, so a mid-stream line is still skipped.
+			if !framed {
+				out(Frame{Kind: FrameError, Text: line})
+				return
+			}
 			continue
 		}
 
@@ -133,9 +141,11 @@ func ReadStream(r io.Reader, out func(Frame)) {
 			}
 			if text != "" {
 				out(Frame{Kind: FrameReasoning, Text: text})
+				framed = true
 			}
 			if choice.Delta.Content != "" {
 				out(Frame{Kind: FrameText, Text: choice.Delta.Content})
+				framed = true
 			}
 			if choice.FinishReason != "" {
 				stop = choice.FinishReason

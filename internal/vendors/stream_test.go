@@ -110,3 +110,24 @@ func TestNothingIsReadAfterDone(t *testing.T) {
 		Frame{Kind: FrameEnd},
 	)
 }
+
+// Rule 2 with no JSON at all. LM Studio answers a routing miss with a bare
+// sentence under HTTP 200, which is the Vendor refusing, not a truncated body.
+func TestBareSentenceIsAnErrorFrame(t *testing.T) {
+	wantFrames(t, "Unexpected endpoint or method.\n",
+		Frame{Kind: FrameError, Text: "Unexpected endpoint or method."},
+	)
+}
+
+// The bound on that rule. Once the body has carried a frame, a line this reader
+// cannot parse is skipped as before.
+func TestUnparsableLineAfterAFrameIsSkipped(t *testing.T) {
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: not json at all\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+
+	wantFrames(t, body,
+		Frame{Kind: FrameText, Text: "hi"},
+		Frame{Kind: FrameEnd, Stop: "stop"},
+	)
+}
