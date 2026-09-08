@@ -14,6 +14,19 @@
   <p class="actions"><a class="button" href="/new">New Session</a></p>
 </header>
 
+<section class="card">
+  <h2>Register a Host</h2>
+  <p>Start Host Registration on the Host. Copy its code here.</p>
+  <form id="host-registration" autocomplete="off">
+    <p><label>Host id <input name="id" required maxlength="64" autocomplete="off"></label></p>
+    <p><label>SSH address (optional correction) <input name="address" maxlength="255" placeholder="host:22" autocomplete="off"></label></p>
+    <p><label>Registration code<br><textarea name="code" required maxlength="4096" rows="4" cols="60" autocomplete="off" spellcheck="false"></textarea></label></p>
+    <button type="submit">Register Host</button>
+    <p id="registration-result" role="status" aria-live="polite"></p>
+  </form>
+</section>
+<script src="/registration.js" defer></script>
+
 {{- range .Cards}}
 <section class="card" data-host="{{.Host}}" data-host-state="{{.State}}">
   <header class="who">
