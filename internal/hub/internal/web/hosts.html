@@ -18,9 +18,20 @@
   <h2>Register a Host</h2>
   <p>Start Host Registration on the Host. Copy its code here.</p>
   <form id="host-registration" autocomplete="off">
-    <p><label>Host id <input name="id" required maxlength="64" autocomplete="off"></label></p>
-    <p><label>SSH address (optional correction) <input name="address" maxlength="255" placeholder="host:22" autocomplete="off"></label></p>
-    <p><label>Registration code<br><textarea name="code" required maxlength="4096" rows="4" cols="60" autocomplete="off" spellcheck="false"></textarea></label></p>
+    <div class="registration-field">
+      <label for="registration-host-id">Host id</label>
+      <input id="registration-host-id" name="id" required maxlength="64" autocomplete="off">
+    </div>
+    <div class="registration-field">
+      <label for="registration-address">SSH address (optional correction)</label>
+      <input id="registration-address" name="address" maxlength="255" placeholder="host:22" autocomplete="off">
+    </div>
+    <div class="registration-field">
+      <label for="registration-code">Registration code</label>
+      <div class="box">
+        <textarea id="registration-code" name="code" required maxlength="4096" rows="4" autocomplete="off" spellcheck="false"></textarea>
+      </div>
+    </div>
     <button type="submit">Register Host</button>
     <p id="registration-result" role="status" aria-live="polite"></p>
   </form>
