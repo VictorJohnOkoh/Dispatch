@@ -108,12 +108,12 @@ func TestAnAddressWithNoPortGetsPort22(t *testing.T) {
 	}
 }
 
-func TestHostAddNeedsAnIDAnAddressAndAnAccount(t *testing.T) {
+func TestHostAddDirectsTheUserToTheClient(t *testing.T) {
 	var out strings.Builder
-	if code := runHost(t.Context(), []string{"add", "-id", "desk"}, &out); code != 1 {
-		t.Fatalf("exit %d, want 1", code)
+	if code := runHost(t.Context(), []string{"add", "-id", "desk"}, &out); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
 	}
-	if !strings.Contains(out.String(), "account") {
+	if !strings.Contains(out.String(), "/hosts") {
 		t.Errorf("stderr = %q", out.String())
 	}
 }
@@ -123,10 +123,10 @@ func TestHostAddNeedsAnIDAnAddressAndAnAccount(t *testing.T) {
 func TestHostAddRefusesAHostIDThatIsNotOne(t *testing.T) {
 	var out strings.Builder
 	code := runHost(t.Context(), []string{"add", "-id", "work station", "-address", "10.0.0.4", "-user", "victor"}, &out)
-	if code != 1 {
-		t.Fatalf("exit %d, want 1", code)
+	if code != 2 {
+		t.Fatalf("exit %d, want 2", code)
 	}
-	if !strings.Contains(out.String(), "not a Host id") {
+	if !strings.Contains(out.String(), "replaced") {
 		t.Errorf("stderr = %q", out.String())
 	}
 }

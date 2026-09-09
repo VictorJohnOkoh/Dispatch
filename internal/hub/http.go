@@ -28,6 +28,7 @@ var (
 
 func (h *Hub) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /registration", h.registerHost)
 	mux.HandleFunc(protocol.ListHosts, h.listHosts)
 	mux.HandleFunc(protocol.StreamEvents, h.stream)
 	for _, route := range protocol.Routes {

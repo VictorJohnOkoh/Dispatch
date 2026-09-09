@@ -23,10 +23,10 @@ ADRs that contradict or under-specify something. Everything original to this doc
 
 - Many Hosts, each running a Daemon on loopback, reached by the Hub over SSH with ed25519 key auth.
 - Manual Daemon install. Copy one binary and one JSON file to the Host and start it by hand.
-- Client-driven Host Registration. `dispatch host add` uses one password login to establish SSH trust,
-  verifies the Handshake, then writes the Host to `hub.json`; see ADR 0013.
-- One binary, two roles and one management command. `dispatch daemon`, `dispatch hub` and
-  `dispatch host add`.
+- Client-driven Host Registration. The Daemon explicitly generates a single-use code. The Client
+  sends it to the Hub, which checks SSH trust and the Handshake before adding the Host; see ADR 0013.
+- One binary, two roles: `dispatch daemon` and `dispatch hub`. The Daemon's `-register-address`
+  flag starts registration. A fixed internal SSH command carries signed registration requests.
 
 **Sessions**
 
@@ -515,10 +515,11 @@ hold.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.
 13. **Register a Host that has never had a Daemon.** Install OpenSSH, copy the binary and
-    `daemon.json`, and start the Daemon. On the Client machine, run `dispatch host add`, confirm the
-    Host fingerprint and enter the local Windows account password once. The command proves key-only
-    SSH and the Handshake before it writes `hub.json`; the user does not edit an authorized-key file,
-    `known_hosts` or `hub.json`. Manual Daemon install remains a frozen v1 feature, and Host
+    `daemon.json`, and start the Daemon with `-register-address` as a standard local Windows account.
+    Start the Hub, open `/hosts` in the Client, and paste the code. The Hub proves key-only SSH and
+    the Handshake before it writes `hub.json`, then attaches the Host without restarting. The user
+    does not edit an authorized-key file, `known_hosts` or `hub.json`. Manual Daemon install remains
+    a frozen v1 feature, and Host
     Registration is the only supported automatic setup in v1.
 
 Three of these get skipped unless they are called out, so they are called out. Number 6 needs a shell

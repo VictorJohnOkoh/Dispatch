@@ -58,6 +58,7 @@ type SSHProfile struct {
 // connect that is already running and then reuses it, rather than opening a
 // second connection that one of the two would throw away.
 type SSHDialer struct {
+	mu      sync.RWMutex
 	targets map[HostID]*sshTarget
 }
 
@@ -106,7 +107,9 @@ func NewSSHDialer(hosts []SSHProfile, timeout time.Duration) (*SSHDialer, error)
 }
 
 func (d *SSHDialer) Dial(ctx context.Context, id HostID) (net.Conn, error) {
+	d.mu.RLock()
 	target, ok := d.targets[id]
+	d.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("no such Host %q", id)
 	}
@@ -116,6 +119,8 @@ func (d *SSHDialer) Dial(ctx context.Context, id HostID) (net.Conn, error) {
 // Close hangs up on every Host. The Hub owns the dialer for the life of the
 // process, so this runs at shutdown and nowhere else.
 func (d *SSHDialer) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for _, target := range d.targets {
 		target.mu.Lock()
 		if target.client != nil {
@@ -124,6 +129,20 @@ func (d *SSHDialer) Close() error {
 		}
 		target.mu.Unlock()
 	}
+	return nil
+}
+
+func (d *SSHDialer) Add(host SSHProfile, timeout time.Duration) error {
+	next, err := NewSSHDialer([]SSHProfile{host}, timeout)
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, exists := d.targets[host.ID]; exists {
+		return fmt.Errorf("Host %s already exists", host.ID)
+	}
+	d.targets[host.ID] = next.targets[host.ID]
 	return nil
 }
 
@@ -184,6 +203,8 @@ func connect(ctx context.Context, address string, config *ssh.ClientConfig) (*ss
 		return nil, fmt.Errorf("%w at %s: %w", ErrUnreachable, address, err)
 	}
 	tcp.SetDeadline(time.Now().Add(config.Timeout))
+	stop := context.AfterFunc(ctx, func() { tcp.Close() })
+	defer stop()
 	conn, channels, requests, err := ssh.NewClientConn(tcp, address, config)
 	if err != nil {
 		tcp.Close()
@@ -197,6 +218,9 @@ func connect(ctx context.Context, address string, config *ssh.ClientConfig) (*ss
 // apart. x/crypto/ssh types the host key failure and describes the auth failure
 // in prose, so the second is matched on that prose.
 func handshakeCause(err error) error {
+	if errors.Is(err, ErrHostKey) {
+		return ErrHostKey
+	}
 	var mismatch *knownhosts.KeyError
 	if errors.As(err, &mismatch) {
 		return ErrHostKey

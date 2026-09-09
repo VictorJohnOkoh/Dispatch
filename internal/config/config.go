@@ -141,7 +141,20 @@ func SaveHub(path string, h Hub) error {
 	// The temporary file is beside the real one, because a rename is atomic only
 	// inside one filesystem.
 	temp := path + ".new"
-	if err := os.WriteFile(temp, append(body, '\n'), 0o600); err != nil {
+	f, err := os.OpenFile(temp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	_, err = f.Write(append(body, '\n'))
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(temp)
 		return fmt.Errorf("config: %w", err)
 	}
 	if err := os.Rename(temp, path); err != nil {
@@ -195,9 +208,6 @@ func (d Daemon) Validate() error {
 func (h Hub) Validate() error {
 	if h.Listen == "" {
 		return fmt.Errorf("listen is empty")
-	}
-	if len(h.Hosts) == 0 {
-		return fmt.Errorf("no Host is named")
 	}
 	for i, host := range h.Hosts {
 		if host.ID == "" {
