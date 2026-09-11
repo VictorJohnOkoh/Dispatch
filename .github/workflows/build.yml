@@ -1,0 +1,33 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            binary: dispatch
+          - goos: windows
+            binary: dispatch.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Compile
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: amd64
+        run: go build -o dist/${{ matrix.binary }} ./cmd/dispatch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-${{ matrix.goos }}-amd64
+          path: dist/${{ matrix.binary }}
+          if-no-files-found: error
