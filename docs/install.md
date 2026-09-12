@@ -3,9 +3,13 @@
 This is the v1 install. You copy two files to the Host and start the Daemon yourself. The Hub does
 not install anything, and nothing here runs from the Client.
 
-ADR 0013 specifies `dispatch host add` for automatic Host Registration, but that command is not in
-the current build yet. Until it lands, steps 6 to 8 are the supported manual fallback. The command
-will automate those steps without changing the `hub.json` format.
+ADR 0013 specifies a code entered in the Client for automatic Host Registration. It supports a
+**standard local Windows account**, with the Daemon running as that same account. Read
+[Steps 6 to 8, with a registration code](#steps-6-to-8-with-a-registration-code) after step 5.
+
+An administrator account still does steps 6 to 8 by hand, because that account uses a shared key file
+with an ACL of its own and the command does not write that one yet. Either way the `hub.json` format
+is the same.
 
 Follow this page from the top and type nothing from memory. `SPEC.md` behaviour 13 is a person doing
 exactly that on a machine that has never had a Daemon.
@@ -240,6 +244,54 @@ curl.exe http://127.0.0.1:7717/v1/sessions
 
 A Host with no Session yet answers `{"sessions":[],"cursor":0}`. If this fails, the problem is on the
 Host and not in the tunnel. Fix it here before you go back to the Client machine.
+
+## Steps 6 to 8, with a registration code
+
+Skip this section for an administrator account or a Daemon running as a different SSH account.
+Use the manual steps below for those profiles. OpenSSH must already accept connections, including
+loopback connections, and have its default ed25519 Host key. The Daemon must listen on 127.0.0.1.
+
+Before starting Sessions, stop the Daemon from step 5 and start it with an explicit registration request:
+
+```powershell
+.\dispatch.exe daemon -config daemon.json -register-address 192.168.1.20:22
+```
+
+The Daemon checks the account, authorization permissions and temporary-key restrictions through
+local OpenSSH before it prints a code. A failed check displays no code. Correct the named prerequisite;
+Dispatch does not edit OpenSSH or firewall settings. The code expires after five minutes.
+
+On the Client machine, start the Hub. It can start without hub.json or with an empty Host list:
+
+```powershell
+.\dispatch.exe hub -config hub.json
+```
+
+Open `http://127.0.0.1:7700/hosts`. Choose a Host id, such as `workstation`, paste the whole code, and
+select **Register Host**. If needed, correct the SSH address in the form. IPv6 addresses with a port
+use brackets, such as `[fd00::20]:2222`. The code does not create a route through NAT or a firewall.
+
+Copy the code directly from the intended Host through a trusted path. It grants temporary access;
+do not put it in chat, logs or a file. The Client clears it on submission. The Hub checks the code's
+Host fingerprint before SSH authentication, creates or reuses its managed ed25519 key, installs only
+the public key on the Host, and proves a new key-only SSH connection, forwarding and the Handshake.
+
+The Hub saves the profile and attaches it without a restart. Its private key remains under
+`%LOCALAPPDATA%\Dispatch\ssh`. A duplicate Host id or normalized address plus Daemon port is refused.
+The Host fingerprint cannot be overridden by changing the address. Existing conflicting trust stops
+registration. Manual hub.json edits still require a restart.
+
+If registration fails before its recovery record is saved, Dispatch removes this attempt's new
+authorization. If cleanup cannot be confirmed, cancel locally. Ctrl+C cancels pending registration
+and stops the Daemon, so use it only when stopping Sessions is acceptable. Start the Daemon without
+`-register-address` for ordinary use. A new explicit registration sweeps stale pending authorization.
+
+If the Hub reports a saved recovery record, keep `hub.json.registration` and restart the Hub. It
+retries with the same permanent key. If completion never reached the Host and its lease expired,
+start a fresh code on the Host and submit it with the same Host id and connection profile. Do not
+delete the recovery record after a lost reply: the Host may already have completed authorization.
+Completed authorization is kept until explicitly removed locally. Administrator support and its
+Windows permissions checks remain separate work in #81–#83.
 
 ## 6. Give the Hub a key
 

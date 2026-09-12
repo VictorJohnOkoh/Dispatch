@@ -11,7 +11,9 @@ Good Example:
 Bad Example:
 - For a function that adds 3 numbers together "Takes in 3 integers, performs the addition operation and returns the result as an integer" 
 When speaking always talk in ASD-STE100 Simplified Technical English, read CONTEXT.md and use the ubiquitous language
-When adding a new feature to an existing codebase publish your changes to a branch and open a Pull Request instead of just comminting to main 
+When adding a new feature to an existing codebase publish your changes to a branch and open a Pull Request instead of just comminting to main <br>
+Refrain from overengineering a feature or fix
+Structure code in a human-readable manner (e.g. rather than squashing multiple lines together or trying to write an entire function in one-line space it out). This isn't a command to completely refrain from cutting down on some jargon with one line still do so if the code fragment is short enough 
 ## Agent skills
 
 ### Issue tracker
@@ -46,7 +48,7 @@ in the last column when you do.
 | 0010 | Four leaf packages, two roles in one binary, and a Host id the Daemon cannot import (`SPEC.md` adds the two per-OS `supervise` files and settles the first paint it deferred) | the package tree, imports, concurrency ownership, testing tiers, where config enters | 41 KB |
 | 0011 | One binary runs both roles, and the Hub is the only place a second Host can be named | the role split, one binary against two, deployment | 6 KB |
 | 0012 | A Harness reaches only its own Host's Vendor, and no type on the wire can say otherwise | cross-Host Sessions, the Data Plane, Vendor addresses | 4 KB |
-| 0013 | Host Registration bootstraps SSH trust with one password login | Host Registration, SSH trust bootstrap, managed Hub keys | 6 KB |
+| 0013 | Host Registration uses a single-use code entered in the Client | Host Registration, SSH trust bootstrap, managed Hub keys | 9 KB |
 
 Everything after 0004 is long. The thirteen together are about 70,000 tokens, which is why
 they are indexed here and not read by default. 0011, 0012 and 0013 are the exceptions and

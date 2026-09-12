@@ -10,7 +10,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
@@ -39,6 +38,10 @@ type daemonFrame struct {
 }
 
 func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	r = r.WithContext(ctx)
+	changed := h.hosts.Changed()
 	flush, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "this server cannot stream", http.StatusInternalServerError)
@@ -63,20 +66,13 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 	// until the header lands.
 	flush.Flush()
 	frames := make(chan daemonFrame)
-	var readers sync.WaitGroup
 	for _, host := range h.hosts.All() {
 		at, resuming := cursors[string(host.ID)]
 		reader := &hostReader{hub: h, id: host.ID, at: at, resuming: resuming}
-		readers.Add(1)
 		go func() {
-			defer readers.Done()
 			reader.run(r.Context(), frames)
 		}()
 	}
-	go func() {
-		readers.Wait()
-		close(frames)
-	}()
 
 	keepalive := time.NewTicker(h.keepalive)
 	defer keepalive.Stop()
@@ -87,6 +83,8 @@ func (h *Hub) stream(w http.ResponseWriter, r *http.Request) {
 	reading := frames
 	for {
 		select {
+		case <-changed:
+			return
 		case <-r.Context().Done():
 			return
 		case <-keepalive.C:

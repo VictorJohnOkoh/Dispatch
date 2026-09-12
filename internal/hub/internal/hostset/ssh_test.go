@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -14,9 +16,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
 	"golang.org/x/crypto/ssh"
@@ -182,16 +186,37 @@ func TestAKeyThatIsNotThereFailsAtStart(t *testing.T) {
 	}
 }
 
-// sshWorld is an in-process sshd that accepts one key and serves direct-tcpip.
+// sshWorld is an in-process sshd. It accepts the keys in one authorized_keys
+// file, accepts one password, serves direct-tcpip, and runs the two scripts Host
+// Registration sends.
 type sshWorld struct {
 	address    string
 	keyPath    string
 	knownHosts string
+	hostKey    ssh.PublicKey
 	handshakes atomic.Int64
+
+	// password is the account's password. It is empty for a world no password
+	// reaches, which is every test of the dialer.
+	password string
 
 	// forbidden is sshd with AllowTcpForwarding off, which refuses the channel
 	// for its own reasons rather than because nothing is listening.
 	forbidden bool
+
+	// silent is a Host that runs the script and answers nothing the caller can
+	// read, which is what an interrupt inside that window looks like from here.
+	silent bool
+
+	mu sync.Mutex
+
+	// authorized is the account's own authorized_keys file, one line per key.
+	authorized []string
+
+	// steps is what this Host was asked to do, in order. It is the only way to see
+	// that the password came after the fingerprint and the key-only login after
+	// the authorization.
+	steps []string
 }
 
 func newSSHWorld(t *testing.T) *sshWorld {
@@ -203,17 +228,29 @@ func newSSHWorld(t *testing.T) *sshWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
+	world.authorized = []string{strings.TrimSpace(string(ssh.MarshalAuthorizedKey(authorized.PublicKey())))}
 	hostKey, err := ssh.ParsePrivateKey(readFile(t, writeKey(t, filepath.Join(dir, "host"))))
 	if err != nil {
 		t.Fatal(err)
 	}
+	world.hostKey = hostKey.PublicKey()
 	world.knownHosts = filepath.Join(dir, "known_hosts")
-	config := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		if string(key.Marshal()) != string(authorized.PublicKey().Marshal()) {
-			return nil, fmt.Errorf("no")
-		}
-		return nil, nil
-	}}
+	config := &ssh.ServerConfig{
+		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			if !world.accepts(key) {
+				return nil, fmt.Errorf("no")
+			}
+			world.did("key login")
+			return nil, nil
+		},
+		PasswordCallback: func(_ ssh.ConnMetadata, given []byte) (*ssh.Permissions, error) {
+			if world.password == "" || string(given) != world.password {
+				return nil, fmt.Errorf("no")
+			}
+			world.did("password login")
+			return nil, nil
+		},
+	}
 	config.AddHostKey(hostKey)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -245,6 +282,10 @@ func (w *sshWorld) serve(tcp net.Conn, config *ssh.ServerConfig) {
 	defer conn.Close()
 	go ssh.DiscardRequests(requests)
 	for newChannel := range channels {
+		if newChannel.ChannelType() == "session" {
+			go w.session(newChannel)
+			continue
+		}
 		if newChannel.ChannelType() != "direct-tcpip" {
 			newChannel.Reject(ssh.UnknownChannelType, "not direct-tcpip")
 			continue
@@ -273,10 +314,123 @@ func (w *sshWorld) serve(tcp net.Conn, config *ssh.ServerConfig) {
 			target.Close()
 			continue
 		}
+		w.did("forward")
 		go ssh.DiscardRequests(channelRequests)
 		go func() { io.Copy(target, channel); target.Close() }()
 		go func() { io.Copy(channel, target); channel.Close() }()
 	}
+}
+
+// session runs one exec request. It reads the base64 UTF-16 PowerShell the
+// module sends, and keeps the account's authorized_keys the way the script would.
+func (w *sshWorld) session(newChannel ssh.NewChannel) {
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		return
+	}
+	defer channel.Close()
+	for request := range requests {
+		if request.Type != "exec" {
+			request.Reply(false, nil)
+			continue
+		}
+		var payload struct{ Command string }
+		ssh.Unmarshal(request.Payload, &payload)
+		request.Reply(true, nil)
+		w.run(payload.Command)
+		if w.silent {
+			return
+		}
+		channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+		return
+	}
+}
+
+// run does what the script says. It reads the key out of the script's own $key
+// line and the operation out of the line that names it.
+func (w *sshWorld) run(command string) {
+	script := decodeCommand(command)
+	_, rest, ok := strings.Cut(script, "$key = '")
+	if !ok {
+		return
+	}
+	key, _, _ := strings.Cut(rest, "'")
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	switch {
+	case strings.HasPrefix(script, "# dispatch: authorize"):
+		w.record("authorize")
+		for _, have := range w.authorized {
+			if have == key {
+				return
+			}
+		}
+		w.authorized = append(w.authorized, key)
+	case strings.HasPrefix(script, "# dispatch: deauthorize"):
+		w.record("deauthorize")
+		kept := w.authorized[:0]
+		for _, have := range w.authorized {
+			if have != key {
+				kept = append(kept, have)
+			}
+		}
+		w.authorized = kept
+	}
+}
+
+// decodeCommand turns -EncodedCommand back into the script.
+func decodeCommand(command string) string {
+	_, encoded, _ := strings.Cut(command, "-EncodedCommand ")
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+	if err != nil {
+		return ""
+	}
+	units := make([]uint16, len(body)/2)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(body[2*i:])
+	}
+	return string(utf16.Decode(units))
+}
+
+func (w *sshWorld) accepts(offered ssh.PublicKey) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, line := range w.authorized {
+		key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+		if err == nil && string(key.Marshal()) == string(offered.Marshal()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *sshWorld) keys() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.authorized...)
+}
+
+func (w *sshWorld) did(step string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.record(step)
+}
+
+// record keeps one step. A repeat of the step before it is dropped, because a
+// key login asks once to see whether the key is wanted and once with a
+// signature, and that is one login.
+func (w *sshWorld) record(step string) {
+	if len(w.steps) > 0 && w.steps[len(w.steps)-1] == step {
+		return
+	}
+	w.steps = append(w.steps, step)
+}
+
+func (w *sshWorld) done() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.steps...)
 }
 
 func (w *sshWorld) profile(daemonPort int) hostset.SSHProfile {

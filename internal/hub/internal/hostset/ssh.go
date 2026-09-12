@@ -58,6 +58,7 @@ type SSHProfile struct {
 // connect that is already running and then reuses it, rather than opening a
 // second connection that one of the two would throw away.
 type SSHDialer struct {
+	mu      sync.RWMutex
 	targets map[HostID]*sshTarget
 }
 
@@ -106,7 +107,9 @@ func NewSSHDialer(hosts []SSHProfile, timeout time.Duration) (*SSHDialer, error)
 }
 
 func (d *SSHDialer) Dial(ctx context.Context, id HostID) (net.Conn, error) {
+	d.mu.RLock()
 	target, ok := d.targets[id]
+	d.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("no such Host %q", id)
 	}
@@ -116,6 +119,8 @@ func (d *SSHDialer) Dial(ctx context.Context, id HostID) (net.Conn, error) {
 // Close hangs up on every Host. The Hub owns the dialer for the life of the
 // process, so this runs at shutdown and nowhere else.
 func (d *SSHDialer) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for _, target := range d.targets {
 		target.mu.Lock()
 		if target.client != nil {
@@ -124,6 +129,20 @@ func (d *SSHDialer) Close() error {
 		}
 		target.mu.Unlock()
 	}
+	return nil
+}
+
+func (d *SSHDialer) Add(host SSHProfile, timeout time.Duration) error {
+	next, err := NewSSHDialer([]SSHProfile{host}, timeout)
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, exists := d.targets[host.ID]; exists {
+		return fmt.Errorf("Host %s already exists", host.ID)
+	}
+	d.targets[host.ID] = next.targets[host.ID]
 	return nil
 }
 
@@ -146,7 +165,7 @@ func (t *sshTarget) dial(ctx context.Context) (net.Conn, error) {
 		t.client = nil
 	}
 
-	client, err := t.connect(ctx)
+	client, err := connect(ctx, t.address, t.config)
 	if err != nil {
 		return nil, err
 	}
@@ -174,18 +193,22 @@ func (t *sshTarget) channelCause(err error, rejected *ssh.OpenChannelError) erro
 	return fmt.Errorf("%w at %s: %w", ErrForwarding, t.address, err)
 }
 
-// connect makes the SSH connection and names why it failed. A wrong key ends
+// connect makes one SSH connection and names why it failed. A wrong key ends
 // here with ErrAuth rather than a retry, because no amount of waiting fixes it.
-func (t *sshTarget) connect(ctx context.Context) (*ssh.Client, error) {
-	tcp, err := (&net.Dialer{Timeout: t.config.Timeout}).DialContext(ctx, "tcp", t.address)
+// Host Registration makes its two connections through this as well, so the four
+// causes are named the same way whoever dialled.
+func connect(ctx context.Context, address string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	tcp, err := (&net.Dialer{Timeout: config.Timeout}).DialContext(ctx, "tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf("%w at %s: %w", ErrUnreachable, t.address, err)
+		return nil, fmt.Errorf("%w at %s: %w", ErrUnreachable, address, err)
 	}
-	tcp.SetDeadline(time.Now().Add(t.config.Timeout))
-	conn, channels, requests, err := ssh.NewClientConn(tcp, t.address, t.config)
+	tcp.SetDeadline(time.Now().Add(config.Timeout))
+	stop := context.AfterFunc(ctx, func() { tcp.Close() })
+	defer stop()
+	conn, channels, requests, err := ssh.NewClientConn(tcp, address, config)
 	if err != nil {
 		tcp.Close()
-		return nil, fmt.Errorf("%w at %s: %w", handshakeCause(err), t.address, err)
+		return nil, fmt.Errorf("%w at %s: %w", handshakeCause(err), address, err)
 	}
 	tcp.SetDeadline(time.Time{})
 	return ssh.NewClient(conn, channels, requests), nil
@@ -195,6 +218,9 @@ func (t *sshTarget) connect(ctx context.Context) (*ssh.Client, error) {
 // apart. x/crypto/ssh types the host key failure and describes the auth failure
 // in prose, so the second is matched on that prose.
 func handshakeCause(err error) error {
+	if errors.Is(err, ErrHostKey) {
+		return ErrHostKey
+	}
 	var mismatch *knownhosts.KeyError
 	if errors.As(err, &mismatch) {
 		return ErrHostKey

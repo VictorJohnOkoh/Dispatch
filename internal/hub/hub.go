@@ -3,7 +3,9 @@
 package hub
 
 import (
+	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
@@ -26,9 +28,11 @@ func NewSSHDialer(hosts []SSHProfile, timeout time.Duration) (*SSHDialer, error)
 }
 
 type Hub struct {
-	hosts     hostset.Table
-	dialer    hostset.HostDialer
-	keepalive time.Duration
+	register   func(context.Context, RegistrationInput) error
+	registerMu sync.Mutex
+	hosts      hostset.Table
+	dialer     hostset.HostDialer
+	keepalive  time.Duration
 
 	// The reconnection curve and the wait that calls a live connection dead. They
 	// are fields only so a test may shorten them: no configuration names any of

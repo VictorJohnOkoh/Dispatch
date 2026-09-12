@@ -1,5 +1,6 @@
 // Package config holds the two files this program reads at start, daemon.json
-// and hub.json, and the loader that turns each into values.
+// and hub.json, and the loader that turns each into values. It writes one of
+// them: Host Registration adds a Host to hub.json, and SaveHub is that write.
 //
 // The traffic goes one way. Nothing under internal/ imports this package:
 // main.go reads the file, validates it and hands plain values down, so no
@@ -125,6 +126,44 @@ func LoadHub(path string) (Hub, error) {
 	return h, nil
 }
 
+// SaveHub writes hub.json, and it is the one thing here that writes a file. Host
+// Registration adds a Host to a file the Hub may be reading, so the file is
+// replaced whole rather than opened and rewritten: a reader sees the old file or
+// the new one and never a half of either.
+func SaveHub(path string, h Hub) error {
+	if err := h.Validate(); err != nil {
+		return fmt.Errorf("config: %s: %w", path, err)
+	}
+	body, err := json.MarshalIndent(h, "", "  ")
+	if err != nil {
+		return fmt.Errorf("config: %s: %w", path, err)
+	}
+	// The temporary file is beside the real one, because a rename is atomic only
+	// inside one filesystem.
+	temp := path + ".new"
+	f, err := os.OpenFile(temp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	_, err = f.Write(append(body, '\n'))
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(temp)
+		return fmt.Errorf("config: %w", err)
+	}
+	if err := os.Rename(temp, path); err != nil {
+		os.Remove(temp)
+		return fmt.Errorf("config: %w", err)
+	}
+	return nil
+}
+
 func (d Daemon) Validate() error {
 	if d.Listen == "" {
 		return fmt.Errorf("listen is empty")
@@ -169,9 +208,6 @@ func (d Daemon) Validate() error {
 func (h Hub) Validate() error {
 	if h.Listen == "" {
 		return fmt.Errorf("listen is empty")
-	}
-	if len(h.Hosts) == 0 {
-		return fmt.Errorf("no Host is named")
 	}
 	for i, host := range h.Hosts {
 		if host.ID == "" {
