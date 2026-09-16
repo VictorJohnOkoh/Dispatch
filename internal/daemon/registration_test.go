@@ -16,9 +16,13 @@ type memoryRegistrationKeys struct {
 	key       []byte
 	completed bool
 	fail      bool
+	expires   int64
 }
 
-func (k *memoryRegistrationKeys) Temporary(protocol.RegistrationCode) error { return nil }
+func (k *memoryRegistrationKeys) Temporary(c protocol.RegistrationCode) error {
+	k.expires = c.Expires
+	return nil
+}
 func (k *memoryRegistrationKeys) Claim(_ string, pub []byte, _ time.Time) error {
 	if k.fail {
 		return errors.New("write failed")
@@ -134,7 +138,7 @@ func TestRegistrationExpiryRestartAndSignatureRefuseAccess(t *testing.T) {
 			r := requestForRegistration(c, "claim", pub, ed25519.NewKeyFromSeed(c.Seed))
 			switch mode {
 			case "expiry":
-				s.now = func() time.Time { return time.Unix(c.Expires, 0) }
+				s.now = func() time.Time { return s.deadline }
 			case "restart":
 				s = NewHostRegistration(keys)
 			case "cancel":
@@ -165,5 +169,30 @@ func TestFailedClaimWriteCanBeRetriedOnlyByItsKey(t *testing.T) {
 	}
 	if err := s.Apply(r); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRegistrationFiveMinuteDeadlineStaysOnHost(t *testing.T) {
+	for _, elapsed := range []time.Duration{5*time.Minute - time.Second, 5 * time.Minute} {
+		t.Run(elapsed.String(), func(t *testing.T) {
+			start := time.Unix(1800000000, 0)
+			keys := &memoryRegistrationKeys{}
+			s := NewHostRegistration(keys)
+			s.now = func() time.Time { return start }
+			raw, err := s.Begin("127.0.0.1:22", "localuser", "SHA256:"+base64.RawStdEncoding.EncodeToString(make([]byte, 32)), 7717)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := protocol.ParseRegistrationCode(raw)
+			if err != nil || c.Expires != 0 || keys.expires != start.Add(5*time.Minute).Unix() {
+				t.Fatal("expiry must remain on the Host and its SSH authorization", err)
+			}
+			s.now = func() time.Time { return start.Add(elapsed) }
+			pub, _, _ := ed25519.GenerateKey(rand.Reader)
+			r := requestForRegistration(c, "claim", pub, ed25519.NewKeyFromSeed(c.Seed))
+			if accepted := s.Apply(r) == nil; accepted != (elapsed < 5*time.Minute) {
+				t.Fatal("claim did not obey the original five-minute deadline")
+			}
+		})
 	}
 }

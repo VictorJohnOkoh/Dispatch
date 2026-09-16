@@ -234,7 +234,19 @@ func TestCodeRegistrationRefusesFingerprintBeforeAuthentication(t *testing.T) {
 			if conflict {
 				os.WriteFile(filepath.Join(req.Dir, "known_hosts"), []byte(knownhosts.Line([]string{req.Address}, signer.PublicKey())+"\n"), 0600)
 			} else {
-				c.Fingerprint = ssh.FingerprintSHA256(signer.PublicKey())
+				otherCode, err := protocol.NewRegistrationCode(c.Address, c.User, ssh.FingerprintSHA256(signer.PublicKey()), c.DaemonPort, time.Now())
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err := otherCode.Encode()
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsed, err := protocol.ParseRegistrationCode(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.Fingerprint = parsed.Fingerprint
 			}
 			commit := func(hostset.Registered) error { t.Error("untrusted Host reached persistence"); return nil }
 			if hostset.RegisterCode(t.Context(), req, c, commit, commit) == nil {
