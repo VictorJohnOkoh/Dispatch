@@ -38,18 +38,61 @@ if (registrationForm) {
 }
 
 // Scanning is the same credential the human would paste, read from a camera or
-// a photo. The browser's own barcode reader does the decoding, so the Hub ships
-// no scanning library and still needs no internet.
+// a photo. The browser's own reader does it where there is one; everywhere else
+// the Hub serves its own copy of jsQR. Either way nothing is fetched from the
+// internet, so a Hub on a machine with no internet still scans.
 const scan = document.getElementById("registration-scan");
-if (scan && "BarcodeDetector" in window) {
-  const detector = new BarcodeDetector({ formats: ["qr_code"] });
+if (scan) {
+  const native = "BarcodeDetector" in window ? new BarcodeDetector({ formats: ["qr_code"] }) : null;
   const code = document.getElementById("registration-code");
   const video = document.getElementById("registration-scan-video");
   const start = document.getElementById("registration-scan-start");
   const stop = document.getElementById("registration-scan-stop");
+  const photo = document.getElementById("registration-scan-photo");
   const file = document.getElementById("registration-scan-file");
   const result = document.getElementById("registration-scan-result");
+  const canvas = document.createElement("canvas");
+  const paint = canvas.getContext("2d", { willReadFrequently: true });
   let stream = null;
+  let loading = null;
+
+  // jsQR is a quarter of a megabyte, so the Hosts page does not carry it until
+  // a human asks for a scan.
+  const vendored = () => {
+    if (!loading) {
+      loading = new Promise((done, fail) => {
+        const tag = document.createElement("script");
+        tag.src = "/jsqr.js";
+        tag.addEventListener("load", () => done(window.jsQR));
+        tag.addEventListener("error", () => fail(new Error("the QR reader did not load")));
+        document.head.append(tag);
+      });
+    }
+    return loading;
+  };
+
+  // A telephone photograph is far larger than a QR reader needs, and a large
+  // picture is slow to read, so the long edge is capped.
+  const longEdge = 1600;
+
+  const detect = async (source) => {
+    if (native) return native.detect(source);
+    const jsQR = await vendored();
+    const width = source.videoWidth || source.width;
+    const height = source.videoHeight || source.height;
+    if (!width || !height) return [];
+    const scale = Math.min(1, longEdge / Math.max(width, height));
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    paint.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const found = jsQR(paint.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+    return found ? [{ rawValue: found.data }] : [];
+  };
+
+  const say = (text, read) => {
+    result.textContent = text;
+    result.classList.toggle("read", read === true);
+  };
 
   const close = () => {
     if (stream) stream.getTracks().forEach((track) => track.stop());
@@ -59,23 +102,26 @@ if (scan && "BarcodeDetector" in window) {
     start.hidden = false;
   };
 
+  // A read fills the box the human would have pasted into, so the rest of
+  // registration cannot tell the two apart.
   const accept = (codes) => {
-    const found = codes.find((c) => c.rawValue.startsWith("dispatch"));
+    const found = codes.find((c) => c.rawValue.trim().startsWith("dispatch"));
     if (!found) return false;
     code.value = found.rawValue.trim();
-    result.textContent = "Code read. Check the Host ID, then register.";
+    code.scrollIntoView({ block: "nearest" });
+    say("Code read. Check the Host ID, then select Register Host.", true);
     return true;
   };
 
   const read = async () => {
     while (stream) {
       try {
-        if (accept(await detector.detect(video))) {
+        if (accept(await detect(video))) {
           close();
           return;
         }
-      } catch {
-        result.textContent = "The camera picture could not be read.";
+      } catch (err) {
+        say(err.message || "The camera picture could not be read.");
         close();
         return;
       }
@@ -84,11 +130,11 @@ if (scan && "BarcodeDetector" in window) {
   };
 
   start.addEventListener("click", async () => {
-    result.textContent = "Hold the Host's QR code in front of the camera.";
+    say("Starting the camera.");
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     } catch {
-      result.textContent = "The camera is not available. Use a photo, or paste the text code.";
+      say("The camera is not available. Use a photo, or paste the text code.");
       return;
     }
     video.srcObject = stream;
@@ -96,25 +142,29 @@ if (scan && "BarcodeDetector" in window) {
     start.hidden = true;
     stop.hidden = false;
     await video.play();
+    say("Hold the Host's QR code in front of the camera.");
     read();
   });
 
   stop.addEventListener("click", () => {
     close();
-    result.textContent = "";
+    say("");
   });
+
+  photo.addEventListener("click", () => file.click());
 
   file.addEventListener("change", async () => {
     const picture = file.files[0];
     file.value = "";
     if (!picture) return;
+    say("Reading the picture.");
     try {
       const bitmap = await createImageBitmap(picture);
-      const found = accept(await detector.detect(bitmap));
+      const found = accept(await detect(bitmap));
       bitmap.close();
-      if (!found) result.textContent = "No Dispatch QR code was found in that picture.";
-    } catch {
-      result.textContent = "That picture could not be read.";
+      if (!found) say("No Dispatch QR code was found in that picture.");
+    } catch (err) {
+      say(err.message || "That picture could not be read.");
     }
   });
 
