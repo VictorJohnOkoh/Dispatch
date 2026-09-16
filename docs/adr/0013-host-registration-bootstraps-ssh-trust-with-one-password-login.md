@@ -21,10 +21,18 @@ Both systems run the same temporary-key restrictions check before displaying a c
 
 The code contains version 1, a random 128-bit registration id, a random 256-bit ed25519 seed, the
 suggested SSH address and account, the Daemon port, the OpenSSH ed25519 Host-key fingerprint, and
-a five-minute expiry. JSON is encoded with unpadded base64url, prefixed `dispatch1.`, with the first
-eight SHA-256 bytes as a hexadecimal checksum. The limit is 4096 characters. The checksum detects
+a five-minute expiry. New codes use compact binary fields encoded with unpadded base64url, prefixed
+`dispatch2.`, with the first eight SHA-256 bytes as a hexadecimal checksum. The limit is 4096 characters. The checksum detects
 copy errors; it does not authenticate the Host. Trust comes from copying the code from the intended
 Host through a trusted path. A short numeric code is not supported. A hash cannot recover a key.
+
+Compact encoding added 2026-09-16: the payload contains the 16-byte registration id, 32-byte seed,
+32-byte fingerprint, eight-byte expiry, two-byte Daemon port, one-byte address length, address,
+and account, in that order. Integers use big-endian byte order. Address and account lengths retain
+their existing limits. The prefix selects the encoding; the registration protocol remains version 1.
+This removes JSON field names and nested text encoding without reducing key or fingerprint sizes.
+Updated Hubs also read the original `dispatch1.` JSON codes. Old Hubs cannot read compact codes;
+update the Hub before generating a compact code on a Host.
 
 The Hub checks the fingerprint before SSH authentication. Conflicting entries in its managed trust
 file, the user's default known_hosts, or configured trust files stop registration. Address correction
