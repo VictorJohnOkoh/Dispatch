@@ -28,7 +28,7 @@ type RegistrationCode struct {
 	DaemonPort  int    `json:"daemonPort"`
 	Fingerprint string `json:"fingerprint"`
 	Seed        []byte `json:"seed"`
-	Expires     int64  `json:"expires"`
+	Expires     int64  `json:"expires"` // Local deadline; absent from dispatch3 codes.
 }
 
 func NewRegistrationCode(address, user, fingerprint string, port int, now time.Time) (RegistrationCode, error) {
@@ -49,16 +49,16 @@ func (c RegistrationCode) Encode() (string, error) {
 		return "", err
 	}
 	id, _ := hex.DecodeString(c.ID)
-	fingerprint, _ := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(c.Fingerprint, "SHA256:"))
+	_, encodedFingerprint, _ := strings.Cut(c.Fingerprint, ":")
+	fingerprint, _ := base64.RawStdEncoding.DecodeString(encodedFingerprint)
 	b := append(id, c.Seed...)
-	b = append(b, fingerprint...)
-	b = binary.BigEndian.AppendUint64(b, uint64(c.Expires))
+	b = append(b, fingerprint[:16]...)
 	b = binary.BigEndian.AppendUint16(b, uint16(c.DaemonPort))
 	b = append(b, byte(len(c.Address)))
 	b = append(b, c.Address...)
 	b = append(b, c.User...)
 	sum := sha256.Sum256(b)
-	return "dispatch2." + base64.RawURLEncoding.EncodeToString(b) + "." + hex.EncodeToString(sum[:8]), nil
+	return "dispatch3." + base64.RawURLEncoding.EncodeToString(b) + "." + hex.EncodeToString(sum[:8]), nil
 }
 
 func ParseRegistrationCode(raw string) (RegistrationCode, error) {
@@ -67,7 +67,7 @@ func ParseRegistrationCode(raw string) (RegistrationCode, error) {
 		return RegistrationCode{}, bad
 	}
 	parts := strings.Split(strings.TrimSpace(raw), ".")
-	if len(parts) != 3 || (parts[0] != "dispatch1" && parts[0] != "dispatch2") {
+	if len(parts) != 3 || (parts[0] != "dispatch1" && parts[0] != "dispatch2" && parts[0] != "dispatch3") {
 		return RegistrationCode{}, bad
 	}
 	b, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -79,7 +79,22 @@ func ParseRegistrationCode(raw string) (RegistrationCode, error) {
 		return RegistrationCode{}, bad
 	}
 	var c RegistrationCode
-	if parts[0] == "dispatch2" {
+	if parts[0] == "dispatch3" {
+		// Expiry stays on the Host; only the first 16 fingerprint bytes travel.
+		if len(b) < 67 || len(b) < 67+int(b[66]) {
+			return RegistrationCode{}, bad
+		}
+		addressEnd := 67 + int(b[66])
+		c = RegistrationCode{
+			Version:     1,
+			ID:          hex.EncodeToString(b[:16]),
+			Seed:        b[16:48],
+			Fingerprint: "SHA256-128:" + base64.RawStdEncoding.EncodeToString(b[48:64]),
+			DaemonPort:  int(binary.BigEndian.Uint16(b[64:66])),
+			Address:     string(b[67:addressEnd]),
+			User:        string(b[addressEnd:]),
+		}
+	} else if parts[0] == "dispatch2" {
 		// Fixed fields occupy 91 bytes, followed by the address and account.
 		if len(b) < 91 || len(b) < 91+int(b[90]) {
 			return RegistrationCode{}, bad
@@ -102,6 +117,9 @@ func ParseRegistrationCode(raw string) (RegistrationCode, error) {
 			return RegistrationCode{}, bad
 		}
 	}
+	if parts[0] != "dispatch3" && (!strings.HasPrefix(c.Fingerprint, "SHA256:") || c.Expires <= 0) {
+		return RegistrationCode{}, bad
+	}
 	if c.Validate() != nil {
 		return RegistrationCode{}, bad
 	}
@@ -112,11 +130,28 @@ func (c RegistrationCode) Validate() error {
 	id, err := hex.DecodeString(c.ID)
 	host, port, addrErr := net.SplitHostPort(c.Address)
 	p, portErr := strconv.Atoi(port)
-	fp, fpErr := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(c.Fingerprint, "SHA256:"))
-	if c.Version != 1 || err != nil || len(id) != 16 || len(c.Seed) != ed25519.SeedSize || host == "" || len(c.Address) > 255 || addrErr != nil || portErr != nil || p < 1 || p > 65535 || c.DaemonPort < 1 || c.DaemonPort > 65535 || c.User == "" || len(c.User) > 128 || strings.ContainsAny(c.User, "\r\n\x00") || !strings.HasPrefix(c.Fingerprint, "SHA256:") || fpErr != nil || len(fp) != 32 || c.Expires <= 0 {
+	algorithm, encoded, _ := strings.Cut(c.Fingerprint, ":")
+	fp, fpErr := base64.RawStdEncoding.DecodeString(encoded)
+	validFingerprint := (algorithm == "SHA256" && len(fp) == 32 && c.Expires > 0) || (algorithm == "SHA256-128" && len(fp) == 16 && c.Expires == 0)
+	if c.Version != 1 || err != nil || len(id) != 16 || len(c.Seed) != ed25519.SeedSize || host == "" || len(c.Address) > 255 || addrErr != nil || portErr != nil || p < 1 || p > 65535 || c.DaemonPort < 1 || c.DaemonPort > 65535 || c.User == "" || len(c.User) > 128 || strings.ContainsAny(c.User, "\r\n\x00") || fpErr != nil || !validFingerprint {
 		return errors.New("invalid registration code fields")
 	}
 	return nil
+}
+
+// MatchesFingerprint checks a full OpenSSH SHA-256 fingerprint against the code.
+func (c RegistrationCode) MatchesFingerprint(fingerprint string) bool {
+	if c.Validate() != nil || !strings.HasPrefix(fingerprint, "SHA256:") {
+		return false
+	}
+	full, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(fingerprint, "SHA256:"))
+	if err != nil || len(full) != 32 {
+		return false
+	}
+	if strings.HasPrefix(c.Fingerprint, "SHA256-128:") {
+		return c.Fingerprint == "SHA256-128:"+base64.RawStdEncoding.EncodeToString(full[:16])
+	}
+	return c.Fingerprint == fingerprint
 }
 
 // RegistrationRequest is signed by the temporary key for claim/abort and by

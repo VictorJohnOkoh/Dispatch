@@ -20,19 +20,29 @@ executable for a POSIX-compatible login shell; Windows retains its encoded Power
 Both systems run the same temporary-key restrictions check before displaying a code.
 
 The code contains version 1, a random 128-bit registration id, a random 256-bit ed25519 seed, the
-suggested SSH address and account, the Daemon port, the OpenSSH ed25519 Host-key fingerprint, and
-a five-minute expiry. New codes use compact binary fields encoded with unpadded base64url, prefixed
-`dispatch2.`, with the first eight SHA-256 bytes as a hexadecimal checksum. The limit is 4096 characters. The checksum detects
+suggested SSH address and account, the Daemon port, and the first 16 bytes of the OpenSSH ed25519
+Host-key SHA-256 fingerprint. The Daemon keeps the five-minute expiry locally, including in the
+temporary SSH authorization; the copied code has no expiry field. New codes use compact binary
+fields encoded with unpadded base64url, prefixed `dispatch3.`, with the first eight SHA-256 bytes as
+a hexadecimal checksum. The limit is 4096 characters. The checksum detects
 copy errors; it does not authenticate the Host. Trust comes from copying the code from the intended
 Host through a trusted path. A short numeric code is not supported. A hash cannot recover a key.
 
 Compact encoding added 2026-09-16: the payload contains the 16-byte registration id, 32-byte seed,
-32-byte fingerprint, eight-byte expiry, two-byte Daemon port, one-byte address length, address,
+16-byte fingerprint, two-byte Daemon port, one-byte address length, address,
 and account, in that order. Integers use big-endian byte order. Address and account lengths retain
 their existing limits. The prefix selects the encoding; the registration protocol remains version 1.
-This removes JSON field names and nested text encoding without reducing key or fingerprint sizes.
-Updated Hubs also read the original `dispatch1.` JSON codes. Old Hubs cannot read compact codes;
-update the Hub before generating a compact code on a Host.
+Updated Hubs also read the original `dispatch1.` JSON codes and `dispatch2.` binary codes, which
+contain a full 32-byte fingerprint and eight-byte expiry. Old Hubs cannot read `dispatch3.` codes;
+update the Hub before generating a new code on a Host. Reading a code never starts a new expiry period.
+
+The shortened fingerprint trades matching strength for 16 fewer bytes. Matching the fingerprint of
+an existing, trusted Host has an expected 128-bit second-preimage work factor; finding any two
+matching fingerprints has only a 64-bit collision work factor. These are different guarantees, not
+equivalent strength to the original 256-bit fingerprint. See [NIST SP 800-107 Rev. 1, section 5.1](https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-107r1.pdf).
+The Hub checks all 16 bytes before authentication, retains existing known_hosts conflict checks,
+and saves the full SSH Host public key for permanent connections. The 32-byte temporary key seed
+is unchanged.
 
 The Hub checks the fingerprint before SSH authentication. Conflicting entries in its managed trust
 file, the user's default known_hosts, or configured trust files stop registration. Address correction

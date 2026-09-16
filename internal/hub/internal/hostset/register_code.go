@@ -35,7 +35,7 @@ func RegisterCode(ctx context.Context, req Registration, code protocol.Registrat
 	}
 	var hostKey ssh.PublicKey
 	check := func(address string, remote net.Addr, key ssh.PublicKey) error {
-		if ssh.FingerprintSHA256(key) != code.Fingerprint {
+		if !code.MatchesFingerprint(ssh.FingerprintSHA256(key)) {
 			return ErrHostKey
 		}
 		for _, known := range append([]string{filepath.Join(req.Dir, trustFile)}, req.TrustFiles...) {

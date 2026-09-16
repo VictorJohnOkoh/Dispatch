@@ -247,8 +247,9 @@ Host and not in the tunnel. Fix it here before you go back to the Client machine
 
 ## Steps 6 to 8, with a registration code
 
-Update and rebuild both the Hub and Daemon before using compact registration codes (`dispatch2.`).
-An updated Hub also accepts older codes (`dispatch1.`).
+Update and rebuild both the Hub and Daemon before using compact registration codes (`dispatch3.`).
+An updated Hub also accepts older codes (`dispatch1.` and `dispatch2.`). Each new code expires
+five minutes after creation on the Host. Copying or submitting it does not restart that time limit.
 
 Skip this section for an administrator account or a Daemon running as a different SSH account.
 Use the manual steps below for those profiles. OpenSSH must already accept connections, including
