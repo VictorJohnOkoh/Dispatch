@@ -34,9 +34,12 @@ func RegisterCode(ctx context.Context, req Registration, code protocol.Registrat
 		return err
 	}
 	var hostKey ssh.PublicKey
+	// The two ways trust can fail read the same to a machine and not at all the
+	// same to a human, so each says which one it was and names the key it saw.
 	check := func(address string, remote net.Addr, key ssh.PublicKey) error {
-		if !code.MatchesFingerprint(ssh.FingerprintSHA256(key)) {
-			return ErrHostKey
+		live := ssh.FingerprintSHA256(key)
+		if !code.MatchesFingerprint(live) {
+			return fmt.Errorf("%w: %s presents %s, which the code does not name; the code is from another Host, or from before this Host's SSH key changed, so take a fresh code from the Host", ErrHostKey, address, live)
 		}
 		for _, known := range append([]string{filepath.Join(req.Dir, trustFile)}, req.TrustFiles...) {
 			if _, err := os.Stat(known); err == nil {
@@ -47,7 +50,7 @@ func RegisterCode(ctx context.Context, req Registration, code protocol.Registrat
 				if err := verify(address, remote, key); err != nil {
 					var missing *knownhosts.KeyError
 					if !errors.As(err, &missing) || len(missing.Want) != 0 {
-						return ErrHostKey
+						return fmt.Errorf("%w: %s already holds a different key for %s; remove that line and register again", ErrHostKey, known, address)
 					}
 				}
 			} else if !errors.Is(err, os.ErrNotExist) {

@@ -249,8 +249,13 @@ func TestCodeRegistrationRefusesFingerprintBeforeAuthentication(t *testing.T) {
 				c.Fingerprint = parsed.Fingerprint
 			}
 			commit := func(hostset.Registered) error { t.Error("untrusted Host reached persistence"); return nil }
-			if hostset.RegisterCode(t.Context(), req, c, commit, commit) == nil {
+			err := hostset.RegisterCode(t.Context(), req, c, commit, commit)
+			if err == nil {
 				t.Fatal("untrusted Host accepted")
+			}
+			// The two causes need different repairs, so the message must say which.
+			if want := "known_hosts"; strings.Contains(err.Error(), want) != conflict {
+				t.Errorf("error = %v, want it to name %s only on a trust conflict", err, want)
 			}
 			keys.mu.Lock()
 			defer keys.mu.Unlock()
