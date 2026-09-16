@@ -4,7 +4,7 @@ Status: accepted. Issue #123 replaces the password flow from PR #122. The filena
 
 ## Trust and account scope
 
-The Daemon generates a long code only when started with `-register-address`. This is explicit local
+The Daemon generates a long code only when started with `-host-reg`. This is explicit local
 authorization to register one Hub. Normal startup creates no code. The first version requires the
 Daemon and SSH to use the same enabled standard local Windows account. It refuses administrator
 membership, including a filtered administrator token. A different Daemon account, administrator,

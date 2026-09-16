@@ -86,7 +86,7 @@ func run(ctx context.Context, args []string, errOut io.Writer) int {
 	flags.StringVar(&path, "config", path, "the configuration file this role reads")
 	registrationAddress := ""
 	if role == "daemon" {
-		flags.StringVar(&registrationAddress, "register-address", "", "explicitly start Host Registration using this SSH address")
+		flags.StringVar(&registrationAddress, "host-reg", "", "explicitly start Host Registration using this SSH address")
 	}
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2

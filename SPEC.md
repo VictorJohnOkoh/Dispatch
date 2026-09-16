@@ -25,7 +25,7 @@ ADRs that contradict or under-specify something. Everything original to this doc
 - Manual Daemon install. Copy one binary and one JSON file to the Host and start it by hand.
 - Client-driven Host Registration. The Daemon explicitly generates a single-use code. The Client
   sends it to the Hub, which checks SSH trust and the Handshake before adding the Host; see ADR 0013.
-- One binary, two roles: `dispatch daemon` and `dispatch hub`. The Daemon's `-register-address`
+- One binary, two roles: `dispatch daemon` and `dispatch hub`. The Daemon's `-host-reg`
   flag starts registration. A fixed internal SSH command carries signed registration requests.
 
 **Sessions**
@@ -515,7 +515,7 @@ hold.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.
 13. **Register a Host that has never had a Daemon.** Install OpenSSH, copy the binary and
-    `daemon.json`, and start the Daemon with `-register-address` as a standard local Windows account.
+    `daemon.json`, and start the Daemon with `-host-reg` as a standard local Windows account.
     Start the Hub, open `/hosts` in the Client, and paste the code. The Hub proves key-only SSH and
     the Handshake before it writes `hub.json`, then attaches the Host without restarting. The user
     does not edit an authorized-key file, `known_hosts` or `hub.json`. Manual Daemon install remains

@@ -8,7 +8,7 @@ are outside this check.
 ## Run
 
 1. Build the same binary for the Host and Hub. Install the Daemon as documented.
-2. Start the Daemon with `-register-address host:22`. Confirm the local OpenSSH checks pass and a
+2. Start the Daemon with `-host-reg host:22`. Confirm the local OpenSSH checks pass and a
    code appears. Record the Windows and OpenSSH versions, but never record the code or private keys.
 3. Start the Hub with no hub.json. Open `http://127.0.0.1:7700/hosts`, choose a Host id and paste the code.
 4. Confirm the Host appears without restarting the Hub. Start a Session through the Client.

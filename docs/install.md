@@ -254,7 +254,7 @@ loopback connections, and have its default ed25519 Host key. The Daemon must lis
 Before starting Sessions, stop the Daemon from step 5 and start it with an explicit registration request:
 
 ```powershell
-.\dispatch.exe daemon -config daemon.json -register-address 192.168.1.20:22
+.\dispatch.exe daemon -config daemon.json -host-reg 192.168.1.20:22
 ```
 
 The Daemon checks the account, authorization permissions and temporary-key restrictions through
@@ -284,7 +284,7 @@ registration. Manual hub.json edits still require a restart.
 If registration fails before its recovery record is saved, Dispatch removes this attempt's new
 authorization. If cleanup cannot be confirmed, cancel locally. Ctrl+C cancels pending registration
 and stops the Daemon, so use it only when stopping Sessions is acceptable. Start the Daemon without
-`-register-address` for ordinary use. A new explicit registration sweeps stale pending authorization.
+`-host-reg` for ordinary use. A new explicit registration sweeps stale pending authorization.
 
 If the Hub reports a saved recovery record, keep `hub.json.registration` and restart the Hub. It
 retries with the same permanent key. If completion never reached the Host and its lease expired,
