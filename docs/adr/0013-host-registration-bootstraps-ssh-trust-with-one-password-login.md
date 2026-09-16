@@ -5,11 +5,19 @@ Status: accepted. Issue #123 replaces the password flow from PR #122. The filena
 ## Trust and account scope
 
 The Daemon generates a long code only when started with `-host-reg`. This is explicit local
-authorization to register one Hub. Normal startup creates no code. The first version requires the
-Daemon and SSH to use the same enabled standard local Windows account. It refuses administrator
+authorization to register one Hub. Normal startup creates no code. The Daemon and SSH must use the
+same account. Windows requires an enabled standard local account. It refuses administrator
 membership, including a filtered administrator token. A different Daemon account, administrator,
 domain account or Entra account requires a separate design; the earlier cross-account assumption
 does not apply to this automatic path. Manual configuration still supports existing SSH profiles.
+
+Linux support added 2026-09-16: the Daemon runs as a non-root account, with matching real and effective
+UIDs and HOME matching the account database. The home directory, .ssh directory and authorized_keys
+must belong to that account and must not permit group or other writes. These paths must not be
+symbolic links. Missing .ssh and authorized_keys are created with modes 0700 and 0600.
+The Host public key is read from /etc/ssh/ssh_host_ed25519_key.pub. The fixed command quotes the
+executable for a POSIX-compatible login shell; Windows retains its encoded PowerShell command.
+Both systems run the same temporary-key restrictions check before displaying a code.
 
 The code contains version 1, a random 128-bit registration id, a random 256-bit ed25519 seed, the
 suggested SSH address and account, the Daemon port, the OpenSSH ed25519 Host-key fingerprint, and

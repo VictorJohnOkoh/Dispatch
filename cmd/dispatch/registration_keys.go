@@ -3,15 +3,12 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 	"golang.org/x/crypto/ssh"
@@ -39,13 +36,11 @@ func publicLine(pub []byte) string {
 
 func (k *registrationKeys) Temporary(c protocol.RegistrationCode) error {
 	pub := ed25519.NewKeyFromSeed(c.Seed).Public().(ed25519.PublicKey)
-	script := "& '" + strings.ReplaceAll(k.exe, "'", "''") + "' registration-relay -port " + fmt.Sprint(k.port)
-	units := utf16.Encode([]rune(script))
-	b := make([]byte, len(units)*2)
-	for i, u := range units {
-		binary.LittleEndian.PutUint16(b[i*2:], u)
+	command := registrationCommand(k.exe, k.port)
+	if strings.ContainsAny(command, "\r\n") {
+		return errors.New("the Dispatch executable path must not contain a newline")
 	}
-	command := "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(b)
+	command = strings.ReplaceAll(command, "\"", "\\\"")
 	line := fmt.Sprintf("restrict,command=\"%s\",expiry-time=\"%s\" %s%s-temporary", command, time.Unix(c.Expires, 0).UTC().Format("20060102150405Z"), publicLine(pub), registrationMark(c.ID))
 	return k.edit(func(lines []string) ([]string, error) { return append(lines, line), nil })
 }

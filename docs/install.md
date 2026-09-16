@@ -257,6 +257,20 @@ Before starting Sessions, stop the Daemon from step 5 and start it with an expli
 .\dispatch.exe daemon -config daemon.json -host-reg 192.168.1.20:22
 ```
 
+On a Linux Host, build the current branch and run as the same non-root account used for SSH:
+
+```bash
+go build -o dispatch ./cmd/dispatch
+./dispatch daemon -config daemon.json -host-reg 192.168.1.20:22
+```
+
+Use Linux paths in daemon.json. Do not use sudo to start the Daemon. HOME must match the account's
+home directory. The home directory, .ssh and authorized_keys must belong to that account, must not
+be symbolic links, and must not allow group or other write access. Dispatch creates missing .ssh
+and authorized_keys with modes 0700 and 0600. Existing permissions are checked, not rewritten.
+OpenSSH must use ~/.ssh/authorized_keys and /etc/ssh/ssh_host_ed25519_key.pub, accept loopback
+connections, and use a POSIX-compatible login shell. The same Client steps below apply.
+
 The Daemon checks the account, authorization permissions and temporary-key restrictions through
 local OpenSSH before it prints a code. A failed check displays no code. Correct the named prerequisite;
 Dispatch does not edit OpenSSH or firewall settings. The code expires after five minutes.
