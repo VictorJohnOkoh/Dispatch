@@ -279,6 +279,9 @@ The Daemon checks the account, authorization permissions and temporary-key restr
 local OpenSSH before it prints a code. A failed check displays no code. Correct the named prerequisite;
 Dispatch does not edit OpenSSH or firewall settings. The code expires after five minutes.
 
+The Daemon draws the same code as a QR square above the text when it prints to a terminal. A
+redirected output gets the text only.
+
 On the Client machine, start the Hub. It can start without hub.json or with an empty Host list:
 
 ```powershell
@@ -286,7 +289,10 @@ On the Client machine, start the Hub. It can start without hub.json or with an e
 ```
 
 Open `http://127.0.0.1:7700/hosts`. Choose a Host id, such as `workstation`, paste the whole code, and
-select **Register Host**. If needed, correct the SSH address in the form. IPv6 addresses with a port
+select **Register Host**. Select **Scan QR code** to read the square with the Client machine's camera,
+or **Use a photo** to read a picture of it. Both need a browser with a barcode reader, such as Chrome
+or Edge, and the camera also needs `http://127.0.0.1` or HTTPS. Scanning the square with a telephone
+does not send the code to the Client; the Client must do the scan. If needed, correct the SSH address in the form. IPv6 addresses with a port
 use brackets, such as `[fd00::20]:2222`. The code does not create a route through NAT or a firewall.
 
 Copy the code directly from the intended Host through a trusted path. It grants temporary access;

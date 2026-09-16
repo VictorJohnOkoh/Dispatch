@@ -163,6 +163,8 @@ func startDaemonRegistration(ctx context.Context, path string, log *slog.Logger,
 		defer s.Close()
 		d.WithRegistration(s)
 		fmt.Fprintln(out, "Host Registration code (expires in five minutes; Ctrl+C cancels registration and stops the Daemon):")
+		fmt.Fprintln(out, "Scan the square below in the Client, or copy the text code under it.")
+		writeRegistrationQR(out, code)
 		fmt.Fprintln(out, code)
 		watch, stop := context.WithCancel(ctx)
 		defer stop()
