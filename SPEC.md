@@ -26,7 +26,7 @@ ADRs that contradict or under-specify something. Everything original to this doc
 - Client-driven Host Registration. The Daemon explicitly generates a single-use code. The Client
   sends it to the Hub, which checks SSH trust and the Handshake before adding the Host; see ADR 0013.
 - One binary, two roles: `dispatch daemon` and `dispatch hub`. The Daemon's `-host-reg`
-  flag starts registration. A fixed internal SSH command carries signed registration requests.
+  flag starts registration on Windows and Linux. A fixed internal SSH command carries signed registration requests.
 
 **Sessions**
 

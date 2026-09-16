@@ -11,11 +11,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/daemon"
@@ -24,22 +21,15 @@ import (
 )
 
 func hostRegistration(address string, port int) (*daemon.HostRegistration, string, error) {
-	if runtime.GOOS != "windows" {
-		return nil, "", errors.New("code registration requires a standard local Windows account")
-	}
-	// Membership is checked against the identity, including a filtered admin token.
-	check := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; $identity=[System.Security.Principal.WindowsIdentity]::GetCurrent(); if ($identity.Groups.Value -contains 'S-1-5-32-544') { throw 'Use a standard local Windows account to run the Daemon and SSH' }; $user=Get-LocalUser -SID $identity.User; if (-not $user.Enabled) { throw 'The local account is disabled' }; $user.Name`)
-	b, err := check.Output()
-	if err != nil {
-		return nil, "", errors.New("registration requires the Daemon and SSH to use the same enabled standard local Windows account")
-	}
-	user := strings.TrimSpace(string(b))
-	home, err := os.UserHomeDir()
+	user, home, err := registrationAccount()
 	if err != nil {
 		return nil, "", err
 	}
 	dir := filepath.Join(home, ".ssh")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", err
+	}
+	if err := checkRegistrationPermissions(home); err != nil {
 		return nil, "", err
 	}
 	exe, err := os.Executable()
@@ -57,13 +47,7 @@ func hostRegistration(address string, port int) (*daemon.HostRegistration, strin
 			k.Close()
 		}
 	}()
-	// Only this account, SYSTEM and Administrators may write the authorization
-	// directory. Refuse broad grants rather than rewriting the user's ACL.
-	acl := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", registrationACLCheck)
-	if err := acl.Run(); err != nil {
-		return nil, "", errors.New("other accounts can write the SSH authorization path; correct its permissions before registration")
-	}
-	pub, err := os.ReadFile(filepath.Join(os.Getenv("ProgramData"), "ssh", "ssh_host_ed25519_key.pub"))
+	pub, err := os.ReadFile(registrationHostKeyPath())
 	if err != nil {
 		return nil, "", fmt.Errorf("read the OpenSSH ed25519 Host public key: %w", err)
 	}
@@ -139,7 +123,7 @@ func checkTemporarySSH(c protocol.RegistrationCode, hostKey ssh.PublicKey) error
 	if ok, err := session.SendRequest("auth-agent-req@openssh.com", true, nil); err != nil || ok {
 		return errors.New("OpenSSH did not refuse agent forwarding")
 	}
-	output, err := session.CombinedOutput("cmd.exe /c echo dispatch-unrestricted-probe")
+	output, err := session.CombinedOutput("echo dispatch-unrestricted-probe")
 	var exit *ssh.ExitError
 	if !errors.As(err, &exit) || exit.ExitStatus() != 1 || len(output) != 0 {
 		return errors.New("the temporary key did not enforce the fixed registration command")
@@ -181,28 +165,3 @@ func registrationRelay(ctx context.Context, args []string, out io.Writer) int {
 	fmt.Fprintln(out, "registered")
 	return 0
 }
-
-const registrationACLCheck = `
-$ErrorActionPreference = 'Stop'
-$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$trusted = @($sid, 'S-1-5-18', 'S-1-5-32-544')
-$change = [System.Security.AccessControl.FileSystemRights]'Write, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
-$paths = @((Join-Path $env:USERPROFILE '.ssh'))
-$file = Join-Path $paths[0] 'authorized_keys'
-if (Test-Path -LiteralPath $file) { $paths += $file }
-foreach ($p in $paths) {
-  if ((Get-Item -Force -LiteralPath $p).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-    throw 'Registration requires ordinary SSH authorization paths, not links'
-  }
-  $acl = Get-Acl -LiteralPath $p
-  if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
-    throw 'Another account owns the SSH authorization path'
-  }
-  foreach ($rule in $acl.Access) {
-    if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $change) -ne 0) {
-      $who = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-      if ($who -notin $trusted) { throw 'Other accounts can change the SSH authorization path' }
-    }
-  }
-}
-`
