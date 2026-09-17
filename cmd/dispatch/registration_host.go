@@ -71,6 +71,10 @@ func hostRegistration(address string, port int) (*daemon.HostRegistration, strin
 			s.Cancel()
 			return nil, "", fmt.Errorf("OpenSSH did not pass the temporary-key restrictions check: %w", err)
 		}
+		if err := checkAdvertisedAddress(c, key); err != nil {
+			s.Cancel()
+			return nil, "", err
+		}
 	}
 	keepLock = err == nil
 	return s, code, err
@@ -129,6 +133,34 @@ func checkTemporarySSH(c protocol.RegistrationCode, hostKey ssh.PublicKey) error
 		return errors.New("the temporary key did not enforce the fixed registration command")
 	}
 	return nil
+}
+
+// The Host proves the SSH on its own loopback, but the code names the address a
+// Client will dial. One machine can serve one SSH on loopback and another on
+// that address: a Daemon inside WSL beside the Windows OpenSSH is the usual way,
+// and a wrong -register address is the other. The Client sees only a key that
+// does not match the code, so the Host says it here instead.
+func checkAdvertisedAddress(c protocol.RegistrationCode, hostKey ssh.PublicKey) error {
+	conn, err := net.DialTimeout("tcp", c.Address, 10*time.Second)
+	if err != nil {
+		// A Host that cannot reach its own advertised address proves nothing about
+		// it. The Client may still reach it, so this is not a refusal.
+		return nil
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(20 * time.Second))
+	var served ssh.PublicKey
+	keep := func(_ string, _ net.Addr, key ssh.PublicKey) error { served = key; return nil }
+	// Authentication is offered nothing and fails. The host key arrives first,
+	// which is the whole of what this asks for.
+	sshConn, channels, requests, _ := ssh.NewClientConn(conn, c.Address, &ssh.ClientConfig{User: c.User, HostKeyCallback: keep, HostKeyAlgorithms: []string{ssh.KeyAlgoED25519}})
+	if sshConn != nil {
+		ssh.NewClient(sshConn, channels, requests).Close()
+	}
+	if served == nil || bytes.Equal(served.Marshal(), hostKey.Marshal()) {
+		return nil
+	}
+	return fmt.Errorf("%s is served by a different SSH than this one: it presents %s and this Daemon's SSH is %s; register the address of the SSH this Daemon uses, and run the Daemon on the machine that serves it", c.Address, ssh.FingerprintSHA256(served), ssh.FingerprintSHA256(hostKey))
 }
 
 // The forced SSH command forwards one bounded, signed operation. It accepts no

@@ -276,8 +276,15 @@ OpenSSH must use ~/.ssh/authorized_keys and /etc/ssh/ssh_host_ed25519_key.pub, a
 connections, and use a POSIX-compatible login shell. The same Client steps below apply.
 
 The Daemon checks the account, authorization permissions and temporary-key restrictions through
-local OpenSSH before it prints a code. A failed check displays no code. Correct the named prerequisite;
+local OpenSSH before it prints a code. It also dials the address given to `-host-reg` and compares the
+SSH there with its own. A failed check displays no code. Correct the named prerequisite;
 Dispatch does not edit OpenSSH or firewall settings. The code expires after five minutes.
+
+A Daemon inside WSL is a different machine from the Windows Host around it, with its own
+`/etc/ssh/ssh_host_ed25519_key.pub` and its own address. Registering the Windows address from a WSL
+Daemon names the Windows OpenSSH, which is not the SSH that Daemon uses, and the Daemon refuses to
+print a code. Run the Daemon on Windows for a Windows Host, or register the WSL address and make WSL
+reachable from the Client.
 
 The Daemon draws the same code as a QR square above the text when it prints to a terminal. A
 redirected output gets the text only.
