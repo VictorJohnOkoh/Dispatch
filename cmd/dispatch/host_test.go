@@ -150,12 +150,12 @@ func TestTheAddressFieldTakesAPortOrAnAddress(t *testing.T) {
 		"192.168.1.10:2222": "192.168.1.10:2222",
 		"[fd00::20]:2222":   "[fd00::20]:2222",
 	} {
-		got, err := registrationAddress("192.168.4.49:22", typed)
+		got, err := resolveRegistrationAddress("192.168.4.49:22", typed)
 		if err != nil || got != want {
-			t.Errorf("registrationAddress(%q) = %q, %v, want %q", typed, got, err, want)
+			t.Errorf("resolveRegistrationAddress(%q) = %q, %v, want %q", typed, got, err, want)
 		}
 	}
-	if _, err := registrationAddress("192.168.4.49:22", "70000"); err == nil {
+	if _, err := resolveRegistrationAddress("192.168.4.49:22", "70000"); err == nil {
 		t.Error("a port above 65535 was accepted")
 	}
 }
