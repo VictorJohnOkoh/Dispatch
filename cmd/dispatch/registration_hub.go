@@ -26,11 +26,7 @@ func registerClientHost(ctx context.Context, path string, h *hub.Hub, in hub.Reg
 	if err != nil {
 		return err
 	}
-	address := code.Address
-	if in.Address != "" {
-		address = withPort(in.Address)
-	}
-	address, err = normalizeRegistrationAddress(address)
+	address, err := registrationAddress(code.Address, strings.TrimSpace(in.Address))
 	if err != nil {
 		return err
 	}
@@ -137,6 +133,23 @@ func recoverClientRegistration(ctx context.Context, path string) error {
 		return fmt.Errorf("Host Registration needs recovery on the Host; keep %s.registration: %w", path, err)
 	}
 	return os.Remove(path + ".registration")
+}
+
+// registrationAddress resolves what the Client typed against the address the
+// code carries. An entry of only digits is a port, because a host name cannot
+// be one, so correcting the port alone keeps the code's host.
+func registrationAddress(coded, typed string) (string, error) {
+	if typed == "" {
+		return normalizeRegistrationAddress(coded)
+	}
+	if strings.IndexFunc(typed, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
+		host, _, err := net.SplitHostPort(coded)
+		if err != nil {
+			return "", err
+		}
+		return normalizeRegistrationAddress(net.JoinHostPort(host, typed))
+	}
+	return normalizeRegistrationAddress(withPort(typed))
 }
 
 func normalizeRegistrationAddress(address string) (string, error) {

@@ -139,3 +139,23 @@ func TestHostTakesOnlyAdd(t *testing.T) {
 		}
 	}
 }
+
+// The Client's address field corrects the address the code carries. It takes a
+// port on its own, because that is the only part a user usually has to correct.
+func TestTheAddressFieldTakesAPortOrAnAddress(t *testing.T) {
+	for typed, want := range map[string]string{
+		"":                  "192.168.4.49:22",
+		"2222":              "192.168.4.49:2222",
+		"192.168.1.10":      "192.168.1.10:22",
+		"192.168.1.10:2222": "192.168.1.10:2222",
+		"[fd00::20]:2222":   "[fd00::20]:2222",
+	} {
+		got, err := registrationAddress("192.168.4.49:22", typed)
+		if err != nil || got != want {
+			t.Errorf("registrationAddress(%q) = %q, %v, want %q", typed, got, err, want)
+		}
+	}
+	if _, err := registrationAddress("192.168.4.49:22", "70000"); err == nil {
+		t.Error("a port above 65535 was accepted")
+	}
+}

@@ -291,8 +291,13 @@ On the Client machine, start the Hub. It can start without hub.json or with an e
 Open `http://127.0.0.1:7700/hosts`. Choose a Host id, such as `workstation`, paste the whole code, and
 select **Register Host**. Select **Scan QR code** to read the square with the Client machine's camera,
 or **Use a photo** to read a picture of it. The camera needs `http://127.0.0.1` or HTTPS. Scanning the
-square with a telephone does not send the code to the Client; the Client must do the scan. If needed, correct the SSH address in the form. IPv6 addresses with a port
-use brackets, such as `[fd00::20]:2222`. The code does not create a route through NAT or a firewall.
+square with a telephone does not send the code to the Client; the Client must do the scan.
+
+The code carries the Host's SSH address, so the address field stays empty unless that address is
+wrong. An entry of only digits is a port and keeps the code's host, such as `2222`. Any other entry
+is a whole address, such as `192.168.1.10:2222`, and port 22 is added when none is written. IPv6
+addresses with a port use brackets, such as `[fd00::20]:2222`. The code does not create a route
+through NAT or a firewall.
 
 Copy the code directly from the intended Host through a trusted path. It grants temporary access;
 do not put it in chat, logs or a file. The Client clears it on submission. The Hub checks the code's
