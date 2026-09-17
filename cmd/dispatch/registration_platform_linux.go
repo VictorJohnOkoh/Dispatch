@@ -55,3 +55,8 @@ func registrationHostKeyPath() string {
 func registrationCommand(exe string, port int) string {
 	return "exec '" + strings.ReplaceAll(exe, "'", "'\"'\"'") + "' registration-relay -port " + strconv.Itoa(port)
 }
+
+// The key is public, so read for everyone is what it should already have.
+func registrationHostKeyAdvice(path, _ string) string {
+	return fmt.Sprintf("this account cannot read it; run: sudo chmod 644 %s", path)
+}

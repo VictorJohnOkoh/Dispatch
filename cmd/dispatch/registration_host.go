@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -47,8 +48,12 @@ func hostRegistration(address string, port int) (*daemon.HostRegistration, strin
 			k.Close()
 		}
 	}()
-	pub, err := os.ReadFile(registrationHostKeyPath())
+	keyPath := registrationHostKeyPath()
+	pub, err := os.ReadFile(keyPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return nil, "", fmt.Errorf("read the OpenSSH ed25519 Host public key at %s: %s", keyPath, registrationHostKeyAdvice(keyPath, user))
+		}
 		return nil, "", fmt.Errorf("read the OpenSSH ed25519 Host public key: %w", err)
 	}
 	key, _, _, _, err := ssh.ParseAuthorizedKey(pub)

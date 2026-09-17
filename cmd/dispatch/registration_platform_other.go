@@ -15,3 +15,5 @@ func checkRegistrationPermissions(string) error {
 func registrationHostKeyPath() string { return "" }
 
 func registrationCommand(string, int) string { return "" }
+
+func registrationHostKeyAdvice(string, string) string { return "" }

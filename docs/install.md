@@ -255,6 +255,15 @@ Skip this section for an administrator account or a Daemon running as a differen
 Use the manual steps below for those profiles. OpenSSH must already accept connections, including
 loopback connections, and have its default ed25519 Host key. The Daemon must listen on 127.0.0.1.
 
+The Daemon reads `C:\ProgramData\ssh\ssh_host_ed25519_key.pub` to name the Host in the code, and
+OpenSSH can leave that file readable only to administrators. If the Daemon says access is denied,
+grant its account read once, in an administrator PowerShell. The file is a public key, so read is
+all it grants:
+
+```powershell
+icacls C:\ProgramData\ssh\ssh_host_ed25519_key.pub /grant "YOUR_USER:(R)"
+```
+
 Before starting Sessions, stop the Daemon from step 5 and start it with an explicit registration request:
 
 ```powershell
@@ -533,7 +542,7 @@ The Hub names five failures. Each one has one place to look.
 | --- | --- | --- |
 | `the Host does not answer` | The SSH connection failed | Check `address`, the network, and that `sshd` is running on the Host |
 | `the Host refused this key` | `sshd` rejected the key | Step 6. An administrator account uses `administrators_authorized_keys`, and that file needs the `icacls` line |
-| `the Host's key is not the one in known_hosts` | The Host answered with a key that is not the recorded one | Step 7. Look for a byte order mark first, then for a rebuilt Host, whose old line you must delete |
+| `the Host's key is not the one this Hub trusts` | The Host answered with a key the code does not name, or one that disagrees with a `known_hosts` line | The message says which. For a code, take a fresh one from the intended Host. For `known_hosts`, it names the file: look for a byte order mark first, then for a rebuilt Host, whose old line you must delete |
 | `the Host answers but no Daemon is listening` | SSH works and the port is closed | The Daemon is not running, or `daemonPort` and the Host's `listen` port differ |
 | `the Host will not forward a channel` | `sshd` refused the channel itself | Set `AllowTcpForwarding yes` in `C:\ProgramData\ssh\sshd_config` on the Host, then `Restart-Service sshd` |
 

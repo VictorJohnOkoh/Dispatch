@@ -76,3 +76,9 @@ foreach ($p in $paths) {
   }
 }
 `
+
+// OpenSSH can leave the public Host key readable only to administrators, and the
+// Daemon runs as a standard account. The key is public, so read is all it grants.
+func registrationHostKeyAdvice(path, user string) string {
+	return fmt.Sprintf("this account cannot read it; in an administrator PowerShell run: icacls \"%s\" /grant \"%s:(R)\"", path, user)
+}
