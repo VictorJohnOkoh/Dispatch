@@ -245,6 +245,23 @@ curl.exe http://127.0.0.1:7717/v1/sessions
 A Host with no Session yet answers `{"sessions":[],"cursor":0}`. If this fails, the problem is on the
 Host and not in the tunnel. Fix it here before you go back to the Client machine.
 
+## Three ways to register a Host
+
+Open `http://127.0.0.1:7700/hosts` on the Client machine and choose one. All three end in the same
+place: this Hub's managed ed25519 key is in the Host account's `authorized_keys`, the Host's own key
+is in the Hub's `known_hosts`, and the Hub has proved a key-only login, a forwarded channel and the
+Daemon Handshake.
+
+| Choice | Use it when | It asks for |
+|---|---|---|
+| Registration code | You can reach the Host's screen, and the Client has no login to it | Host id, the code |
+| Account password | You know the account password and have no SSH login to the Host yet | Host id, SSH address, account, Daemon port, password |
+| An SSH login I already have | `ssh user@host` already works from this Client machine | Host id, SSH address, account, Daemon port |
+
+The code is the safest of the three, because it names the Host's SSH fingerprint in advance and the
+Hub checks that fingerprint before it authenticates. The other two are quicker and need nothing
+typed on the Host.
+
 ## Steps 6 to 8, with a registration code
 
 Update and rebuild both the Hub and Daemon before using compact registration codes (`dispatch3.`).
@@ -304,8 +321,8 @@ On the Client machine, start the Hub. It can start without hub.json or with an e
 .\dispatch.exe hub -config hub.json
 ```
 
-Open `http://127.0.0.1:7700/hosts`. Choose a Host id, such as `workstation`, paste the whole code, and
-select **Register Host**. Select **Scan QR code** to read the square with the Client machine's camera,
+Open `http://127.0.0.1:7700/hosts`. Leave **Registration code** selected. Choose a Host id, such as
+`workstation`, paste the whole code, and select **Register Host**. Select **Scan QR code** to read the square with the Client machine's camera,
 or **Use a photo** to read a picture of it. The camera needs `http://127.0.0.1` or HTTPS. Scanning the
 square with a telephone does not send the code to the Client; the Client must do the scan.
 
@@ -336,6 +353,44 @@ start a fresh code on the Host and submit it with the same Host id and connectio
 delete the recovery record after a lost reply: the Host may already have completed authorization.
 Completed authorization is kept until explicitly removed locally. Administrator support and its
 Windows permissions checks remain separate work in #81–#83.
+
+## Steps 6 to 8, with a password or an SSH login you already have
+
+These two skip the code. They need no `-host-reg` and nothing typed on the Host: start the Daemon
+as in step 5 and leave it running.
+
+Both write the Hub's public key over SFTP. OpenSSH serves the SFTP subsystem by default on Windows
+and on Linux. If `Subsystem sftp` is commented out in `sshd_config`, these two options fail and the
+registration code still works.
+
+Use a standard account. Windows OpenSSH reads `C:\ProgramData\ssh\administrators_authorized_keys`
+for an administrator and ignores that account's own `.ssh\authorized_keys`, which is the file
+Dispatch writes.
+
+**Account password.** The Hub logs in with the password once, appends its public key to
+`.ssh\authorized_keys`, then logs in again with that key and proves the Daemon. The password is
+never saved, never written to `hub.json`, and never logged.
+
+This option accepts a Host that no `known_hosts` file names yet, and records the key it is shown.
+Whatever answers on that address at that moment becomes the trusted Host, so use it on a network you
+trust. Use the registration code where you cannot. A Host that `known_hosts` already names with a
+**different** key stops registration; that is either the wrong machine or a Host key that changed,
+and Dispatch does not decide which.
+
+**An SSH login you already have.** The Hub borrows what this account already holds:
+
+- the SSH agent, at `\\.\pipe\openssh-ssh-agent` on Windows or `$SSH_AUTH_SOCK` elsewhere
+- `~/.ssh/id_ed25519`, `~/.ssh/id_ecdsa` and `~/.ssh/id_rsa`
+
+A key file with a passphrase is skipped, because the Hub has nobody at the keyboard to ask. Load it
+into the agent instead.
+
+This option **refuses** a Host that no `known_hosts` file on this machine names. That check is the
+whole meaning of the choice: it confirms the SSH connection exists rather than assuming it. If it
+refuses, run `ssh user@host` once by hand, accept the fingerprint, then try again.
+
+Neither option leaves a recovery record, because neither leaves half a registration on the Host.
+Both refuse a duplicate Host id, and a duplicate address plus Daemon port.
 
 ## 6. Give the Hub a key
 

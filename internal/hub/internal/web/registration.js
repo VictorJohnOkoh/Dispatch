@@ -1,16 +1,55 @@
 const registrationForm = document.getElementById("host-registration");
 if (registrationForm) {
   const result = document.getElementById("registration-result");
+  const fields = registrationForm.elements;
+  const panels = registrationForm.querySelectorAll(".registration-panel");
+  const addressLabel = document.getElementById("registration-address-label");
+
+  // Each way in needs its own fields, so the method decides which panels show and
+  // which entries the browser insists on. The login panel is shared, because a
+  // password and a key both need the account and the Daemon port.
+  const shown = {
+    code: ["code"],
+    password: ["login", "password"],
+    existing: ["login", "existing"],
+  };
+  const needed = {
+    code: ["code"],
+    password: ["address", "user", "daemonPort", "password"],
+    existing: ["address", "user", "daemonPort"],
+  };
+  const every = ["code", "address", "user", "daemonPort", "password"];
+
+  const chosen = () => fields.method.value;
+
+  const show = () => {
+    const method = chosen();
+    panels.forEach((panel) => { panel.hidden = !shown[method].includes(panel.dataset.method); });
+    every.forEach((name) => { fields[name].required = needed[method].includes(name); });
+    addressLabel.textContent = method === "code"
+      ? "SSH port or address (optional; the code carries one)"
+      : "SSH address of the Host";
+  };
+
+  const body = () => {
+    const method = chosen();
+    const shared = { id: fields.id.value.trim(), address: fields.address.value.trim() };
+    if (method === "code") return { ...shared, code: fields.code.value.trim() };
+    const login = { ...shared, method, user: fields.user.value.trim(), daemonPort: Number(fields.daemonPort.value) };
+    return method === "password" ? { ...login, password: fields.password.value } : login;
+  };
+
+  const forget = () => { fields.code.value = ""; fields.password.value = ""; };
+
+  registrationForm.querySelectorAll("input[name=method]").forEach((radio) => radio.addEventListener("change", show));
+  show();
+
   registrationForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const button = registrationForm.querySelector("button");
+    const button = registrationForm.querySelector("button[type=submit]");
     if (button.disabled) return;
-    const input = {
-      id: registrationForm.elements.id.value.trim(),
-      address: registrationForm.elements.address.value.trim(),
-      code: registrationForm.elements.code.value.trim(),
-    };
-    registrationForm.elements.code.value = "";
+    const input = body();
+    forget();
     button.disabled = true;
     result.textContent = "Checking SSH trust, key access and the Daemon. This can take up to 90 seconds.";
     try {
@@ -21,6 +60,7 @@ if (registrationForm) {
         cache: "no-store",
       });
       input.code = "";
+      input.password = "";
       if (!response.ok) {
         result.textContent = await response.text();
         return;
@@ -31,10 +71,11 @@ if (registrationForm) {
       result.textContent = "The Hub reply was lost. Check the Hosts list before trying again. The Hub may have saved registration for recovery.";
     } finally {
       input.code = "";
+      input.password = "";
       button.disabled = false;
     }
   });
-  window.addEventListener("pagehide", () => { registrationForm.elements.code.value = ""; });
+  window.addEventListener("pagehide", forget);
 }
 
 // Scanning is the same credential the human would paste, read from a camera or

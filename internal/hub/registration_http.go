@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net"
@@ -13,10 +14,30 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
+// The three ways a Host is registered. Code is the zero value, so a caller that
+// names no Method gets the flow that existed before there was a choice.
+const (
+	RegisterByCode     = "code"
+	RegisterByPassword = "password"
+	RegisterByLogin    = "existing"
+)
+
 type RegistrationInput struct {
 	ID      string `json:"id"`
 	Address string `json:"address"`
-	Code    string `json:"code"`
+
+	// Method selects the flow. Code carries the account, the Daemon port and the
+	// Host's fingerprint, so the other two ask for what it would have carried.
+	Method string `json:"method"`
+
+	Code string `json:"code"`
+
+	User       string `json:"user"`
+	DaemonPort int    `json:"daemonPort"`
+
+	// Password is the Host account's password, used once to install this Hub's
+	// key. It is never written to the configuration or to the log.
+	Password string `json:"password"`
 }
 
 func (h *Hub) WithRegistration(register func(context.Context, RegistrationInput) error) *Hub {
@@ -69,6 +90,10 @@ func (h *Hub) registerHost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid Host id or address", 400)
 		return
 	}
+	if err := in.check(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	if err := h.register(ctx, in); err != nil {
@@ -76,4 +101,36 @@ func (h *Hub) registerHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// check asks for what the selected flow needs and refuses what it does not use,
+// so a password sent to a flow that never reads one is an error and not a secret
+// that travelled for nothing.
+func (in RegistrationInput) check() error {
+	switch in.Method {
+	case "", RegisterByCode:
+		if in.User != "" || in.DaemonPort != 0 || in.Password != "" {
+			return errors.New("a registration code carries the account and the Daemon port")
+		}
+		return nil
+	case RegisterByPassword, RegisterByLogin:
+		if in.Code != "" {
+			return errors.New("this way of registering takes no registration code")
+		}
+		if in.Address == "" {
+			return errors.New("this way of registering needs the Host's SSH address")
+		}
+		if in.User == "" || len(in.User) > 64 {
+			return errors.New("name the account on the Host that runs the Daemon")
+		}
+		if in.DaemonPort < 1 || in.DaemonPort > 65535 {
+			return errors.New("name the port the Daemon listens on")
+		}
+		if (in.Password == "") != (in.Method == RegisterByLogin) {
+			return errors.New("the password way needs a password, and the existing-login way takes none")
+		}
+		return nil
+	default:
+		return errors.New("unknown way of registering a Host")
+	}
 }

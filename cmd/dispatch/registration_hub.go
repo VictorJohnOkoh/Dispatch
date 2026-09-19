@@ -21,7 +21,17 @@ type registrationIntent struct {
 	Host hub.Registered `json:"host"`
 }
 
+// registerClientHost sends one registration down the flow the Client chose. The
+// code flow leaves a half-finished registration on the Host and so has recovery
+// behind it; the two login flows only append a key and have none.
 func registerClientHost(ctx context.Context, path string, h *hub.Hub, in hub.RegistrationInput) error {
+	if in.Method == hub.RegisterByPassword || in.Method == hub.RegisterByLogin {
+		return registerLoginHost(ctx, path, h, in)
+	}
+	return registerCodeHost(ctx, path, h, in)
+}
+
+func registerCodeHost(ctx context.Context, path string, h *hub.Hub, in hub.RegistrationInput) error {
 	code, err := protocol.ParseRegistrationCode(in.Code)
 	if err != nil {
 		return err

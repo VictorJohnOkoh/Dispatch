@@ -11,11 +11,16 @@ import (
 
 type Registration = hostset.Registration
 type Registered = hostset.Registered
+type Login = hostset.Login
 
 var ErrIncompatible = hostset.ErrIncompatible
 
 func RegisterCode(ctx context.Context, req Registration, code protocol.RegistrationCode, prepare, commit func(Registered) error) error {
 	return hostset.RegisterCode(ctx, req, code, prepare, commit)
+}
+
+func RegisterLogin(ctx context.Context, req Registration, in Login, commit func(Registered) error) error {
+	return hostset.RegisterLogin(ctx, req, in, commit)
 }
 
 func RecoverRegistration(ctx context.Context, host Registered, id string, commit func(Registered) error) error {
