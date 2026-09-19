@@ -12,6 +12,9 @@ import (
 // handler is the Daemon's mux, and it serves every endpoint on the Daemon's leg.
 func (d *Daemon) handler() http.Handler {
 	mux := http.NewServeMux()
+	if d.registration != nil {
+		mux.Handle("POST /registration", d.registration)
+	}
 	mux.HandleFunc(protocol.ListModels, d.listModels)
 	mux.HandleFunc(protocol.ListHarnesses, d.listHarnesses)
 	mux.HandleFunc(protocol.StartSession, d.startSession)

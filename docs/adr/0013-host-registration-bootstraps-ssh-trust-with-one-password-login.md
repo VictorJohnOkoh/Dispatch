@@ -1,57 +1,136 @@
-# Host Registration bootstraps SSH trust with one password login
+# Host Registration uses a single-use code entered in the Client
 
-Status: accepted
+Status: accepted. Issue #123 replaces the password flow from PR #122. The filename stays stable for existing links.
 
-A new Windows Host already has OpenSSH and its Daemon running, but the Hub cannot use key authentication until the Host trusts its key. Host Registration uses one password-authenticated SSH connection to install the Hub's public key, then proves key-only access and a compatible Daemon before it adds the Host to `hub.json`. This keeps the Daemon on loopback and uses Windows OpenSSH as the security boundary instead of adding authentication to the Daemon.
+## Trust and account scope
 
-## Registration flow
+The Daemon generates a long code only when started with `-host-reg`. This is explicit local
+authorization to register one Hub. Normal startup creates no code. The Daemon and SSH must use the
+same account. Windows requires an enabled standard local account. It refuses administrator
+membership, including a filtered administrator token. A different Daemon account, administrator,
+domain account or Entra account requires a separate design; the earlier cross-account assumption
+does not apply to this automatic path. Manual configuration still supports existing SSH profiles.
 
-The user runs `dispatch host add` on the Client machine. Flags may supply the Host id, address and local Windows account; the command asks for missing values. An address without a port uses SSH port 22, and the Daemon port is 7717 unless `-daemon-port` changes it. The password is read from a hidden prompt, used for one attempt, held only in memory and never logged or stored.
+Linux support added 2026-09-16: the Daemon runs as a non-root account, with matching real and effective
+UIDs and HOME matching the account database. The home directory, .ssh directory and authorized_keys
+must belong to that account and must not permit group or other writes. These paths must not be
+symbolic links. Missing .ssh and authorized_keys are created with modes 0700 and 0600.
+The Host public key is read from /etc/ssh/ssh_host_ed25519_key.pub. The fixed command quotes the
+executable for a POSIX-compatible login shell; Windows retains its encoded PowerShell command.
+Both systems run the same temporary-key restrictions check before displaying a code.
 
-The command reads the SSH Host key before it sends the password. It shows the fingerprint and continues only after the user confirms it on a trusted network. This is trust on first use: later connections refuse a changed Host key, but the first confirmation cannot prove identity by itself.
+The code contains version 1, a random 128-bit registration id, a random 256-bit ed25519 seed, the
+suggested SSH address and account, the Daemon port, and the first 16 bytes of the OpenSSH ed25519
+Host-key SHA-256 fingerprint. The Daemon keeps the five-minute expiry locally, including in the
+temporary SSH authorization; the copied code has no expiry field. New codes use compact binary
+fields encoded with unpadded base64url, prefixed `dispatch3.`, with the first eight SHA-256 bytes as
+a hexadecimal checksum. The limit is 4096 characters. The checksum detects
+copy errors; it does not authenticate the Host. Trust comes from copying the code from the intended
+Host through a trusted path. A short numeric code is not supported. A hash cannot recover a key.
 
-Registration then runs in this order:
+Compact encoding added 2026-09-16: the payload contains the 16-byte registration id, 32-byte seed,
+16-byte fingerprint, two-byte Daemon port, one-byte address length, address,
+and account, in that order. Integers use big-endian byte order. Address and account lengths retain
+their existing limits. The prefix selects the encoding; the registration protocol remains version 1.
+Updated Hubs also read the original `dispatch1.` JSON codes and `dispatch2.` binary codes, which
+contain a full 32-byte fingerprint and eight-byte expiry. Old Hubs cannot read `dispatch3.` codes;
+update the Hub before generating a new code on a Host. Reading a code never starts a new expiry period.
 
-1. Connect with the password and verify that SSH forwarding reaches a compatible Daemon through the normal Handshake.
-2. Generate the Hub's passphrase-free ed25519 key if it does not exist. One Hub uses one key for all its Hosts.
-3. Detect whether the local Windows account is a standard user or an administrator. Add the public key once to the account's `authorized_keys` file or to `C:\ProgramData\ssh\administrators_authorized_keys`, and apply the required administrator-file ACL.
-4. Open a new connection with the key only and repeat the forwarding and Handshake checks.
-5. Persist the confirmed Host key and atomically add the Host to `hub.json`.
+The shortened fingerprint trades matching strength for 16 fewer bytes. Matching the fingerprint of
+an existing, trusted Host has an expected 128-bit second-preimage work factor; finding any two
+matching fingerprints has only a 64-bit collision work factor. These are different guarantees, not
+equivalent strength to the original 256-bit fingerprint. See [NIST SP 800-107 Rev. 1, section 5.1](https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-107r1.pdf).
+The Hub checks all 16 bytes before authentication, retains existing known_hosts conflict checks,
+and saves the full SSH Host public key for permanent connections. The 32-byte temporary key seed
+is unchanged.
 
-All checks happen before the config commit. If a later step fails, registration removes only the Host authorization and trust entry that this attempt added. It keeps a newly generated Hub key because that key is the Hub's stable identity and can be used on retry. An error names the failed stage and says whether rollback succeeded.
+The Hub checks the fingerprint before SSH authentication. Conflicting entries in its managed trust
+file, the user's default known_hosts, or configured trust files stop registration. Address correction
+never changes the fingerprint. This version uses an ed25519 Host key and fails if OpenSSH does not
+offer it. The Host private key stays on the Host; the permanent Hub private key stays on the Hub.
 
-The managed key and `known_hosts` file live under `%LOCALAPPDATA%\Dispatch\ssh`. Existing `hub.json` files may continue to name keys in other locations. If `hub.json` does not exist, registration creates it with `127.0.0.1:7700` as the Hub listen address. If it exists, registration preserves its settings and reloads it immediately before the atomic write.
+## Restricted SSH operation
 
-## Scope
+The temporary authorized_keys line uses `restrict`, `expiry-time` and a fixed `command`. The command
+starts this binary's `registration-relay` with the Daemon port. It accepts only the literal original
+command `dispatch-register`, reads one bounded signed request from stdin, and sends it to the existing
+Daemon listener on 127.0.0.1. It accepts no user-selected URL, file, account or shell command.
 
-The first version supports a Windows Hub, a Windows Host and a local Windows account. OpenSSH and the Daemon are prerequisites. Registration does not install either one and does not edit `sshd_config`, firewall rules or Windows services. It does not support Microsoft Entra ID accounts, domain accounts, Linux Hosts, concurrent registrations, Host removal, config live reload or password retries. The Hub must restart after a Host is added. Manual `hub.json` configuration remains supported.
+Before displaying a code, the Daemon checks local SSH login, fingerprint, denial of local and remote
+forwarding, denial of a PTY and agent forwarding, and enforcement of the fixed command. Failure
+removes temporary authorization and displays no code. This tests the installed OpenSSH configuration;
+Dispatch does not change sshd_config, services or firewall rules. OpenSSH must accept loopback SSH
+at the selected port. The Daemon must listen on 127.0.0.1.
 
-`host add` refuses an existing Host id and an exact duplicate of an SSH address and Daemon port. The SSH account does not have to run the Daemon because the SSH channel reaches the Daemon through the Host's loopback address.
+The local endpoint verifies ed25519 signatures and the in-memory pending registration. Claim and
+abort use the temporary key. Completion uses the claimed permanent key. A first claim binds its
+public key under one mutex, even if the authorization write fails. The same key can retry; another
+key cannot take the claim. A claimed operation gets two minutes to finish. Pending permanent-key
+authorization has an OpenSSH expiry too. No secret is written in a recovery record or authorization
+line. A temporary key left after a crash cannot install a key because a restarted Daemon has no
+pending registration. It cannot open a shell or tunnel because its OpenSSH restrictions remain.
 
-## Module seam
+One operating-system file lock prevents two local Daemons from registering the same account at
+once. A similar lock protects the managed Hub identity. The locks release after process death.
 
-Host Registration is one deep Hub module with one operation:
+## Commit and recovery
 
-```go
-hub.RegisterHost(ctx, request, interaction, commit)
-```
+These are separate machines, so there is no atomic distributed transaction. The durable Hub intent
+is the decision to finish registration; it is not an abandoned attempt after that point.
 
-The CLI supplies validated plain input, the hidden password and fingerprint confirmation through `interaction`, and an atomic config callback through `commit`. This keeps config file access in `cmd/dispatch`, as ADR 0010 requires. The module owns SSH trust, remote key installation, ordering, Handshake verification and rollback. It reuses the existing Go SSH implementation and does not start local `ssh`, `scp` or `ssh-keyscan` processes.
+1. Verify temporary SSH trust, then install a time-limited authorization for the Hub public key.
+2. Open a separate permanent-key SSH connection and verify forwarding and the normal Handshake.
+3. Write the verified trust entry, then sync `hub.json.registration`, containing the registration id
+   and public connection profile. This is committed intent. It contains no seed or private key.
+4. Sign completion with the permanent key. The Host atomically replaces this attempt's pending
+   line with completed authorization and removes its temporary line.
+5. Atomically save hub.json, attach the Host to the running Hub, and remove the recovery record.
 
-Connection and SSH stages have a 10-second limit. Remote key installation and the Handshake have a 30-second limit. Cancellation starts rollback if registration has changed the Host.
+Before step 3, a failure removes only this attempt's authorization and trust addition. A lost cleanup
+reply reports that local cancellation may be needed. The OpenSSH expiry bounds new login with the
+pending key. After step 3, failure keeps the intent and trust. It never automatically removes a
+completed authorization. Startup retries completion and the config save. A completed Host line also
+acts as a public receipt, so a lost completion reply is recoverable after a Daemon restart.
 
-## Verification
+If completion never reached the Host and its lease expired, the Hub starts with a recovery notice.
+The user starts a fresh code on the Host and submits it with the same Host id and connection profile.
+The new attempt replaces the old recovery record only after its own checks pass. Do not delete a
+recovery record simply because an acknowledgement was lost. A completed but unreachable Host requires
+restoring reachability, not issuing another public key. A Host key change requires explicit local
+trust repair; Dispatch never silently overwrites conflicting trust.
 
-The existing in-process SSH rig grows password authentication, fingerprint capture, remote command handling and key-only reconnection. Tests exercise the complete module interface, including every failure after mutation and the config commit. One manual Windows check covers a standard account and an administrator account because an in-process SSH server cannot prove Windows ACL behavior.
+Before committed intent, local cancellation or expiry removes pending authorization. Ctrl+C cancels
+registration and stops the Daemon; do not use it while Sessions must remain running. A normal restart
+invalidates the pending operation. Starting another explicit registration sweeps stale pending lines.
+Completed lines and unrelated keys remain. Existing authorization for the same Hub key is refused
+without changing it; use its existing profile or resolve it locally.
 
-## Considered options
+## Client and Hub
 
-- **Keep all SSH setup manual.** Rejected because the Windows administrator key location, ACL and text encoding rules make the normal path error-prone.
-- **Add a browser setup screen.** Rejected for the first version because the current Hub needs a configured Host before it starts; this would also add config mutation and secret input to the Client.
-- **Run an unauthenticated pairing listener in the Daemon.** Rejected because it would add a second network security boundary and weaken the loopback-only Daemon rule.
-- **Install OpenSSH from the Hub.** Rejected because the Hub has no remote channel until OpenSSH already runs.
-- **Trust the first Host key without confirmation.** Rejected because the password could then be sent to the wrong machine without the user seeing its identity.
+A missing hub.json starts an empty Hub at 127.0.0.1:7700. An existing empty Host list is also valid.
+The Client form is on `/hosts`. It clears the code on submission and page exit and uses no URL,
+browser storage or log for it. The POST endpoint checks the numeric loopback Host header, peer and
+exact browser Origin, requires JSON, bounds input, and serializes registrations. Hub browser access
+is loopback only. Remote browser access needs a separate authenticated, encrypted design.
 
-## Consequences
+Config reads and writes stay in cmd/dispatch through prepare and commit callbacks. A Host id and a
+normalized SSH address plus Daemon port are checked before mutation and again before persistence.
+Normalization lowercases DNS names, removes a final dot and normalizes IP spelling. DNS aliases for
+the same machine cannot be detected reliably and are not resolved into identity.
 
-Daemon installation stays manual, while the Hub side of SSH trust becomes Client-driven. This reopens only the reach-and-deployment part of the frozen v1 scope. The config format and normal Hub connection path do not change. The shared Hub key is simpler to manage, but compromise of that key affects every Host that trusts it.
+Live attachment updates the SSH dialer and Host table, then ends existing merged streams so their
+normal reconnect includes the new Host. The submitting Client reloads its cards after success.
+Manual hub.json edits still require a restart. `dispatch host add` now directs the user to the Client.
+
+## Verification and remaining account work
+
+Automated checks cover code corruption, signatures, competing claims, expiry, cancellation, restart,
+failed claim writes, preserved authorization, locks, SSH fingerprint ordering, pre-intent rollback,
+and post-intent recovery. The real Windows run is recorded in docs/checks/first-host.md. A passing
+in-process SSH test does not prove Windows ACL or OpenSSH behavior.
+
+Issues #81–#83 must be reviewed against this flow. Password prompting is superseded. Administrator
+authorization and its real Windows check remain separate work and are not claimed as supported here.
+
+References: [OpenSSH key options](https://man.openbsd.org/sshd.8),
+[Windows key management](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement).

@@ -46,7 +46,7 @@ type Hosts interface {
 // The three faces ship in the binary. A Hub on a machine with no internet is the
 // normal case, and a page that reaches out for its fonts loses its look there.
 //
-//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js names.js fonts/*.woff2
+//go:embed page.html start.html hosts.html index.html page.css page.js fold.js render.js hosts.js names.js registration.js jsqr.js fonts/*.woff2
 var files embed.FS
 
 // pathEscape is the one function the template calls. A Session id or a Host id
@@ -114,7 +114,12 @@ func New(hosts Hosts) http.Handler {
 	mux.HandleFunc("GET /fold.js", asset("fold.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /render.js", asset("render.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /hosts.js", asset("hosts.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /registration.js", asset("registration.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /names.js", asset("names.js", "text/javascript; charset=utf-8"))
+	// jsQR is the QR reader for a browser with no BarcodeDetector, which is every
+	// Windows one. The page asks for it only when a human starts a scan. The file is
+	// jsqr 1.4.0 dist/jsQR.js, Apache-2.0, kept verbatim beside its licence.
+	mux.HandleFunc("GET /jsqr.js", asset("jsqr.js", "text/javascript; charset=utf-8"))
 	for _, face := range []string{"archivo", "karla", "martian-mono"} {
 		name := "fonts/" + face + ".woff2"
 		mux.HandleFunc("GET /"+name, asset(name, "font/woff2"))

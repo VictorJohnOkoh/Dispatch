@@ -108,12 +108,12 @@ func TestAnAddressWithNoPortGetsPort22(t *testing.T) {
 	}
 }
 
-func TestHostAddNeedsAnIDAnAddressAndAnAccount(t *testing.T) {
+func TestHostAddDirectsTheUserToTheClient(t *testing.T) {
 	var out strings.Builder
-	if code := runHost(t.Context(), []string{"add", "-id", "desk"}, &out); code != 1 {
-		t.Fatalf("exit %d, want 1", code)
+	if code := runHost(t.Context(), []string{"add", "-id", "desk"}, &out); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
 	}
-	if !strings.Contains(out.String(), "account") {
+	if !strings.Contains(out.String(), "/hosts") {
 		t.Errorf("stderr = %q", out.String())
 	}
 }
@@ -123,10 +123,10 @@ func TestHostAddNeedsAnIDAnAddressAndAnAccount(t *testing.T) {
 func TestHostAddRefusesAHostIDThatIsNotOne(t *testing.T) {
 	var out strings.Builder
 	code := runHost(t.Context(), []string{"add", "-id", "work station", "-address", "10.0.0.4", "-user", "victor"}, &out)
-	if code != 1 {
-		t.Fatalf("exit %d, want 1", code)
+	if code != 2 {
+		t.Fatalf("exit %d, want 2", code)
 	}
-	if !strings.Contains(out.String(), "not a Host id") {
+	if !strings.Contains(out.String(), "replaced") {
 		t.Errorf("stderr = %q", out.String())
 	}
 }
@@ -137,5 +137,25 @@ func TestHostTakesOnlyAdd(t *testing.T) {
 		if code := runHost(t.Context(), args, &out); code != 2 {
 			t.Errorf("runHost(%q) = %d, want 2", args, code)
 		}
+	}
+}
+
+// The Client's address field corrects the address the code carries. It takes a
+// port on its own, because that is the only part a user usually has to correct.
+func TestTheAddressFieldTakesAPortOrAnAddress(t *testing.T) {
+	for typed, want := range map[string]string{
+		"":                  "192.168.4.49:22",
+		"2222":              "192.168.4.49:2222",
+		"192.168.1.10":      "192.168.1.10:22",
+		"192.168.1.10:2222": "192.168.1.10:2222",
+		"[fd00::20]:2222":   "[fd00::20]:2222",
+	} {
+		got, err := resolveRegistrationAddress("192.168.4.49:22", typed)
+		if err != nil || got != want {
+			t.Errorf("resolveRegistrationAddress(%q) = %q, %v, want %q", typed, got, err, want)
+		}
+	}
+	if _, err := resolveRegistrationAddress("192.168.4.49:22", "70000"); err == nil {
+		t.Error("a port above 65535 was accepted")
 	}
 }

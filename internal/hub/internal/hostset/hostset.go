@@ -22,17 +22,18 @@ type HostDialer interface {
 }
 
 type Table struct {
-	mu    *sync.Mutex
-	hosts []Host
-	logs  map[HostID]string
+	mu      *sync.Mutex
+	hosts   []Host
+	logs    map[HostID]string
+	changed chan struct{}
 }
 
 func New(hosts []Host) Table {
-	return Table{mu: &sync.Mutex{}, hosts: append([]Host(nil), hosts...), logs: make(map[HostID]string)}
+	return Table{mu: &sync.Mutex{}, hosts: append([]Host(nil), hosts...), logs: make(map[HostID]string), changed: make(chan struct{})}
 }
 
-func (t Table) LogID(id HostID) string { t.mu.Lock(); defer t.mu.Unlock(); return t.logs[id] }
-func (t Table) SetLogID(id HostID, value string) {
+func (t *Table) LogID(id HostID) string { t.mu.Lock(); defer t.mu.Unlock(); return t.logs[id] }
+func (t *Table) SetLogID(id HostID, value string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.logs[id] = value
@@ -40,7 +41,7 @@ func (t Table) SetLogID(id HostID, value string) {
 
 // ObserveHello keeps the identity of the log a Host is serving and returns the
 // Hello, so a caller that needs the same fields parses them once.
-func (t Table) ObserveHello(id HostID, data []byte) protocol.Hello {
+func (t *Table) ObserveHello(id HostID, data []byte) protocol.Hello {
 	var hello protocol.Hello
 	if json.Unmarshal(data, &hello) == nil {
 		t.SetLogID(id, hello.LogID)
@@ -48,13 +49,29 @@ func (t Table) ObserveHello(id HostID, data []byte) protocol.Hello {
 	return hello
 }
 
-func (t Table) All() []Host { return append([]Host(nil), t.hosts...) }
+func (t *Table) All() []Host {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]Host{}, t.hosts...)
+}
 
-func (t Table) Find(id HostID) (Host, bool) {
+func (t *Table) Find(id HostID) (Host, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	for _, host := range t.hosts {
 		if host.ID == id {
 			return host, true
 		}
 	}
 	return Host{}, false
+}
+
+func (t *Table) Changed() <-chan struct{} { t.mu.Lock(); defer t.mu.Unlock(); return t.changed }
+
+func (t *Table) Add(host Host) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.hosts = append(t.hosts, host)
+	close(t.changed)
+	t.changed = make(chan struct{})
 }

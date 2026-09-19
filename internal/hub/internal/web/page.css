@@ -349,6 +349,37 @@ input, select, textarea {
 }
 input:focus, select:focus { border-color: var(--orchid); outline: none; }
 
+#host-registration { max-width: 72ch; }
+/* A fieldset is left as a block. A legend inside a flex container is a special
+   box in every engine, and the three choices wrap on their own. */
+.registration-methods { border: 0; padding: 0; margin: 0 0 1rem; }
+.registration-methods legend { padding: 0; margin: 0 0 8px; color: var(--mist); }
+.registration-methods label { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0 1.2rem 8px 0; }
+.registration-panel p.meta { margin: 0 0 1rem; }
+.registration-field {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 1rem;
+}
+.registration-field input { width: 100%; min-width: 0; }
+/* A class selector beats the browser's own [hidden] rule, so the hidden state is
+   written here. Without it the controls show in a browser that cannot scan. */
+.registration-scan[hidden] { display: none; }
+.registration-scan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.registration-scan video {
+  flex-basis: 100%;
+  max-width: 320px;
+  border-radius: 12px;
+  corner-shape: squircle;
+}
+.registration-scan p { flex-basis: 100%; margin: 0; color: var(--mist); }
+.registration-scan p.read { color: var(--green); }
+
 button {
   background: #fff;
   color: #000;
@@ -447,8 +478,9 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 }
 .box:focus-within { border-color: var(--orchid); }
 
-#prompt {
+.box textarea {
   flex: 1;
+  min-width: 0;
   padding: 10px 0;
   max-height: 200px;
   background: transparent;
@@ -458,7 +490,7 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
   resize: none;
   font: 400 16px/1.5 var(--body);
 }
-#prompt::placeholder { color: var(--mist-dim); }
+.box textarea::placeholder { color: var(--mist-dim); }
 .box:has(#prompt:disabled) { opacity: 0.5; }
 
 /* One button sends and stops, because a Prompt in flight is the only thing there
