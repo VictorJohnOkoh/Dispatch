@@ -5,17 +5,17 @@ if (registrationForm) {
   const panels = registrationForm.querySelectorAll(".registration-panel");
   const addressLabel = document.getElementById("registration-address-label");
 
+  const userLabel = document.getElementById("registration-user-label");
+
   // Each way in needs its own fields, so the method decides which panels show and
-  // which entries the browser insists on. The login panel is shared, because a
-  // password and a key both need the account and the Daemon port.
+  // which entries the browser insists on. The account panel is shared: the code
+  // names an account, and the existing-login way has nothing to read one from.
   const shown = {
-    code: ["code"],
-    password: ["login", "password"],
-    existing: ["login", "existing"],
+    code: ["code", "account"],
+    existing: ["account", "existing"],
   };
   const needed = {
-    code: ["code"],
-    password: ["address", "user", "daemonPort", "password"],
+    code: ["code", "password"],
     existing: ["address", "user", "daemonPort"],
   };
   const every = ["code", "address", "user", "daemonPort", "password"];
@@ -29,14 +29,16 @@ if (registrationForm) {
     addressLabel.textContent = method === "code"
       ? "SSH port or address (optional; the code carries one)"
       : "SSH address of the Host";
+    userLabel.textContent = method === "code"
+      ? "Account on the Host (optional; the code carries one)"
+      : "Account on the Host";
   };
 
   const body = () => {
     const method = chosen();
-    const shared = { id: fields.id.value.trim(), address: fields.address.value.trim() };
-    if (method === "code") return { ...shared, code: fields.code.value.trim() };
-    const login = { ...shared, method, user: fields.user.value.trim(), daemonPort: Number(fields.daemonPort.value) };
-    return method === "password" ? { ...login, password: fields.password.value } : login;
+    const shared = { id: fields.id.value.trim(), address: fields.address.value.trim(), user: fields.user.value.trim() };
+    if (method === "code") return { ...shared, code: fields.code.value.trim(), password: fields.password.value };
+    return { ...shared, method, daemonPort: Number(fields.daemonPort.value) };
   };
 
   const forget = () => { fields.code.value = ""; fields.password.value = ""; };
@@ -68,7 +70,7 @@ if (registrationForm) {
       result.textContent = "Host registered.";
       window.location.reload();
     } catch {
-      result.textContent = "The Hub reply was lost. Check the Hosts list before trying again. The Hub may have saved registration for recovery.";
+      result.textContent = "The Hub reply was lost. Check the Hosts list before trying again.";
     } finally {
       input.code = "";
       input.password = "";
@@ -78,7 +80,7 @@ if (registrationForm) {
   window.addEventListener("pagehide", forget);
 }
 
-// Scanning is the same credential the human would paste, read from a camera or
+// Scanning reads the same code the human would paste, read from a camera or
 // a photo. The browser's own reader does it where there is one; everywhere else
 // the Hub serves its own copy of jsQR. Either way nothing is fetched from the
 // internet, so a Hub on a machine with no internet still scans.

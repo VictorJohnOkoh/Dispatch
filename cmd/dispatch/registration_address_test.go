@@ -7,7 +7,6 @@ import (
 	"net"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 	"golang.org/x/crypto/ssh"
@@ -53,8 +52,8 @@ func sshHostKey(t *testing.T) (string, ssh.PublicKey) {
 
 func addressCode(t *testing.T, address string, key ssh.PublicKey) protocol.RegistrationCode {
 	t.Helper()
-	c, err := protocol.NewRegistrationCode(address, "victor", ssh.FingerprintSHA256(key), 7700, time.Now())
-	if err != nil {
+	c := protocol.RegistrationCode{Address: address, User: "victor", DaemonPort: 7700, Fingerprint: ssh.FingerprintSHA256(key)}
+	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	return c

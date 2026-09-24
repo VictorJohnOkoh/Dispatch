@@ -3,17 +3,13 @@ package main
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
 func testRegistrationCode(t *testing.T) string {
 	t.Helper()
-	c, err := protocol.NewRegistrationCode("192.168.1.10:22", "victor", "SHA256:"+strings.Repeat("A", 43), 7777, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := protocol.RegistrationCode{Address: "192.168.1.10:22", User: "victor", DaemonPort: 7777, Fingerprint: "SHA256:" + strings.Repeat("A", 43)}
 	code, err := c.Encode()
 	if err != nil {
 		t.Fatal(err)

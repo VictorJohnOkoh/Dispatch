@@ -22,7 +22,7 @@ func TestEmptyHubServesRegistrationAndRejectsOtherOrigins(t *testing.T) {
 		origin, host, media, body string
 		want                      int
 	}{
-		{"http://127.0.0.1:7700", "127.0.0.1:7700", "application/json", `{"id":"desk","code":"test"}`, 204},
+		{"http://127.0.0.1:7700", "127.0.0.1:7700", "application/json", `{"id":"desk","code":"test","password":"secret"}`, 204},
 		{"https://evil.example", "127.0.0.1:7700", "application/json", `{"id":"desk"}`, 403},
 		{"null", "127.0.0.1:7700", "application/json", `{"id":"desk"}`, 403},
 		{"http://evil.example:7700", "evil.example:7700", "application/json", `{"id":"desk"}`, 403},
@@ -68,26 +68,27 @@ func TestAddingAHostEndsTheOldMergedStreamForReconnect(t *testing.T) {
 }
 
 func TestEachWayOfRegisteringAsksForWhatItUses(t *testing.T) {
-	code := RegistrationInput{ID: "desk", Code: "dispatch3.aaa.bbb"}
-	password := RegistrationInput{ID: "desk", Address: "10.0.0.2:22", Method: RegisterByPassword, User: "victor", DaemonPort: 7717, Password: "secret"}
+	code := RegistrationInput{ID: "desk", Code: "dispatch4.aaa.bbb", Password: "secret"}
 	existing := RegistrationInput{ID: "desk", Address: "10.0.0.2:22", Method: RegisterByLogin, User: "victor", DaemonPort: 7717}
 
 	for name, test := range map[string]struct {
 		in RegistrationInput
 		ok bool
 	}{
-		"a code on its own":              {code, true},
-		"a code naming the method":       {RegistrationInput{ID: "desk", Method: RegisterByCode, Code: code.Code}, true},
-		"a code beside an account":       {RegistrationInput{ID: "desk", Code: code.Code, User: "victor"}, false},
-		"a password login":               {password, true},
-		"a password login with no user":  {RegistrationInput{ID: "desk", Address: password.Address, Method: RegisterByPassword, DaemonPort: 7717, Password: "secret"}, false},
-		"a password login with no port":  {RegistrationInput{ID: "desk", Address: password.Address, Method: RegisterByPassword, User: "victor", Password: "secret"}, false},
-		"a password login with no words": {RegistrationInput{ID: "desk", Address: password.Address, Method: RegisterByPassword, User: "victor", DaemonPort: 7717}, false},
-		"an existing login":              {existing, true},
-		"an existing login with a word":  {RegistrationInput{ID: "desk", Address: existing.Address, Method: RegisterByLogin, User: "victor", DaemonPort: 7717, Password: "secret"}, false},
-		"a login with no address":        {RegistrationInput{ID: "desk", Method: RegisterByLogin, User: "victor", DaemonPort: 7717}, false},
-		"a login carrying a code":        {RegistrationInput{ID: "desk", Address: existing.Address, Method: RegisterByLogin, User: "victor", DaemonPort: 7717, Code: code.Code}, false},
-		"a way nobody serves":            {RegistrationInput{ID: "desk", Method: "telepathy"}, false},
+		"a code and a password":           {code, true},
+		"a code naming the method":        {RegistrationInput{ID: "desk", Method: RegisterByCode, Code: code.Code, Password: "secret"}, true},
+		"a code with another account":     {RegistrationInput{ID: "desk", Code: code.Code, Password: "secret", User: "admin"}, true},
+		"a code with no password":         {RegistrationInput{ID: "desk", Code: code.Code}, false},
+		"a password with no code":         {RegistrationInput{ID: "desk", Password: "secret"}, false},
+		"a code beside a Daemon port":     {RegistrationInput{ID: "desk", Code: code.Code, Password: "secret", DaemonPort: 7717}, false},
+		"an existing login":               {existing, true},
+		"an existing login with a word":   {RegistrationInput{ID: "desk", Address: existing.Address, Method: RegisterByLogin, User: "victor", DaemonPort: 7717, Password: "secret"}, false},
+		"an existing login with no user":  {RegistrationInput{ID: "desk", Address: existing.Address, Method: RegisterByLogin, DaemonPort: 7717}, false},
+		"an existing login with no port":  {RegistrationInput{ID: "desk", Address: existing.Address, Method: RegisterByLogin, User: "victor"}, false},
+		"a login with no address":         {RegistrationInput{ID: "desk", Method: RegisterByLogin, User: "victor", DaemonPort: 7717}, false},
+		"a login carrying a code":         {RegistrationInput{ID: "desk", Address: existing.Address, Method: RegisterByLogin, User: "victor", DaemonPort: 7717, Code: code.Code}, false},
+		"the password way that was taken": {RegistrationInput{ID: "desk", Address: existing.Address, Method: "password", User: "victor", DaemonPort: 7717, Password: "secret"}, false},
+		"a way nobody serves":             {RegistrationInput{ID: "desk", Method: "telepathy"}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := test.in.check(); (err == nil) != test.ok {
