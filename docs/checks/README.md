@@ -29,9 +29,8 @@ instructions do not exist.
 | 13 | Put a Daemon on a Host that has never had one | [first-host.md](first-host.md) | not run | built, not run |
 
 **Number 13 is built and not run.** It is Host Registration with a code entered in the Client (#123).
-The build supports a standard local Windows account. The run on a real Windows Host is #83. An
-administrator account is not supported, and #81 holds that work. v1 is not done until that run holds
-with the rest.
+The run on a real Windows Host is #83, with a standard account and an administrator account. v1 is
+not done until that run holds with the rest.
 
 **Number 2 has a hole in it.** `HubDetached` and `HubAttached` are declared and nothing writes either,
 which is issue #109. The sheet says what not to look for. The rest of that behaviour is checkable now.
