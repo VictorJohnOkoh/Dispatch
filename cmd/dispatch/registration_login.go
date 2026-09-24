@@ -22,10 +22,8 @@ func registerLoginHost(ctx context.Context, path string, h *hub.Hub, in hub.Regi
 	if err != nil {
 		return err
 	}
-	login := hub.Login{NewHost: in.Method == hub.RegisterByPassword}
-	if login.NewHost {
-		login.Auth = []ssh.AuthMethod{ssh.Password(in.Password)}
-	} else if login.Auth, err = clientLogins(); err != nil {
+	var login hub.Login
+	if login.Auth, err = clientLogins(); err != nil {
 		return err
 	}
 	if known, err := defaultKnownHosts(); err == nil {
@@ -81,7 +79,7 @@ func clientLogins() ([]ssh.AuthMethod, error) {
 		}
 	}
 	if len(methods) == 0 {
-		return nil, errors.New("this account has no SSH agent and no usable key in ~/.ssh, so it has no existing login to borrow; use the password option")
+		return nil, errors.New("this account has no SSH agent and no usable key in ~/.ssh, so it has no existing login to borrow; use the registration code")
 	}
 	return methods, nil
 }

@@ -56,10 +56,6 @@ func run(ctx context.Context, args []string, errOut io.Writer) int {
 	// The operational log is stderr. It holds what the Event log cannot: a process,
 	// a socket, and a decision that produced no Session.
 	log := slog.New(slog.NewTextHandler(errOut, nil))
-	if args[0] == "registration-relay" {
-		return registrationRelay(ctx, args[1:], os.Stdout)
-	}
-
 	// host add is a command and not a role: it registers one Host and ends, and
 	// nothing it does needs a log or a signal.
 	if args[0] == "host" {
@@ -86,7 +82,7 @@ func run(ctx context.Context, args []string, errOut io.Writer) int {
 	flags.StringVar(&path, "config", path, "the configuration file this role reads")
 	registrationAddress := ""
 	if role == "daemon" {
-		flags.StringVar(&registrationAddress, "host-reg", "", "explicitly start Host Registration using this SSH address")
+		flags.StringVar(&registrationAddress, "host-reg", "", "print the Host Registration code for this SSH address, then serve")
 	}
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
@@ -141,12 +137,6 @@ func startDaemonRegistration(ctx context.Context, path string, log *slog.Logger,
 	log.Info("dispatch starting", "role", "daemon", "vendors", len(adapters),
 		"harnesses", len(harnesses), "workspaceRoot", root, "logPath", cfg.LogPath)
 	d := daemon.New(log, events, state, root, adapters, harnesses, cfg.PolicyDefault)
-	// Completion is idempotent across a Daemon restart. With no pending code,
-	// this handler only acknowledges an existing completed public key.
-	if home, err := os.UserHomeDir(); err == nil {
-		keys := &registrationKeys{path: filepath.Join(home, ".ssh", "authorized_keys")}
-		d.WithRegistration(daemon.NewHostRegistration(keys))
-	}
 	if address != "" {
 		host, p, err := net.SplitHostPort(cfg.Listen)
 		if err != nil || host != "127.0.0.1" {
@@ -156,32 +146,17 @@ func startDaemonRegistration(ctx context.Context, path string, log *slog.Logger,
 		if err != nil {
 			return err
 		}
-		s, code, err := hostRegistration(address, port)
+		code, admin, err := hostRegistration(address, port)
 		if err != nil {
 			return err
 		}
-		defer s.Close()
-		d.WithRegistration(s)
-		fmt.Fprintln(out, "Host Registration code (expires in five minutes; Ctrl+C cancels registration and stops the Daemon):")
+		if admin {
+			log.Warn("this Daemon runs as an administrator, so every Harness tool call runs with administrator rights; a standard account is safer")
+		}
+		fmt.Fprintln(out, "Host Registration code. Enter it in the Client with the password of the account it names.")
 		fmt.Fprintln(out, "Scan the square below in the Client, or copy the text code under it.")
 		writeRegistrationQR(out, code)
 		fmt.Fprintln(out, code)
-		watch, stop := context.WithCancel(ctx)
-		defer stop()
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-watch.Done():
-					return
-				case <-ticker.C:
-					if s.Expire() != nil {
-						log.Warn("registration cleanup failed; check authorized_keys")
-					}
-				}
-			}
-		}()
 	}
 	return d.Serve(ctx, cfg.Listen)
 }
@@ -257,9 +232,6 @@ func startHub(ctx context.Context, path string, log *slog.Logger) error {
 		return errors.New("another Hub owns this configuration")
 	}
 	defer configLock.Close()
-	if err := recoverClientRegistration(ctx, path); err != nil {
-		log.Warn("Host Registration needs recovery; use the same Host id and a fresh code in the Client")
-	}
 	cfg, err := loadHubOrEmpty(path)
 	if err != nil {
 		return err

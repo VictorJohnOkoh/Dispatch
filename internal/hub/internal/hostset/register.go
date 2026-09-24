@@ -20,12 +20,13 @@ import (
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-// These are the shared SSH, managed identity and trust-file operations used by
-// code registration. Configuration stays at the command boundary.
+// These are the SSH, managed identity and trust-file steps both ways of
+// registering share. Configuration stays at the command boundary.
 
 // ErrIncompatible requires a Daemon update rather than a connection retry.
 var ErrIncompatible = errors.New("this Host's Daemon serves another protocol version")
@@ -57,7 +58,7 @@ type Registration struct {
 	// the user typed none, because this package dials the string as it is written.
 	Address string
 
-	// User is the standard local Windows account running the Daemon and SSH.
+	// User is the account the Hub logs in to the Host as.
 	User string
 
 	DaemonPort int
@@ -77,6 +78,32 @@ type Registered struct {
 	KeyPath    string
 	KnownHosts string
 	DaemonPort int
+}
+
+// install is what both ways do once they hold a login that can write the Host's
+// keys: put the Hub key there, prove it, and commit. A failure takes the key back
+// over the same login, so a Host is never left with a key the Hub did not save.
+func install(ctx context.Context, login *ssh.Client, req Registration, hostKey ssh.PublicKey, commit func(Registered) error) error {
+	permanent, err := identity(req.Dir)
+	if err != nil {
+		return err
+	}
+	remote, err := sftp.NewClient(login)
+	if err != nil {
+		return fmt.Errorf("the Host does not serve SFTP, which is how the Hub key is written: %w", err)
+	}
+	defer remote.Close()
+	undo, err := authorize(ctx, login, remote, permanent.PublicKey(), req.DaemonPort)
+	if err != nil {
+		return fmt.Errorf("installing this Hub's key on the Host: %w", err)
+	}
+	if err := prove(ctx, req, permanent, hostKey, net.JoinHostPort("127.0.0.1", strconv.Itoa(req.DaemonPort)), commit); err != nil {
+		if undoErr := undo(); undoErr != nil {
+			return fmt.Errorf("%w (and the Hub key stays on the Host: %w)", err, undoErr)
+		}
+		return fmt.Errorf("%w; the Hub key was taken off the Host again", err)
+	}
+	return nil
 }
 
 // prove is everything after the Host has been changed: the key-only login, the

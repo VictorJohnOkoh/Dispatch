@@ -14,24 +14,25 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// The three ways a Host is registered. Code is the zero value, so a caller that
-// names no Method gets the flow that existed before there was a choice.
+// The two ways a Host is registered. Code is the zero value, so a caller that
+// names no Method gets the code and password way.
 const (
-	RegisterByCode     = "code"
-	RegisterByPassword = "password"
-	RegisterByLogin    = "existing"
+	RegisterByCode  = "code"
+	RegisterByLogin = "existing"
 )
 
 type RegistrationInput struct {
 	ID      string `json:"id"`
 	Address string `json:"address"`
 
-	// Method selects the flow. Code carries the account, the Daemon port and the
-	// Host's fingerprint, so the other two ask for what it would have carried.
+	// Method selects the way. Code carries the account and the Daemon port, so
+	// the existing-login way asks for them instead.
 	Method string `json:"method"`
 
 	Code string `json:"code"`
 
+	// User replaces the account the code names, when SSH and the Daemon run as
+	// two accounts.
 	User       string `json:"user"`
 	DaemonPort int    `json:"daemonPort"`
 
@@ -103,31 +104,34 @@ func (h *Hub) registerHost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// check asks for what the selected flow needs and refuses what it does not use,
-// so a password sent to a flow that never reads one is an error and not a secret
+// check asks for what the selected way needs and refuses what it does not use,
+// so a password sent to a way that never reads one is an error and not a secret
 // that travelled for nothing.
 func (in RegistrationInput) check() error {
+	if len(in.User) > 64 {
+		return errors.New("the account name is too long")
+	}
 	switch in.Method {
 	case "", RegisterByCode:
-		if in.User != "" || in.DaemonPort != 0 || in.Password != "" {
-			return errors.New("a registration code carries the account and the Daemon port")
+		if in.Code == "" || in.Password == "" {
+			return errors.New("enter the code from the Host and the password of its account")
+		}
+		if in.DaemonPort != 0 {
+			return errors.New("a registration code carries the Daemon port")
 		}
 		return nil
-	case RegisterByPassword, RegisterByLogin:
-		if in.Code != "" {
-			return errors.New("this way of registering takes no registration code")
+	case RegisterByLogin:
+		if in.Code != "" || in.Password != "" {
+			return errors.New("the existing-login way takes no code and no password")
 		}
 		if in.Address == "" {
 			return errors.New("this way of registering needs the Host's SSH address")
 		}
-		if in.User == "" || len(in.User) > 64 {
-			return errors.New("name the account on the Host that runs the Daemon")
+		if in.User == "" {
+			return errors.New("name the account on the Host")
 		}
 		if in.DaemonPort < 1 || in.DaemonPort > 65535 {
 			return errors.New("name the port the Daemon listens on")
-		}
-		if (in.Password == "") != (in.Method == RegisterByLogin) {
-			return errors.New("the password way needs a password, and the existing-login way takes none")
 		}
 		return nil
 	default:
