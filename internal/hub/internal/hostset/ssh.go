@@ -20,7 +20,7 @@ var (
 	ErrUnreachable = errors.New("the Host does not answer")
 	ErrNoDaemon    = errors.New("the Host answers but no Daemon is listening")
 	ErrAuth        = errors.New("the Host refused this key")
-	ErrHostKey     = errors.New("the Host's key is not the one in known_hosts")
+	ErrHostKey     = errors.New("the Host's key is not the one this Hub trusts")
 
 	// ErrForwarding is sshd saying no to the channel itself, which is what
 	// AllowTcpForwarding off looks like. It is apart from ErrNoDaemon because the

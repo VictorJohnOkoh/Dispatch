@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 
@@ -14,49 +12,32 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// This is committed intent, containing only public connection data. Once saved,
-// retries finish it instead of revoking authorization after a lost reply.
-type registrationIntent struct {
-	ID   string         `json:"registrationId"`
-	Host hub.Registered `json:"host"`
+// registerClientHost sends one registration down the way the Client chose.
+func registerClientHost(ctx context.Context, path string, h *hub.Hub, in hub.RegistrationInput) error {
+	if in.Method == hub.RegisterByLogin {
+		return registerLoginHost(ctx, path, h, in)
+	}
+	return registerCodeHost(ctx, path, h, in)
 }
 
-func registerClientHost(ctx context.Context, path string, h *hub.Hub, in hub.RegistrationInput) error {
+func registerCodeHost(ctx context.Context, path string, h *hub.Hub, in hub.RegistrationInput) error {
 	code, err := protocol.ParseRegistrationCode(in.Code)
 	if err != nil {
 		return err
 	}
-	address := code.Address
-	if in.Address != "" {
-		address = withPort(in.Address)
-	}
-	address, err = normalizeRegistrationAddress(address)
+	address, err := resolveRegistrationAddress(code.Address, strings.TrimSpace(in.Address))
 	if err != nil {
 		return err
 	}
-	replacing := false
-	if b, readErr := os.ReadFile(path + ".registration"); readErr == nil {
-		var saved registrationIntent
-		if json.Unmarshal(b, &saved) != nil || saved.Host.ID != hub.HostID(in.ID) || saved.Host.Address != address || saved.Host.User != code.User || saved.Host.DaemonPort != code.DaemonPort {
-			return errors.New("a different Host Registration needs recovery; use its Host id and connection profile")
-		}
-		if err := recoverClientRegistration(ctx, path); err == nil {
-			for _, id := range h.All() {
-				if id == in.ID {
-					return nil
-				}
-			}
-			return h.Attach(saved.Host)
-		}
-		replacing = true
-	} else if !errors.Is(readErr, os.ErrNotExist) {
-		return readErr
+	user := code.User
+	if typed := strings.TrimSpace(in.User); typed != "" {
+		user = typed
 	}
 	dir, err := hubSSHDir()
 	if err != nil {
 		return err
 	}
-	req := hub.Registration{ID: hub.HostID(in.ID), Address: address, User: code.User, DaemonPort: code.DaemonPort, Dir: dir}
+	req := hub.Registration{ID: hub.HostID(in.ID), Address: address, User: user, DaemonPort: code.DaemonPort, Dir: dir}
 	if known, err := defaultKnownHosts(); err == nil {
 		req.TrustFiles = append(req.TrustFiles, known)
 	}
@@ -67,26 +48,11 @@ func registerClientHost(ctx context.Context, path string, h *hub.Hub, in hub.Reg
 			}
 		}
 	}
-	if _, err := hubWith(path, hub.Registered{ID: req.ID, Address: address, User: code.User, DaemonPort: code.DaemonPort}); err != nil {
+	if _, err := hubWith(path, hub.Registered{ID: req.ID, Address: address, User: user, DaemonPort: code.DaemonPort}); err != nil {
 		return err
 	}
 	var registered hub.Registered
-	err = hub.RegisterCode(ctx, req, code, func(host hub.Registered) error {
-		if _, err := hubWith(path, host); err != nil {
-			return err
-		}
-		b, err := json.Marshal(registrationIntent{ID: code.ID, Host: host})
-		if err != nil {
-			return err
-		}
-		if replacing {
-			return writeRegistrationFile(path+".registration", b)
-		}
-		if _, err := os.Stat(path + ".registration"); !errors.Is(err, os.ErrNotExist) {
-			return errors.New("a registration recovery record already exists")
-		}
-		return writeRegistrationFile(path+".registration", b)
-	}, func(host hub.Registered) error {
+	err = hub.RegisterCode(ctx, req, code, in.Password, func(host hub.Registered) error {
 		if err := commitHost(path, host); err != nil {
 			return err
 		}
@@ -99,44 +65,24 @@ func registerClientHost(ctx context.Context, path string, h *hub.Hub, in hub.Reg
 	if err := h.Attach(registered); err != nil {
 		return fmt.Errorf("Host saved; restart the Hub to attach it: %w", err)
 	}
-	if err := os.Remove(path + ".registration"); err != nil {
-		return errors.New("Host registered; the recovery record could not be removed")
-	}
 	return nil
 }
 
-func recoverClientRegistration(ctx context.Context, path string) error {
-	b, err := os.ReadFile(path + ".registration")
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+// registrationAddress resolves what the Client typed against the address the
+// code carries. An entry of only digits is a port, because a host name cannot
+// be one, so correcting the port alone keeps the code's host.
+func resolveRegistrationAddress(coded, typed string) (string, error) {
+	if typed == "" {
+		return normalizeRegistrationAddress(coded)
 	}
-	if err != nil {
-		return err
-	}
-	var intent registrationIntent
-	if len(b) > 8192 || json.Unmarshal(b, &intent) != nil || len(intent.ID) != 32 || !protocol.ValidHostID(string(intent.Host.ID)) {
-		return errors.New("invalid Host Registration recovery record; inspect it locally")
-	}
-	err = hub.RecoverRegistration(ctx, intent.Host, intent.ID, func(host hub.Registered) error {
-		// A crash after the config rename must not append the same Host again.
-		cfg, loadErr := loadHubOrEmpty(path)
-		if loadErr != nil {
-			return loadErr
+	if strings.IndexFunc(typed, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
+		host, _, err := net.SplitHostPort(coded)
+		if err != nil {
+			return "", err
 		}
-		for _, have := range cfg.Hosts {
-			if have.ID == string(host.ID) {
-				if have.Address == host.Address && have.User == host.User && have.KeyPath == host.KeyPath && have.KnownHosts == host.KnownHosts && have.DaemonPort == host.DaemonPort {
-					return nil
-				}
-				return errors.New("recovery would replace an existing Host")
-			}
-		}
-		return commitHost(path, host)
-	})
-	if err != nil {
-		return fmt.Errorf("Host Registration needs recovery on the Host; keep %s.registration: %w", path, err)
+		return normalizeRegistrationAddress(net.JoinHostPort(host, typed))
 	}
-	return os.Remove(path + ".registration")
+	return normalizeRegistrationAddress(withPort(typed))
 }
 
 func normalizeRegistrationAddress(address string) (string, error) {

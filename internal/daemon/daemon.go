@@ -46,12 +46,11 @@ type Harness struct {
 
 // Daemon is one Host's server.
 type Daemon struct {
-	registration *HostRegistration
-	log          *slog.Logger
-	events       *eventlog.Log
-	root         workspace.Root
-	vendors      *Vendors
-	harnesses    []Harness
+	log       *slog.Logger
+	events    *eventlog.Log
+	root      workspace.Root
+	vendors   *Vendors
+	harnesses []Harness
 
 	// transcripts is the directory a Session's raw Harness bytes are written in,
 	// which is the one the Event log lives in.
@@ -99,11 +98,6 @@ type Daemon struct {
 	// base is the context every Session hangs off, which is Serve's. A handler
 	// exercised without Serve gets the background one this starts as.
 	base context.Context
-}
-
-func (d *Daemon) WithRegistration(s *HostRegistration) *Daemon {
-	d.registration = s
-	return d
 }
 
 // New builds the Daemon from the values main.go resolved. The Vendor adapters and

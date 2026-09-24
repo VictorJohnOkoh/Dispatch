@@ -23,10 +23,13 @@ ADRs that contradict or under-specify something. Everything original to this doc
 
 - Many Hosts, each running a Daemon on loopback, reached by the Hub over SSH with ed25519 key auth.
 - Manual Daemon install. Copy one binary and one JSON file to the Host and start it by hand.
-- Client-driven Host Registration. The Daemon explicitly generates a single-use code. The Client
-  sends it to the Hub, which checks SSH trust and the Handshake before adding the Host; see ADR 0013.
-- One binary, two roles: `dispatch daemon` and `dispatch hub`. The Daemon's `-register-address`
-  flag starts registration. A fixed internal SSH command carries signed registration requests.
+- Client-driven Host Registration. The Daemon prints a code that names the Host by its SSH key
+  fingerprint. The user enters the code and the account password in the Client. The Hub checks the
+  Host key against the code before it sends the password, installs a Hub key that can open only the
+  tunnel to the Daemon, and checks the Handshake before it adds the Host. Standard and administrator
+  accounts are both supported; see ADR 0013.
+- One binary, two roles: `dispatch daemon` and `dispatch hub`. The Daemon's `-host-reg` flag prints
+  the registration code on Windows and Linux.
 
 **Sessions**
 
@@ -515,12 +518,11 @@ hold.
 12. **Break the Handshake on purpose.** Run an old Daemon against a new Hub, see `Incompatible`, and
     confirm from the Daemon's log that the Hub stopped retrying.
 13. **Register a Host that has never had a Daemon.** Install OpenSSH, copy the binary and
-    `daemon.json`, and start the Daemon with `-register-address` as a standard local Windows account.
-    Start the Hub, open `/hosts` in the Client, and paste the code. The Hub proves key-only SSH and
-    the Handshake before it writes `hub.json`, then attaches the Host without restarting. The user
-    does not edit an authorized-key file, `known_hosts` or `hub.json`. Manual Daemon install remains
-    a frozen v1 feature, and Host
-    Registration is the only supported automatic setup in v1.
+    `daemon.json`, and start the Daemon with `-host-reg`. Start the Hub, open `/hosts` in the
+    Client, and enter the code and the account password. The Hub proves key-only SSH and the
+    Handshake before it writes `hub.json`, then attaches the Host without restarting. The user does
+    not edit an authorized-key file, `known_hosts` or `hub.json`. Manual Daemon install remains a
+    frozen v1 feature, and Host Registration is the only supported automatic setup in v1.
 
 Three of these get skipped unless they are called out, so they are called out. Number 6 needs a shell
 on the Host, not a green test. Number 12 needs two builds, which is an inconvenience rather than a

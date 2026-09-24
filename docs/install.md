@@ -3,13 +3,10 @@
 This is the v1 install. You copy two files to the Host and start the Daemon yourself. The Hub does
 not install anything, and nothing here runs from the Client.
 
-ADR 0013 specifies a code entered in the Client for automatic Host Registration. It supports a
-**standard local Windows account**, with the Daemon running as that same account. Read
-[Steps 6 to 8, with a registration code](#steps-6-to-8-with-a-registration-code) after step 5.
-
-An administrator account still does steps 6 to 8 by hand, because that account uses a shared key file
-with an ACL of its own and the command does not write that one yet. Either way the `hub.json` format
-is the same.
+After step 5, register the Host from the Client. Read
+[Steps 6 to 8, with a registration code](#steps-6-to-8-with-a-registration-code). It works for a
+standard account and for an administrator account. The manual steps 6 to 8 stay as a fallback, and
+the `hub.json` format is the same either way.
 
 Follow this page from the top and type nothing from memory. `SPEC.md` behaviour 13 is a person doing
 exactly that on a machine that has never had a Daemon.
@@ -245,53 +242,120 @@ curl.exe http://127.0.0.1:7717/v1/sessions
 A Host with no Session yet answers `{"sessions":[],"cursor":0}`. If this fails, the problem is on the
 Host and not in the tunnel. Fix it here before you go back to the Client machine.
 
-## Steps 6 to 8, with a registration code
+## Two ways to register a Host
 
-Skip this section for an administrator account or a Daemon running as a different SSH account.
-Use the manual steps below for those profiles. OpenSSH must already accept connections, including
-loopback connections, and have its default ed25519 Host key. The Daemon must listen on 127.0.0.1.
+Open `http://127.0.0.1:7700/hosts` on the Client machine and choose one. Both end in the same place:
+this Hub's managed ed25519 key is on the Host, the Host's own key is in the Hub's `known_hosts`, and
+the Hub has proved a key-only login, a forwarded channel and the Daemon Handshake.
 
-Before starting Sessions, stop the Daemon from step 5 and start it with an explicit registration request:
+| Choice | Use it when | It asks for |
+|---|---|---|
+| Registration code and password | The Client has no SSH login to the Host yet | Host id, the code, the account password |
+| An SSH login I already have | `ssh user@host` already works from this Client machine | Host id, SSH address, account, Daemon port |
 
-```powershell
-.\dispatch.exe daemon -config daemon.json -register-address 192.168.1.20:22
+The Hub puts its key on the Host with options that allow only the tunnel to the Daemon:
+
+```
+restrict,port-forwarding,permitopen="127.0.0.1:7717",command="exit 1" ssh-ed25519 AAAA... dispatch-hub
 ```
 
-The Daemon checks the account, authorization permissions and temporary-key restrictions through
-local OpenSSH before it prints a code. A failed check displays no code. Correct the named prerequisite;
-Dispatch does not edit OpenSSH or firewall settings. The code expires after five minutes.
+So the Hub key cannot open a shell or run a command on the Host. The `dispatch-hub` comment marks
+the line. To remove the Hub's access, delete that line.
 
-On the Client machine, start the Hub. It can start without hub.json or with an empty Host list:
+## Steps 6 to 8, with a registration code
+
+OpenSSH must already accept connections, allow password login for the account, serve SFTP, and have
+its default ed25519 Host key. The Daemon must listen on 127.0.0.1. Rebuild both the Hub and the
+Daemon from the same source: a code from an older build starts with `dispatch3.` and the Hub
+refuses it with a message that says so.
+
+The Daemon reads `C:\ProgramData\ssh\ssh_host_ed25519_key.pub` to name the Host in the code, and
+OpenSSH can leave that file readable only to administrators. If the Daemon says access is denied,
+grant its account read once, in an administrator PowerShell. The file is a public key, so read is
+all it grants:
+
+```powershell
+icacls C:\ProgramData\ssh\ssh_host_ed25519_key.pub /grant "YOUR_USER:(R)"
+```
+
+Stop the Daemon from step 5 and start it again with the address the Client machine uses for this
+Host's SSH:
+
+```powershell
+.\dispatch.exe daemon -config daemon.json -host-reg 192.168.1.20:22
+```
+
+The Daemon prints the code and then keeps running as usual. The code names this Host: its SSH
+address, the account the Daemon runs as, the Daemon port and the Host's SSH key fingerprint. It
+holds no secret and does not expire, so you can use it again. Start the Daemon without `-host-reg`
+for ordinary use.
+
+Before it prints the code, the Daemon dials the address you gave and checks that the same SSH key
+answers there. A Daemon inside WSL is a different machine from the Windows Host around it, with its
+own SSH key and address, so a WSL Daemon given the Windows address refuses to print a code. Run the
+Daemon on Windows for a Windows Host, or register the WSL address and make WSL reachable from the
+Client.
+
+**Which account.** The Daemon runs every Harness tool call as its own account, and the Workspace
+Root does not bound shell commands. If you start the Daemon from an elevated PowerShell (**Run as
+administrator**), an agent's shell commands run with administrator rights too, and the Daemon logs
+a warning. Start it from a normal window, or use a standard account. An administrator account
+works for registration: the Hub finds out that the account is an administrator and writes
+`C:\ProgramData\ssh\administrators_authorized_keys` with the ACL that OpenSSH requires, instead of
+the account's own `.ssh\authorized_keys`. You can also run the Daemon as a standard account and
+register with an administrator's password. Type that account in the **Account on the Host** field.
+
+On the Client machine, start the Hub. It can start without `hub.json` or with an empty Host list:
 
 ```powershell
 .\dispatch.exe hub -config hub.json
 ```
 
-Open `http://127.0.0.1:7700/hosts`. Choose a Host id, such as `workstation`, paste the whole code, and
-select **Register Host**. If needed, correct the SSH address in the form. IPv6 addresses with a port
-use brackets, such as `[fd00::20]:2222`. The code does not create a route through NAT or a firewall.
+Open `http://127.0.0.1:7700/hosts`. Leave **Registration code and password** selected. Choose a Host
+id, such as `workstation`, paste the whole code, type the password of the account the code names,
+and select **Register Host**. Select **Scan QR code** to read the square with the Client machine's
+camera, or **Use a photo** to read a picture of it. The camera needs `http://127.0.0.1` or HTTPS.
+Scanning the square with a telephone does not send the code to the Client. The Client must do the
+scan.
 
-Copy the code directly from the intended Host through a trusted path. It grants temporary access;
-do not put it in chat, logs or a file. The Client clears it on submission. The Hub checks the code's
-Host fingerprint before SSH authentication, creates or reuses its managed ed25519 key, installs only
-the public key on the Host, and proves a new key-only SSH connection, forwarding and the Handshake.
+The code carries the Host's SSH address, so leave the address field empty unless that address is
+wrong. An entry of only digits is a port and keeps the code's host, such as `2222`. Any other entry
+is a whole address, such as `192.168.1.10:2222`, and port 22 is added when none is written. IPv6
+addresses with a port use brackets, such as `[fd00::20]:2222`. The code does not make a route
+through NAT or a firewall.
 
-The Hub saves the profile and attaches it without a restart. Its private key remains under
-`%LOCALAPPDATA%\Dispatch\ssh`. A duplicate Host id or normalized address plus Daemon port is refused.
-The Host fingerprint cannot be overridden by changing the address. Existing conflicting trust stops
-registration. Manual hub.json edits still require a restart.
+**What the Hub does.** It connects to the address and compares the Host's SSH key with the
+fingerprint in the code. It sends the password only if they match, so a password never goes to the
+wrong machine. Changing the address cannot get around this check. A `known_hosts` line that holds a
+different key for that address also stops registration. Then the Hub writes its public key on the
+Host, logs in again with that key, and runs the Handshake with the Daemon. The password stays in the
+Hub's memory for that one request. It is not saved, not written to `hub.json` and not logged.
 
-If registration fails before its recovery record is saved, Dispatch removes this attempt's new
-authorization. If cleanup cannot be confirmed, cancel locally. Ctrl+C cancels pending registration
-and stops the Daemon, so use it only when stopping Sessions is acceptable. Start the Daemon without
-`-register-address` for ordinary use. A new explicit registration sweeps stale pending authorization.
+If any step after the key write fails, the Hub puts the key file back the way it found it and
+removes the trust it added. If someone changed the file during registration, the Hub leaves it and
+the error tells you to delete the `dispatch-hub` line by hand.
 
-If the Hub reports a saved recovery record, keep `hub.json.registration` and restart the Hub. It
-retries with the same permanent key. If completion never reached the Host and its lease expired,
-start a fresh code on the Host and submit it with the same Host id and connection profile. Do not
-delete the recovery record after a lost reply: the Host may already have completed authorization.
-Completed authorization is kept until explicitly removed locally. Administrator support and its
-Windows permissions checks remain separate work in #81–#83.
+The Hub saves the profile and attaches the Host without a restart. Its private key stays under
+`%LOCALAPPDATA%\Dispatch\ssh`. A duplicate Host id, or a duplicate address plus Daemon port, is
+refused. Manual `hub.json` edits still need a restart.
+
+## Steps 6 to 8, with an SSH login you already have
+
+This way needs no code and nothing typed on the Host. Start the Daemon as in step 5 and leave it
+running. The Hub borrows what this Client machine's account already holds:
+
+- the SSH agent, at `\\.\pipe\openssh-ssh-agent` on Windows or `$SSH_AUTH_SOCK` elsewhere
+- `~/.ssh/id_ed25519`, `~/.ssh/id_ecdsa` and `~/.ssh/id_rsa`
+
+A key file with a passphrase is skipped, because the Hub has nobody at the keyboard to ask. Load it
+into the agent instead.
+
+This way **refuses** a Host that no `known_hosts` file on this machine names. That check is what
+the choice means: it confirms that the SSH connection exists rather than assuming it. If it
+refuses, run `ssh user@host` once by hand, check the fingerprint, then try again.
+
+The Hub writes the same restricted line to the same file as the code way, including the
+administrators file for an administrator, and it undoes the write the same way on failure.
 
 ## 6. Give the Hub a key
 
@@ -498,7 +562,7 @@ The Hub names five failures. Each one has one place to look.
 | --- | --- | --- |
 | `the Host does not answer` | The SSH connection failed | Check `address`, the network, and that `sshd` is running on the Host |
 | `the Host refused this key` | `sshd` rejected the key | Step 6. An administrator account uses `administrators_authorized_keys`, and that file needs the `icacls` line |
-| `the Host's key is not the one in known_hosts` | The Host answered with a key that is not the recorded one | Step 7. Look for a byte order mark first, then for a rebuilt Host, whose old line you must delete |
+| `the Host's key is not the one this Hub trusts` | The Host answered with a key the code does not name, or one that disagrees with a `known_hosts` line | The message says which. For a code, take a fresh one from the intended Host. For `known_hosts`, it names the file: look for a byte order mark first, then for a rebuilt Host, whose old line you must delete |
 | `the Host answers but no Daemon is listening` | SSH works and the port is closed | The Daemon is not running, or `daemonPort` and the Host's `listen` port differ |
 | `the Host will not forward a channel` | `sshd` refused the channel itself | Set `AllowTcpForwarding yes` in `C:\ProgramData\ssh\sshd_config` on the Host, then `Restart-Service sshd` |
 

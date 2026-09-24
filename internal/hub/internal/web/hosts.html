@@ -16,22 +16,60 @@
 
 <section class="card">
   <h2>Register a Host</h2>
-  <p>Start Host Registration on the Host - copy its code here.</p>
   <form id="host-registration" autocomplete="off">
+    <fieldset class="registration-methods">
+      <legend>How this Client reaches the Host for the first time</legend>
+      <label><input type="radio" name="method" value="code" checked> Registration code and password</label>
+      <label><input type="radio" name="method" value="existing"> An SSH login I already have</label>
+    </fieldset>
     <div class="registration-field">
       <label for="registration-host-id">Host ID</label>
       <input id="registration-host-id" name="id" required maxlength="64" autocomplete="off">
     </div>
     <div class="registration-field">
-      <label for="registration-address">SSH port (optional default: 22)</label>
-      <input id="registration-address" name="address" maxlength="255" placeholder="22" autocomplete="off">
+      <label for="registration-address" id="registration-address-label">SSH port or address (optional; the code carries one)</label>
+      <input id="registration-address" name="address" maxlength="255" placeholder="2222 or 192.168.1.10:2222" autocomplete="off">
     </div>
-    <div class="registration-field">
-      <label for="registration-code">Registration code</label>
-      <div class="box">
-        <textarea id="registration-code" name="code" required maxlength="4096" rows="4" autocomplete="off" spellcheck="false"></textarea>
+
+    <div class="registration-panel" data-method="code">
+      <p class="meta">Start the Daemon on the Host with <code>-host-reg</code>, then scan or paste the code it prints.
+        <a href="https://github.com/VictorJohnOkoh/Dispatch/blob/main/docs/install.md" target="_blank" rel="noreferrer">Read the install guide</a>.</p>
+      <div class="registration-field">
+        <label for="registration-code">Registration code</label>
+        <div class="box">
+          <textarea id="registration-code" name="code" maxlength="4096" rows="4" autocomplete="off" spellcheck="false"></textarea>
+        </div>
+        <div class="registration-scan" id="registration-scan" hidden>
+          <button type="button" id="registration-scan-start">Scan QR code</button>
+          <button type="button" id="registration-scan-stop" hidden>Stop the camera</button>
+          <button type="button" id="registration-scan-photo">Use a photo</button>
+          <input id="registration-scan-file" type="file" accept="image/*" hidden>
+          <video id="registration-scan-video" playsinline muted hidden></video>
+          <p id="registration-scan-result" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+      <div class="registration-field">
+        <label for="registration-password">Password of the account the code names</label>
+        <input id="registration-password" name="password" type="password" autocomplete="off">
+      </div>
+      <p class="meta">The Hub checks the Host's SSH key against the code before it sends the password. It uses the password once to install its own key, and it does not save it.</p>
+    </div>
+
+    <div class="registration-panel" data-method="account">
+      <div class="registration-field">
+        <label for="registration-user" id="registration-user-label">Account on the Host (optional; the code carries one)</label>
+        <input id="registration-user" name="user" maxlength="64" autocomplete="off">
       </div>
     </div>
+
+    <div class="registration-panel" data-method="existing" hidden>
+      <div class="registration-field">
+        <label for="registration-daemon-port">Port the Daemon listens on</label>
+        <input id="registration-daemon-port" name="daemonPort" type="number" min="1" max="65535" value="7717" autocomplete="off">
+      </div>
+      <p class="meta">The Hub borrows this account's SSH agent or the keys in its .ssh directory, and it refuses a Host that this machine's known_hosts does not already name.</p>
+    </div>
+
     <button type="submit">Register Host</button>
     <p id="registration-result" role="status" aria-live="polite"></p>
   </form>
