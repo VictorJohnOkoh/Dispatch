@@ -477,6 +477,115 @@ setTimeout(() => {
 	}
 }
 
+// The question from the Session on screen is answered on its own row. Without
+// this, the user could answer it only from some other Session's page.
+func TestAQuestionFromTheSessionOnScreenIsAnsweredOnItsRow(t *testing.T) {
+	var got struct {
+		Buttons []string `json:"buttons"`
+		Posted  []string `json:"posted"`
+		Pressed bool     `json:"pressed"`
+		After   bool     `json:"after"`
+	}
+	pageUnder(t, `
+function answer() {
+  return dom.transcript.children.find((r) => r.dataset.kind === "ApprovalRequested").querySelector(".answer");
+}
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "ToolCallRequested",
+  payload: {toolCallId: "c1", name: "bash"}});
+opened.send("event", {host: "desk", session: "s-1", seq: 3, kind: "ApprovalRequested",
+  payload: {toolCallId: "c1", title: "rm -rf build/"}});
+const buttons = answer().children.map((b) => b.dataset.decision);
+await answer().children[0].onclick();
+const pressed = answer() !== null;
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "ApprovalDecided",
+  payload: {toolCallId: "c1", decision: "allowed", by: "user"}});
+console.log(JSON.stringify({
+  buttons,
+  posted: posted.map((p) => p.url + " " + p.body),
+  pressed,
+  after: answer() !== null,
+}));
+`, &got)
+
+	if strings.Join(got.Buttons, ",") != "allowed,refused" {
+		t.Fatalf("the open question offers %v, want Allow and Refuse", got.Buttons)
+	}
+	if len(got.Posted) != 1 || !strings.Contains(got.Posted[0], "/v1/hosts/desk/sessions/s-1/approvals") ||
+		!strings.Contains(got.Posted[0], `"toolCallId":"c1"`) {
+		t.Errorf("the decision went out as %v", got.Posted)
+	}
+	// A command is an intention, so the controls wait for the Daemon's own Event.
+	if !got.Pressed {
+		t.Error("the controls went when the button was pressed, before any Event said the question was decided")
+	}
+	if got.After {
+		t.Error("the controls are still up after ApprovalDecided")
+	}
+}
+
+// The controls on a row come down on the same Events that take a toast down.
+func TestTheRowsControlsGoWhateverEndedItsQuestion(t *testing.T) {
+	var got []bool
+	pageUnder(t, `
+const seen = [];
+function ask(seq, id) {
+  opened.send("event", {host: "desk", session: "s-1", seq, kind: "ToolCallRequested", payload: {toolCallId: id, name: "bash"}});
+  opened.send("event", {host: "desk", session: "s-1", seq: seq + 1, kind: "ApprovalRequested", payload: {toolCallId: id, title: "t"}});
+}
+function up(seq) {
+  return dom.transcript.children.find((r) => r.dataset.seq === seq).querySelector(".answer") !== null;
+}
+
+// The Tool Call ended with no decision, which is the Daemon's own synthesis when
+// a Prompt completes with the call still open.
+ask(2, "c1");
+seen.push(up(3));
+opened.send("event", {host: "desk", session: "s-1", seq: 4, kind: "ToolCallEnded", payload: {toolCallId: "c1", outcome: "unknown"}});
+seen.push(up(3));
+
+// The Session ended under the question.
+ask(5, "c2");
+seen.push(up(6));
+opened.send("event", {host: "desk", session: "s-1", seq: 7, kind: "SessionEnded", payload: {reason: "stopped"}});
+seen.push(up(6));
+
+console.log(JSON.stringify(seen));
+`, &got)
+
+	want := []bool{true, false, true, false}
+	whens := []string{"it was asked", "the Tool Call ended", "it was asked", "the Session ended"}
+	if len(got) != len(want) {
+		t.Fatalf("the page answered %v", got)
+	}
+	for i, when := range whens {
+		if got[i] != want[i] {
+			t.Errorf("after %s the controls are up: %v, want %v", when, got[i], want[i])
+		}
+	}
+}
+
+// A reload during an open question draws the controls again. The server draws
+// the row and not the controls, so they come from the fold of the first paint's
+// Events.
+func TestAReloadDuringAnOpenQuestionShowsTheControlsAgain(t *testing.T) {
+	var got []string
+	pageUnderSetup(t, `
+transcript.append(row(2, "ToolCallRequested", "Tool call: bash"), row(3, "ApprovalRequested", "Approval requested: t"));
+embedded.textContent = JSON.stringify([
+  {seq: 1, kind: "SessionStarted", payload: {harness: "opencode"}},
+  {seq: 2, kind: "ToolCallRequested", payload: {toolCallId: "c1", name: "bash"}},
+  {seq: 3, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "t"}},
+]);
+`, `
+const answer = dom.transcript.children[2].querySelector(".answer");
+console.log(JSON.stringify(answer ? answer.children.map((b) => b.dataset.decision) : []));
+`, &got)
+
+	if strings.Join(got, ",") != "allowed,refused" {
+		t.Errorf("after a reload the open question offers %v, want Allow and Refuse", got)
+	}
+}
+
 // A decision that did not land leaves the toast up and the button usable. The
 // question is open until an Event says otherwise, and a toast that went quiet
 // would be the user believing they had answered.
