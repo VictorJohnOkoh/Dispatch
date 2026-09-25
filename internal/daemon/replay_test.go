@@ -43,9 +43,8 @@ func (h *host) resume(t *testing.T, from protocol.Cursor, logID string) *reader 
 // sees the whole message, including the half that arrived after the Cursor.
 func TestAReplayFromMidMessageReturnsTheMessageWhole(t *testing.T) {
 	h := newHost(t)
-	s := &Session{id: "s-open", cancel: func() {}}
-	h.sessions.add(s)
-	k := &sink{d: h.Daemon, s: s}
+	s := h.bare("s-open")
+	k := s.sink
 	k.Message("half a", false)
 
 	// The message is open at Seq 1, so a reader that has read everything stands
@@ -81,8 +80,7 @@ func TestAReplayFromMidMessageReturnsTheMessageWhole(t *testing.T) {
 // arrives once on the subscription rather than twice.
 func TestAReplayHandsEachEventOverExactlyOnce(t *testing.T) {
 	h := newHost(t)
-	s := &Session{id: "s-old", cancel: func() {}}
-	h.sessions.add(s)
+	s := h.bare("s-old")
 	for _, text := range []string{"one", "two"} {
 		if _, err := h.write(s, event.KindPromptSubmitted, &event.PromptSubmitted{Text: text}); err != nil {
 			t.Fatalf("write: %v", err)
@@ -136,8 +134,7 @@ func TestACursorAboveTheHighWaterMarkIsAResyncAndTheStreamStaysOpen(t *testing.T
 // A Cursor is a Sequence Number one log allotted, and it means nothing in another.
 func TestACursorFromAnotherLogIsAResync(t *testing.T) {
 	h := newHost(t)
-	s := &Session{id: "s-old", cancel: func() {}}
-	h.sessions.add(s)
+	s := h.bare("s-old")
 	if _, err := h.write(s, event.KindPromptSubmitted, &event.PromptSubmitted{Text: "one"}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -156,8 +153,7 @@ func TestACursorFromAnotherLogIsAResync(t *testing.T) {
 // resync above came from the identity and not from the number.
 func TestACursorCarryingThisLogsIdentityReplays(t *testing.T) {
 	h := newHost(t)
-	s := &Session{id: "s-old", cancel: func() {}}
-	h.sessions.add(s)
+	s := h.bare("s-old")
 	if _, err := h.write(s, event.KindPromptSubmitted, &event.PromptSubmitted{Text: "one"}); err != nil {
 		t.Fatalf("write: %v", err)
 	}

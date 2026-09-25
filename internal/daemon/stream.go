@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
@@ -49,6 +50,10 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 	// One view of the log, so the replay below and the Cursor it ends on describe
 	// the same moment. Everything above it arrives on the subscription instead.
 	at := d.events.Resume()
+
+	// After the subscription, so a HubAttached this reader causes is sent to it.
+	d.attach()
+	defer d.detach()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -99,6 +104,39 @@ func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.log.Debug("an Event stream failed to write", "err", out.err)
+}
+
+// attach counts one Event stream in. The first stream after the last one closed
+// writes HubAttached into each live Session that has a HubDetached open. The first
+// stream after boot writes nothing, because no Session has a gap to close.
+func (d *Daemon) attach() {
+	d.attaching.Lock()
+	defer d.attaching.Unlock()
+	d.readers++
+	if d.readers == 1 {
+		d.hubChanged(true, event.KindHubAttached)
+	}
+}
+
+// detach counts one Event stream out, and the last one writes HubDetached into
+// each live Session. Two streams that overlap, such as a Hub that reconnects
+// before its old connection is seen to drop, write nothing.
+func (d *Daemon) detach() {
+	d.attaching.Lock()
+	defer d.attaching.Unlock()
+	d.readers--
+	if d.readers == 0 {
+		d.hubChanged(false, event.KindHubDetached)
+	}
+}
+
+// hubChanged writes kind into each live Session whose log says the Hub is detached
+// or not, as given. It goes through the Session's Sink, whose fence keeps it from
+// landing below a SessionEnded.
+func (d *Daemon) hubChanged(detached bool, kind event.Kind) {
+	for _, s := range d.sessions.hubDetached(detached) {
+		s.sink.report(func() { d.write(s, kind, &event.NoPayload{}) })
+	}
 }
 
 // resumeAt is where this connection resumes from. A reader that sends no
