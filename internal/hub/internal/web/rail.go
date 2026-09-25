@@ -49,7 +49,7 @@ type entry struct {
 	Answering bool
 
 	// Incompatible is a Host that answered and refused this Hub's version, which
-	// is a Host State after one read, because the Hub never retries it. Speaks is
+	// is a Host State after one read, because the Hub does not retry it on its own. Speaks is
 	// the versions it said it serves, empty when its refusal could not be read.
 	Incompatible bool
 	Speaks       []int

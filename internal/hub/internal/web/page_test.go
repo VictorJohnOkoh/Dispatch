@@ -274,7 +274,7 @@ func hostsUnder(t *testing.T, script string, into any) {
 		program.WriteString(string(source))
 		program.WriteString("\n")
 	}
-	program.WriteString("setTimeout(() => {\n" + script + "\n}, 0);")
+	program.WriteString("setTimeout(async () => {\n" + script + "\n}, 0);")
 
 	cmd := exec.Command(node, "-e", program.String())
 	said, err := cmd.CombinedOutput()
@@ -384,6 +384,47 @@ console.log(JSON.stringify(seen));
 	// A Down Host is not told about a version, because that is not why it is down.
 	if strings.Contains(got[1], "speaks") {
 		t.Errorf("a Down card reads %q", got[1])
+	}
+}
+
+// The retry lives on an Incompatible card, because that card is where the user
+// reads why the Host is not working. A card in any other state has nothing for a
+// retry to do, so it does not offer one.
+func TestAnIncompatibleCardOffersARetry(t *testing.T) {
+	var got struct {
+		Before  bool `json:"before"`
+		Offered bool `json:"offered"`
+		Other   bool `json:"other"`
+		Posted  []struct {
+			URL    string `json:"url"`
+			Method string `json:"method"`
+		} `json:"posted"`
+		After bool `json:"after"`
+	}
+	hostsUnder(t, `
+const before = page.get("desk").retry.hidden;
+opened.send("host", {host: "desk", state: "Incompatible", speaks: [2]});
+const offered = !page.get("desk").retry.hidden;
+const other = page.get("attic").retry.hidden;
+await page.get("desk").retry.onclick();
+opened.send("host", {host: "desk", state: "Connecting"});
+console.log(JSON.stringify({before, offered, other, posted, after: page.get("desk").retry.hidden}));
+`, &got)
+
+	if !got.Before {
+		t.Error("a Ready card offers a retry")
+	}
+	if !got.Offered {
+		t.Error("an Incompatible card does not offer a retry")
+	}
+	if !got.Other {
+		t.Error("a frame about desk offered a retry on attic")
+	}
+	if len(got.Posted) != 1 || got.Posted[0].URL != "/v1/hosts/desk/retry" || got.Posted[0].Method != "POST" {
+		t.Errorf("the retry posted %+v", got.Posted)
+	}
+	if !got.After {
+		t.Error("a Connecting card still offers a retry")
 	}
 }
 

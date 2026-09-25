@@ -85,6 +85,7 @@
     {{- else}}
     <span class="pill host" data-host-state="{{.State}}">{{.State}}{{if .Cause}} {{.Cause}}{{end}}</span>
     {{- end}}
+    <button type="button" data-retry="{{.Host}}"{{if ne .State "Incompatible"}} hidden{{end}}>Retry</button>
     {{- if .Since}}
     <span class="stamp">last answered at {{.Since}}</span>
     {{- else if .Asked}}

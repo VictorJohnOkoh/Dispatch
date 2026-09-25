@@ -33,6 +33,7 @@ type Hub struct {
 	hosts      hostset.Table
 	dialer     hostset.HostDialer
 	keepalive  time.Duration
+	retries    retries
 
 	// The reconnection curve and the wait that calls a live connection dead. They
 	// are fields only so a test may shorten them: no configuration names any of
