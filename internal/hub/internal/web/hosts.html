@@ -80,7 +80,11 @@
 <section class="card" data-host="{{.Host}}" data-host-state="{{.State}}">
   <header class="who">
     <b>{{.Host}}</b>
+    {{- if eq .State "Incompatible"}}
+    <span class="pill host" data-host-state="{{.State}}">Incompatible: this Hub speaks {{$.Protocol}}, {{if .Speaks}}this Host speaks {{range $i, $v := .Speaks}}{{if $i}}, {{end}}{{$v}}{{end}}{{else}}this Host speaks another{{end}}</span>
+    {{- else}}
     <span class="pill host" data-host-state="{{.State}}">{{.State}}{{if .Cause}} {{.Cause}}{{end}}</span>
+    {{- end}}
     {{- if .Since}}
     <span class="stamp">last answered at {{.Since}}</span>
     {{- else if .Asked}}
@@ -104,6 +108,8 @@
   <ul class="vendors" data-vendors="{{.Host}}">
     {{- if eq .State "Ready"}}
     <li class="meta waiting">waiting for this Host's Vendors</li>
+    {{- else if eq .State "Incompatible"}}
+    <li class="meta">this Host speaks another protocol, so what it serves is not known</li>
     {{- else}}
     <li class="meta">this Host is not answering, so what it serves is not known</li>
     {{- end}}

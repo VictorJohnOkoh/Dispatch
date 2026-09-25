@@ -614,6 +614,31 @@ console.log(JSON.stringify({ready, down, after: page.get("desk").row.textContent
 	}
 }
 
+// The precedence rule holds for every Host that is not Ready, not only a Down one.
+// An Incompatible Host answered, so its row says why nothing is known rather than
+// that the Host is not answering, and a vendors frame does not rewrite it.
+func TestAnIncompatibleHostIsNotToldAboutItsVendor(t *testing.T) {
+	var got struct {
+		Refused string `json:"refused"`
+		After   string `json:"after"`
+	}
+	hostsUnder(t, `
+opened.send("host", {host: "desk", state: "Incompatible", speaks: [2]});
+const refused = page.get("desk").row.textContent;
+opened.send("vendors", {host: "desk", vendors: [
+  {kind: "ollama", base: "http://127.0.0.1:11434", reachable: true, resident: [{modelId: "qwen3.5-9b"}]},
+]});
+console.log(JSON.stringify({refused, after: page.get("desk").row.textContent}));
+`, &got)
+
+	if !strings.Contains(got.Refused, "speaks another protocol") {
+		t.Errorf("an Incompatible Host's Vendor row reads %q", got.Refused)
+	}
+	if got.After != got.Refused {
+		t.Errorf("a vendors frame rewrote an Incompatible Host's row: %q", got.After)
+	}
+}
+
 // Down dims and stamps, live as well as on the server. A Host that goes Down while
 // this page is open would otherwise keep content that claims to be current.
 func TestALiveHostGoingDownStampsItsCard(t *testing.T) {
