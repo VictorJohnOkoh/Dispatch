@@ -7,9 +7,10 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// The Hosts view shows machines. It is read only: starting a Session is the
-// wizard's job, and a view that both showed machines and started work on them
-// would be two things.
+// The Hosts view shows machines. It starts no Session: that is the wizard's job,
+// and a view that both showed machines and started work on them would be two
+// things. The one command it sends about a machine is the retry an Incompatible
+// card offers.
 //
 // One card per configured Host, and no Host is ever hidden for being
 // unreachable. A card that cannot be filled is a card that says so.

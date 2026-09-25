@@ -41,18 +41,20 @@ are sitting at, and the Host across the room is the one still serving last month
   refused, and never dialled again. Leave it for a few minutes, because a Host on the backoff curve
   writes its second line inside one.
 - Every other Host on the same Hub keeps working, and the Client's stream stays open.
+- The card has a Retry button, and no other card has one. Press it once. The card goes to
+  `Connecting` and back to `Incompatible`, and the Daemon's log holds **one** more refused line.
+  The other cards do not move.
 
-A second line while that page is open is the failure this check exists to catch. It means the Hub is
-retrying a Host that can never come `Ready`.
+A second line that you did not ask for is the failure this check exists to catch. It means the Hub
+is retrying a Host that can never come `Ready`.
 
-Reloading the page does write another one, and that is not the failure. Host State lives for one
-Client stream, so a reload is the user asking again, which is ADR 0004's one way out of
-`Incompatible`.
+Reloading the page also writes another one, and that is not the failure either. Host State lives for
+one Client stream, so a reload asks every Host again. The Retry button asks one.
 
 ## Then put it back
 
-Copy the Daemon your Host had before, or build one from the tree, and restart it. Then reload the
-page: an `Incompatible` Host is never retried on its own, so the reload is what asks again.
+Copy the Daemon your Host had before, or build one from the tree, and restart it. Then press Retry
+on the card. It goes to `Connecting` and then `Ready`.
 
 ## Runs
 

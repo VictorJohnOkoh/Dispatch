@@ -362,7 +362,7 @@ from two questions: does a Session exist yet, and is the Host answering.
 | failure | surface | what the user sees |
 | --- | --- | --- |
 | Host unreachable, or nothing behind the tunnel | Host State `Down{unreachable}` or `Down{no-daemon}` | the Host card dims and stamps. Its Sessions keep their last-known state beside a Host that is not answering |
-| Hub and Daemon disagree on protocol version | Host State `Incompatible` | the Host stays listed and is never retried. It is the only state the Hub stops working on |
+| Hub and Daemon disagree on protocol version | Host State `Incompatible` | the Host stays listed, and the Hub dials it again only when the user presses Retry on its card. It is the only state the Hub stops working on |
 | Admission refuses a start | HTTP `409` carrying a `Refusal` | the wizard names the blocking Session and offers to stop it and start this one. No Event is written, because no Session exists, so the refusal goes to the operational log |
 | A malformed or impossible command | HTTP `422` | the Client's own bug, or a stale form. Not drawn as a system failure |
 | The Harness will not launch, or its Gate fails to announce | `SessionEnded{failed}` | the Session exists, is `Ended`, and its transcript holds the process's stderr |

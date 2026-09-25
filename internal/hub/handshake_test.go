@@ -71,9 +71,9 @@ func oldDaemon(seen *refusals) dialFn {
 	}
 }
 
-// A Daemon that refuses the version makes its Host Incompatible, and the Hub never
-// retries one: a version mismatch cannot fix itself, so retrying would hammer a
-// Host that can never come Ready.
+// A Daemon that refuses the version makes its Host Incompatible, and the Hub does
+// not retry one on its own: a version mismatch cannot fix itself, so retrying
+// would hammer a Host that can never come Ready.
 func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.T) {
 	var seen refusals
 	h := quick([]Host{{ID: "desk"}}, oldDaemon(&seen))
@@ -104,7 +104,7 @@ func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.
 	after, _ := seen.seen()
 	time.Sleep(200 * time.Millisecond)
 	if now, _ := seen.seen(); now != after {
-		t.Errorf("an Incompatible Host was dialled %d more times, and the Hub never retries one", now-after)
+		t.Errorf("an Incompatible Host was dialled %d more times, and only the user retries one", now-after)
 	}
 }
 
@@ -261,6 +261,9 @@ func TestTheFirstPaintDrawsAnIncompatibleHostAsIncompatible(t *testing.T) {
 	}
 	if !strings.Contains(card, "this Hub speaks 1, this Host speaks 2") {
 		t.Errorf("the card does not name both versions: %s", card)
+	}
+	if !strings.Contains(card, `data-retry="desk">Retry`) {
+		t.Errorf("the card does not offer a retry: %s", card)
 	}
 	// The machine answered, so the card does not say it did not.
 	if strings.Contains(card, "did not answer") || strings.Contains(card, "not answering") {

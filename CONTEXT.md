@@ -43,7 +43,7 @@ The Hub's view of one Host, and the only place that view exists. One of `Connect
 _Avoid_: status, availability, online, offline, health
 
 **Handshake**:
-The protocol version check the Hub and a Daemon run when the connection opens. The Hub names the one version it requires; the Daemon serves it or answers `426` with the set it can serve, which is `{1}` today. Passing it makes a Host `Ready`; failing it makes the Host `Incompatible`, which the Hub never retries. It runs on the Event stream, not on an endpoint of its own.
+The protocol version check the Hub and a Daemon run when the connection opens. The Hub names the one version it requires; the Daemon serves it or answers `426` with the set it can serve, which is `{1}` today. Passing it makes a Host `Ready`; failing it makes the Host `Incompatible`, which the Hub retries only when the user commands it. It runs on the Event stream, not on an endpoint of its own.
 _Avoid_: negotiation, version check, hello
 
 **Stale**:

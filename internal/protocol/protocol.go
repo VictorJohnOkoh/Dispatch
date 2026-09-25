@@ -70,7 +70,7 @@ const (
 	StatusUnprocessable = http.StatusUnprocessableEntity
 
 	// StatusUpgradeRequired is the Handshake failing, and it is the one refusal
-	// that never retries.
+	// the Hub does not retry on its own.
 	StatusUpgradeRequired = http.StatusUpgradeRequired
 
 	// StatusHostNotReady is the Hub's alone: this Host is not Ready.
