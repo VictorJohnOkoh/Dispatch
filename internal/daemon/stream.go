@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
@@ -26,9 +25,6 @@ const replayPage = 500
 // Host's presence: failing the request would tell the user their machine is
 // unreachable when the log was merely replaced.
 func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request) {
-	if !d.speaks(w, r) {
-		return
-	}
 	flush, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "this server cannot stream", http.StatusInternalServerError)
@@ -141,27 +137,6 @@ func (d *Daemon) replay(out *sse, from protocol.Cursor, at eventlog.Resume) {
 			return
 		}
 	}
-}
-
-// speaks is the Handshake. A caller that names a version this Daemon cannot serve
-// is refused here, and one that names none is served, because curl names none.
-func (d *Daemon) speaks(w http.ResponseWriter, r *http.Request) bool {
-	asked := r.Header.Get(protocol.VersionHeader)
-	if asked == "" {
-		return true
-	}
-	if n, err := strconv.Atoi(asked); err == nil && slices.Contains(protocol.ServedVersions[:], n) {
-		return true
-	}
-	// The Hub marks this Host Incompatible and never dials it again, so this line
-	// is the only evidence the check ran.
-	d.log.Info("the Handshake was refused", "asked", asked, "speaks", protocol.ServedVersions)
-	refuse(w, protocol.StatusUpgradeRequired, protocol.Refusal{
-		Reason: protocol.ReasonProtocol,
-		Detail: fmt.Sprintf("this Daemon does not speak protocol %q", asked),
-		Speaks: protocol.ServedVersions[:],
-	})
-	return false
 }
 
 // vendorsBody is the vendors frame. It names its list vendors, as the answer to

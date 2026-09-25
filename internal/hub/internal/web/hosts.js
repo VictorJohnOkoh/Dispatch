@@ -48,10 +48,9 @@ stream.addEventListener("vendors", (frame) => {
   const row = rows.get(f.host);
   if (!row) return;
   // Precedence: Host State, then the HTTP status, then an Event, then the
-  // operational log. A user looking at a Down Host is not also told that its
-  // Vendor stopped answering, because the Vendor not answering is what a Host
-  // that is not there looks like from here.
-  if (down(f.host)) return;
+  // operational log. A user looking at a Host that is not Ready is not also told
+  // about its Vendor, because what its Host State says comes first.
+  if (cards.get(f.host)?.dataset.hostState !== "Ready") return;
 
   const drawn = [];
   for (const v of f.vendors ?? []) {
@@ -96,6 +95,9 @@ stream.addEventListener("host", (frame) => {
   const row = rows.get(f.host);
   if (row && down(f.host)) {
     row.replaceChildren(node("li", "meta", "this Host is not answering, so what it serves is not known"));
+  }
+  if (row && f.state === "Incompatible") {
+    row.replaceChildren(node("li", "meta", "this Host speaks another protocol, so what it serves is not known"));
   }
   if (f.since) trueAt.set(f.host, f.since);
   if (f.state !== "Down") unstamp(card);

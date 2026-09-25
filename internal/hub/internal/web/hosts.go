@@ -21,10 +21,14 @@ const hostsRoute = "GET /hosts"
 type card struct {
 	Host string
 
-	// State is the Host State. The Hub reports two of the four today, from one read:
-	// a Host that answered is Ready and one that did not is Down. The card draws all
-	// four, because what each looks like is this view's to decide.
+	// State is the Host State. The Hub reports three of the four from one read: a
+	// Host that answered is Ready, one that refused the version is Incompatible,
+	// and one that did not answer is Down. The card draws all four, because what
+	// each looks like is this view's to decide.
 	State string
+
+	// Speaks is the versions an Incompatible Host said it serves.
+	Speaks []int
 
 	// Cause is why a Down Host is down, which is unreachable or no-daemon. The Hub
 	// cannot tell the two apart yet, so it is empty and the card leaves the line out
@@ -88,6 +92,10 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
+		if e.Incompatible {
+			view.Cards[i].State = stateIncompatible
+			view.Cards[i].Speaks = e.Speaks
+		}
 		if e.Answering {
 			view.Cards[i].State = stateReady
 			drawn[e.Host] = e.At
@@ -100,10 +108,11 @@ func (c *client) machinesPage(w http.ResponseWriter, r *http.Request) {
 	}
 	// A Host that answered needs no stamp: what is on its card is current. One that
 	// did not carries the time its content was true, or the time it was asked when
-	// it has never given this Hub any.
+	// it has never given this Hub any. An Incompatible Host did answer, so it is
+	// never stamped as one that did not.
 	asked := time.Now().UTC().Format(time.RFC3339)
 	for i := range view.Cards {
-		if view.Cards[i].State == stateReady {
+		if view.Cards[i].State == stateReady || view.Cards[i].State == stateIncompatible {
 			continue
 		}
 		if view.Cards[i].Since == "" {

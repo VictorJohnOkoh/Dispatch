@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -46,6 +47,12 @@ type entry struct {
 	// arrive with the Hub's own presence tracking, and until they do the Client
 	// draws the one thing it knows rather than borrowing the word for it.
 	Answering bool
+
+	// Incompatible is a Host that answered and refused this Hub's version, which
+	// is a Host State after one read, because the Hub never retries it. Speaks is
+	// the versions it said it serves, empty when its refusal could not be read.
+	Incompatible bool
+	Speaks       []int
 
 	// On marks the Session the page is drawing in full.
 	On bool
@@ -187,6 +194,9 @@ func (c *client) sessionsOn(ctx context.Context, host string) []entry {
 		return c.recall(host)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == protocol.StatusUpgradeRequired {
+		return c.refused(host, resp.Body)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return c.recall(host)
 	}
@@ -252,6 +262,20 @@ func (c *client) recall(host string) []entry {
 		e.At = 0
 		e.Since = was.at
 		out[i] = e
+	}
+	return out
+}
+
+// refused is a Host that speaks another version: what it said last, marked
+// Incompatible with the versions it named. Its Sessions are still Sessions, so
+// they stay as Stale as they would for a Host that went Down.
+func (c *client) refused(host string, body io.Reader) []entry {
+	var said protocol.Refusal
+	_ = json.NewDecoder(io.LimitReader(body, 4096)).Decode(&said)
+	out := c.recall(host)
+	for i := range out {
+		out[i].Incompatible = true
+		out[i].Speaks = said.Speaks
 	}
 	return out
 }

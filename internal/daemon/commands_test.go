@@ -498,10 +498,7 @@ func TestACommandOnAnUnknownSessionIsRefused(t *testing.T) {
 // cannot drift.
 func TestTheMuxServesEveryEndpoint(t *testing.T) {
 	h := newHost(t)
-	mux, ok := h.handler().(*http.ServeMux)
-	if !ok {
-		t.Fatalf("the handler is %T", h.handler())
-	}
+	mux := h.routes()
 	for _, route := range protocol.Routes {
 		method, path, _ := strings.Cut(route, " ")
 		handler, pattern := mux.Handler(httptest.NewRequest(method, path, nil))
