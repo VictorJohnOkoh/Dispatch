@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,9 +36,9 @@ func TestTheTranscriptStopsAtItsCapAndSaysWhereItStopped(t *testing.T) {
 	}
 	tr.limit = 16
 
-	tr.Write(bytes.Repeat([]byte("a"), 10))
-	tr.Write(bytes.Repeat([]byte("b"), 10))
-	tr.Write([]byte("this never lands"))
+	tr.write(bytes.Repeat([]byte("a"), 10))
+	tr.write(bytes.Repeat([]byte("b"), 10))
+	tr.write([]byte("this never lands"))
 	tr.Close()
 
 	raw, err := os.ReadFile(transcriptPath(dir, "s-cap"))
@@ -67,7 +69,7 @@ func TestATranscriptThatExactlyFillsItsLimitSaysNothingAboutStopping(t *testing.
 		t.Fatalf("newTranscript: %v", err)
 	}
 	tr.limit = 16
-	tr.Write(bytes.Repeat([]byte("a"), 16))
+	tr.write(bytes.Repeat([]byte("a"), 16))
 	tr.Close()
 
 	raw, err := os.ReadFile(transcriptPath(dir, "s-exact"))
@@ -89,7 +91,7 @@ func TestTheTranscriptTakesAWriteAfterItIsClosed(t *testing.T) {
 	}
 	tr.Close()
 
-	if n, err := tr.Write([]byte("too late")); n != len("too late") || err != nil {
+	if n, err := tr.stdout.Write([]byte("too late\n")); n != len("too late\n") || err != nil {
 		t.Errorf("Write = %d, %v after the close", n, err)
 	}
 	raw, err := os.ReadFile(transcriptPath(dir, "s-closed"))
@@ -98,6 +100,82 @@ func TestTheTranscriptTakesAWriteAfterItIsClosed(t *testing.T) {
 	}
 	if len(raw) != 0 {
 		t.Errorf("the closed transcript took %q", raw)
+	}
+}
+
+// Two goroutines write to the two streams in pieces that never end on a newline,
+// and every line in the file is still one stream's line, whole.
+func TestTheTranscriptKeepsEachStreamsLinesWhole(t *testing.T) {
+	tr, err := newTranscript(t.TempDir(), "s-whole")
+	if err != nil {
+		t.Fatalf("newTranscript: %v", err)
+	}
+	const lines = 500
+	out := `{"jsonrpc":"2.0","method":"session/update","params":{}}`
+	errs := "npm warn deprecated something nobody asked about"
+
+	var wg sync.WaitGroup
+	for _, w := range []struct {
+		into io.Writer
+		line string
+	}{{&tr.stdout, out + "\n"}, {&tr.stderr, errs + "\n"}} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range lines {
+				// Three pieces, so no single write is a whole line.
+				w.into.Write([]byte(w.line[:5]))
+				w.into.Write([]byte(w.line[5:20]))
+				w.into.Write([]byte(w.line[20:]))
+			}
+		}()
+	}
+	wg.Wait()
+	tr.Close()
+
+	said := strings.Split(strings.TrimSuffix(tr.said(t), "\n"), "\n")
+	if len(said) != 2*lines {
+		t.Fatalf("the transcript has %d lines, want %d", len(said), 2*lines)
+	}
+	for _, l := range said {
+		if l != "stdout "+out && l != "stderr "+errs {
+			t.Fatalf("the transcript has the line %q, which is neither stream's line whole", l)
+		}
+	}
+}
+
+// The last thing a dying Harness wrote often has no newline, and the close still
+// writes it down as a line of its own.
+func TestTheTranscriptKeepsAnUnfinishedLineAtTheClose(t *testing.T) {
+	tr, err := newTranscript(t.TempDir(), "s-partial")
+	if err != nil {
+		t.Fatalf("newTranscript: %v", err)
+	}
+	tr.stderr.Write([]byte("panic: the last words"))
+	tr.Close()
+
+	if said := tr.said(t); said != "stderr panic: the last words\n" {
+		t.Errorf("the transcript is %q", said)
+	}
+}
+
+// A line with no newline is written as it stands once it reaches lineLimit, and
+// what follows starts a new line, so the stream stops holding it.
+func TestTheTranscriptWritesALineThatNeverEndsInPieces(t *testing.T) {
+	tr, err := newTranscript(t.TempDir(), "s-long")
+	if err != nil {
+		t.Fatalf("newTranscript: %v", err)
+	}
+	tr.stdout.Write(bytes.Repeat([]byte("x"), lineLimit+10))
+	tr.stdout.Write(bytes.Repeat([]byte("x"), 10))
+	if len(tr.stdout.pending) != 10 {
+		t.Errorf("the stream holds %d bytes, want the 10 written after the piece", len(tr.stdout.pending))
+	}
+	tr.Close()
+
+	want := "stdout " + strings.Repeat("x", lineLimit+10) + "\nstdout " + strings.Repeat("x", 10) + "\n"
+	if said := tr.said(t); said != want {
+		t.Errorf("the transcript is %d bytes, want %d", len(said), len(want))
 	}
 }
 
