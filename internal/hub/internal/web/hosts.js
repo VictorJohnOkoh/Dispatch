@@ -8,9 +8,9 @@
 // answering empties its row rather than leaving a remembered list behind.
 
 // The page's cards, their Vendor rows and their retry buttons, read once from
-// the page by the selectors this file holds. Neither is built from a Host id: a selector made
-// from data is a selector an id can break, and one that throws stops every frame
-// after it.
+// the page by the selectors this file holds. None is built from a Host id: a
+// selector made from data is a selector an id can break, and one that throws
+// stops every frame after it.
 const rows = byHost("[data-vendors]", (el) => el.dataset.vendors);
 const cards = byHost("[data-host]", (el) => el.dataset.host);
 const retries = byHost("[data-retry]", (el) => el.dataset.retry);
