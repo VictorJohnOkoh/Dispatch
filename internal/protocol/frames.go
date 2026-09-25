@@ -136,6 +136,9 @@ type Delta struct {
 	// N is the length of that Event's text before this Delta, so a reader appends
 	// at N. The final Delta replaces rather than appends, so a Client that dropped
 	// one repairs itself, and there N is simply the whole length.
+	//
+	// The length is in UTF-16 code units, not bytes, because that is what a
+	// JavaScript string counts: the Client slices at N with no encoding step.
 	N int `json:"n"`
 
 	Text string `json:"text"`
