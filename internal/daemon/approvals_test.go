@@ -41,6 +41,19 @@ func (a *gating) Close() error                         { return nil }
 
 const gateStart = `{"harness":"gate","model":"qwen3:8b"}`
 
+func TestAutoApprovalRefusesWhenItsEventCannotBeWritten(t *testing.T) {
+	policy := `{"read":"auto","edit":"auto","execute":"auto","fetch":"auto","other":"auto"}`
+	h, _, out := gated(t, `{"harness":"gate","model":"qwen3:8b","policy":`+policy+`}`)
+	out.ToolCallRequested("c1", "bash", event.ToolExecute, "echo hello", nil)
+	if err := h.events.Close(); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := out.Approve(t.Context(), "c1", "echo hello", "")
+	if decision != event.DecisionRefused || err == nil {
+		t.Fatalf("Approve = %q, %v; want refused and a write error", decision, err)
+	}
+}
+
 // gated is a Host running the gating Harness, with one Session up and its Sink in
 // hand, which is what an Adapter asks a question through.
 func gated(t *testing.T, body string) (*host, event.SessionID, harness.Sink) {

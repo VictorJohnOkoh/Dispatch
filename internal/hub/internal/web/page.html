@@ -14,14 +14,14 @@
   {{- if .Session}}
   <a class="rrow{{if .On}} on{{end}}{{if not .Answering}} stale{{end}}"
      href="/hosts/{{.Host | pathEscape}}/sessions/{{.Session | pathEscape}}"
-     data-session-row="{{.Session}}" data-host="{{.Host}}">
+     data-session-row="{{.Session}}" data-host="{{.Host}}" data-answering="{{.Answering}}" data-state="{{.SessionState}}">
     <b data-name-host="{{.Host}}" data-name-session="{{.Session}}">{{.Name}}</b>
     <span class="meta">{{.Host}}</span>
     <span class="pill" data-session-state="{{.SessionState}}">{{.SessionState}}</span>
     <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
   </a>
   {{- else}}
-  <p class="rrow empty{{if not .Answering}} stale{{end}}" data-host="{{.Host}}">
+  <p class="rrow empty{{if not .Answering}} stale{{end}}" data-host="{{.Host}}" data-answering="{{.Answering}}">
     <span class="meta">{{.Host}}</span>
     <span class="pill host" data-host-answering="{{.Answering}}">{{if .Answering}}answering{{else}}not answering{{end}}</span>
   </p>

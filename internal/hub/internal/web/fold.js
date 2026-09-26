@@ -53,18 +53,28 @@ const FOLD_IGNORES = [
 // A list with no SessionStarted folds to Starting, which is what the Session will
 // be the moment its first Event lands.
 function foldSession(events) {
+  const fold = newSessionFold();
+  for (const e of events) fold.apply(e);
+  return fold.result();
+}
+
+// The live page applies new Events once. A replay replacement rebuilds this
+// same fold from its ordered Events.
+function newSessionFold() {
   const view = { ready: false, prompting: false, held: [], calls: [], ended: null };
-
-  for (const e of events) {
-    const rule = FOLD_RULES[e.kind];
-    if (!rule) continue;
-    rule(view, e.payload ?? {});
-    if (view.ended !== null) return { state: "Ended", reason: view.ended, held: [], calls: [] };
-  }
-
-  let state = "Starting";
-  if (view.held.length > 0) state = "Asking";
-  else if (view.prompting) state = "Working";
-  else if (view.ready) state = "Idle";
-  return { state, reason: "", held: view.held, calls: view.calls };
+  return {
+    apply(e) {
+      if (view.ended !== null) return;
+      const rule = FOLD_RULES[e.kind];
+      if (rule) rule(view, e.payload ?? {});
+    },
+    result() {
+      if (view.ended !== null) return { state: "Ended", reason: view.ended, held: [], calls: [] };
+      let state = "Starting";
+      if (view.held.length > 0) state = "Asking";
+      else if (view.prompting) state = "Working";
+      else if (view.ready) state = "Idle";
+      return { state, reason: "", held: [...view.held], calls: [...view.calls] };
+    },
+  };
 }

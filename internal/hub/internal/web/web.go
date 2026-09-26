@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -177,7 +178,15 @@ func (c *client) session(w http.ResponseWriter, r *http.Request) {
 // draws what it is told, so a Session the browser holds no Events for is never
 // something it has to fold for itself.
 func (c *client) railJSON(w http.ResponseWriter, r *http.Request) {
-	rail := c.rail(r.Context(), r.PathValue("host"), r.PathValue("session"))
+	hosts := c.hosts.All()
+	if changed := r.URL.Query().Get("changed"); changed != "" {
+		if !slices.Contains(hosts, changed) {
+			http.NotFound(w, r)
+			return
+		}
+		hosts = []string{changed}
+	}
+	rail := c.railOn(r.Context(), r.PathValue("host"), r.PathValue("session"), hosts)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
 		Rail []entry `json:"rail"`
