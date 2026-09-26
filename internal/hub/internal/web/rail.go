@@ -88,7 +88,6 @@ type sessionRow struct {
 //
 // A Host that stops answering keeps its Sessions, drawn as the last read left
 // them and stamped with when that read happened, which is CONTEXT.md's Stale.
-//
 func (c *client) rail(ctx context.Context, host, id string) []entry {
 	return c.railOn(ctx, host, id, c.hosts.All())
 }
