@@ -1,14 +1,18 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
+	"github.com/VictorJohnOkoh/Dispatch/internal/eventlog"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
@@ -165,5 +169,88 @@ func TestAnUnknownOutcomeIsGreyAndAFailureIsNot(t *testing.T) {
 	}
 	if toneUnknown == toneBad {
 		t.Error("no result reported and failed are the same colour")
+	}
+}
+
+// The Daemon's log makes the Deltas and render.js applies them, so this checks
+// that the two count N in the same unit. The text has a two-byte "é" and a
+// four-byte "😀", where bytes and UTF-16 code units disagree.
+func TestTheClientAppliesTheDaemonsDeltasToNonASCIIText(t *testing.T) {
+	node := findNode(t)
+
+	log, err := eventlog.Open(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	opened, err := log.Append(event.Event{
+		Session: "s-1", At: time.Now(), Kind: event.KindAssistantMessage, Payload: &event.AssistantMessage{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []protocol.Delta
+	for _, piece := range []string{"héllo ", "😀 ", "wörld"} {
+		d, err := log.AppendText(opened.Seq, piece, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deltas = append(deltas, d)
+	}
+	final, err := log.AppendText(opened.Seq, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const whole = "héllo 😀 wörld"
+
+	type scenario struct {
+		Name   string           `json:"name"`
+		Start  string           `json:"start"`
+		Deltas []protocol.Delta `json:"deltas"`
+		Want   string           `json:"want"`
+	}
+	scenarios := []scenario{
+		{"every Delta", "", deltas, whole},
+		// A page that read the open message after the second Delta went out holds
+		// its text already, and must rewrite from N rather than keep a second copy.
+		{"a row ahead of the Delta", "héllo 😀 ", deltas[1:], whole},
+		{"a dropped Delta, then the final one", "", []protocol.Delta{deltas[0], deltas[2], final}, whole},
+		{"every Delta dropped but the final one", "", []protocol.Delta{final}, whole},
+	}
+	input, err := json.Marshal(scenarios)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source, err := os.ReadFile("render.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := `const fs = require("fs");
+` + string(source) + `
+const scenarios = JSON.parse(fs.readFileSync(0, "utf8"));
+console.log(JSON.stringify(scenarios.map((s) => {
+  let text = s.start, held = s.start.length;
+  for (const d of s.deltas) {
+    const next = deltaText(text, held, d);
+    text = next.append !== undefined ? text + next.append : next.text;
+    held = next.held;
+  }
+  return text;
+})));`
+	cmd := exec.Command(node, "-e", program)
+	cmd.Stdin = bytes.NewReader(input)
+	said, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, said)
+	}
+	var got []string
+	if err := json.Unmarshal(said, &got); err != nil {
+		t.Fatalf("node said %q: %v", said, err)
+	}
+	for i, s := range scenarios {
+		if got[i] != s.Want {
+			t.Errorf("%s: the row holds %q, want %q", s.Name, got[i], s.Want)
+		}
 	}
 }
