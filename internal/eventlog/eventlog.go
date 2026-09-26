@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS events_by_session ON events (session, seq);
 
+CREATE INDEX IF NOT EXISTS session_starts ON events (seq) WHERE kind = 'SessionStarted';
+
 CREATE TABLE IF NOT EXISTS meta (
   id       INTEGER PRIMARY KEY CHECK (id = 1),
   log_id   TEXT    NOT NULL,

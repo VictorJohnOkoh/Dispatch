@@ -47,6 +47,30 @@ func folded(t *testing.T, d *Daemon, id event.SessionID) (session.State, event.E
 	return state, reason
 }
 
+func TestSessionListKeepsStoppedAndLostHistoryAcrossRestart(t *testing.T) {
+	h := newHost(t)
+	stopped := h.idle(t)
+	h.command(t, stopped, "stop", "")
+	lost := h.idle(t)
+	d := killed(t, h)
+	var body struct{ Sessions []SessionView }
+	decodeGet(t, d, "/v1/sessions", &body)
+	if len(body.Sessions) != 2 {
+		t.Fatalf("after restart: %d Sessions, want 2", len(body.Sessions))
+	}
+	for i, want := range []struct {
+		id     event.SessionID
+		reason event.EndReason
+	}{
+		{stopped, event.EndStopped}, {lost, event.EndLost},
+	} {
+		got := body.Sessions[i]
+		if got.ID != want.id || got.State != session.Ended || got.EndReason != want.reason || got.Model != "qwen3:8b" || got.Cwd != h.root {
+			t.Errorf("Session %d = %+v", i, got)
+		}
+	}
+}
+
 // Behaviour 5. The process does not fold, so a Session that was live when the
 // Daemon died is ended lost, and its transcript is still there to read.
 func TestADaemonKilledUnderALiveSessionEndsItLostOnTheNextBoot(t *testing.T) {

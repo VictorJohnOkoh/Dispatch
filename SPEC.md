@@ -217,6 +217,16 @@ Event Kind the Hub has never heard of still reach the Client.
 **The Client** renders Events and never raw Harness output. It applies live Events itself, so it
 folds Session State in JS against the same JSON fixture `session.Fold` is tested with.
 
+Live folds apply each committed Event once. They keep the facts needed for current decisions,
+including open Tool Calls and the Approval Policy at each call's request. They keep no transcript
+payloads or completed calls. Session State remains derived from Events; no separate state is written
+to disk. The Client rebuilds its fold when replay replaces an Event or supplies one out of order.
+
+The live registry releases a Session after cleanup. Historical Session listings read `SessionStarted`
+and the terminal Event from SQLite, so a Daemon restart keeps those rows visible. A partial index on
+`SessionStarted` supports this read without scanning transcript Events. New Session ids contain 128
+random bits because their lifetime includes every Daemon restart.
+
 ## The interfaces
 
 Four, and each is already written in the ADR that owns it. Do not redesign them from the summary.

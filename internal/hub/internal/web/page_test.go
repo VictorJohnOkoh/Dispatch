@@ -20,6 +20,74 @@ func pageUnder(t *testing.T, script string, into any) {
 	pageUnderSetup(t, "", script, into)
 }
 
+func TestLiveStateUpdatesDoNotReplayEarlierPrompts(t *testing.T) {
+	var got struct {
+		Applied int
+		State   string
+	}
+	pageUnderSetup(t, `
+let appliedPrompts = 0;
+const submittedRule = FOLD_RULES.PromptSubmitted;
+FOLD_RULES.PromptSubmitted = (view, payload) => {
+  appliedPrompts++;
+  submittedRule(view, payload);
+};
+`, `
+opened.send("event", {host: "desk", session: "s-1", seq: 1, kind: "SessionReady", payload: {}});
+for (let i = 0; i < 200; i++) {
+  opened.send("event", {host: "desk", session: "s-1", seq: 2+i*2, kind: "PromptSubmitted", payload: {text: "go"}});
+  opened.send("event", {host: "desk", session: "s-1", seq: 3+i*2, kind: "PromptCompleted", payload: {stopReason: "stop", usage: {}}});
+}
+
+console.log(JSON.stringify({Applied: appliedPrompts, State: dom.stateElement.textContent}));
+`, &got)
+	if got.Applied != 200 || got.State != "Idle" {
+		t.Fatalf("200 Prompts applied %d times, state %s", got.Applied, got.State)
+	}
+}
+
+func TestLiveFoldRebuildsForLateAndReplacedEvents(t *testing.T) {
+	var got []string
+	pageUnder(t, `
+const states = [];
+function receive(seq, kind, payload) {
+  opened.send("event", {host: "desk", session: "s-1", seq, kind, payload});
+  states.push(dom.stateElement.textContent);
+}
+receive(2, "SessionReady", {});
+receive(3, "PromptSubmitted", {text: "go"});
+receive(6, "ApprovalDecided", {toolCallId: "c1", decision: "allowed"});
+receive(5, "ApprovalRequested", {toolCallId: "c1"});
+receive(5, "ApprovalRequested", {toolCallId: "c1"});
+receive(6, "ApprovalDecided", {toolCallId: "c2", decision: "allowed"});
+receive(7, "SessionEnded", {reason: "stopped"});
+receive(8, "PromptSubmitted", {text: "too late"});
+console.log(JSON.stringify(states));
+`, &got)
+	want := []string{"Idle", "Working", "Working", "Working", "Working", "Asking", "Ended stopped", "Ended stopped"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("states = %v, want %v", got, want)
+	}
+}
+
+func TestASlowRailReadDoesNotDelayAnotherHost(t *testing.T) {
+	var got []string
+	pageUnder(t, `
+globalThis.fetch = async (url) => {
+  fetched.push(url);
+  if (url.endsWith("changed=attic")) return new Promise(() => {});
+  return {ok: true, json: async () => ({rail: []})};
+};
+opened.send("event", {host: "attic", session: "s-9", seq: 1, kind: "SessionReady", payload: {}});
+opened.send("event", {host: "desk", session: "s-1", seq: 2, kind: "SessionReady", payload: {}});
+await new Promise((resolve) => setTimeout(resolve, 0));
+console.log(JSON.stringify(fetched));
+`, &got)
+	if len(got) != 2 || !strings.HasSuffix(got[1], "changed=desk") {
+		t.Fatalf("one slow Host held the rail reads: %v", got)
+	}
+}
+
 func pageUnderSetup(t *testing.T, setup, script string, into any) {
 	t.Helper()
 	node := findNode(t)
@@ -250,12 +318,34 @@ setTimeout(() => {
 	if len(got.Rows) != 3 {
 		t.Fatalf("the rail holds %v", got.Rows)
 	}
-	if !strings.Contains(got.Rows[1], "Asking") || !strings.Contains(got.Rows[1], "other") {
-		t.Errorf("the other Host's Session reads %q", got.Rows[1])
+	if !strings.Contains(got.Rows[0], "Asking") || !strings.Contains(got.Rows[0], "other") {
+		t.Errorf("the other Host's Session reads %q", got.Rows[0])
 	}
 	// The pair, on a row for a Session this page is not drawing.
 	if !strings.Contains(got.Rows[2], "not answering") {
 		t.Errorf("the Host that is not answering reads %q", got.Rows[2])
+	}
+}
+
+func TestRailRefreshesOnlyForRelevantEventsAndKeepsOtherHosts(t *testing.T) {
+	var got struct {
+		URLs []string
+		Rows []string
+	}
+	pageUnder(t, `
+drawRail([{Host: "desk", Session: "s-1", Name: "desk work", SessionState: "Idle", Answering: true}]);
+railAnswer = [{Host: "attic", Session: "s-9", Name: "attic work", SessionState: "Asking", Answering: true}];
+opened.send("event", {host: "attic", session: "s-9", seq: 1, kind: "AssistantMessage", payload: {text: "hello", complete: true}});
+await new Promise((resolve) => setTimeout(resolve, 0));
+opened.send("event", {host: "attic", session: "s-9", seq: 2, kind: "ApprovalRequested", payload: {toolCallId: "c1"}});
+await new Promise((resolve) => setTimeout(resolve, 0));
+console.log(JSON.stringify({URLs: fetched, Rows: dom.rail.children.map((r) => r.textContent)}));
+`, &got)
+	if len(got.URLs) != 1 || !strings.HasSuffix(got.URLs[0], "?changed=attic") {
+		t.Errorf("rail requests = %v", got.URLs)
+	}
+	if len(got.Rows) != 2 || !strings.Contains(got.Rows[0], "Asking") || !strings.Contains(got.Rows[1], "desk work") {
+		t.Errorf("rail rows = %v", got.Rows)
 	}
 }
 

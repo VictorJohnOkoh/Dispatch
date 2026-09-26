@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -124,7 +125,7 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(d.base)
 	s := &Session{
-		id:      d.sessions.newID(),
+		id:      newSessionID(),
 		harness: req.Harness,
 		caps:    h.Adapter.Capabilities(),
 		model:   req.Model,
@@ -232,6 +233,7 @@ const unloadWait = 5 * time.Second
 // one of its own: the Model has to come back even when the reason the Session
 // ended was that everything about it was cancelled.
 func (d *Daemon) release(s *Session) {
+	defer d.sessions.remove(s)
 	if d.sessions.stillServing(s) {
 		return
 	}
@@ -316,17 +318,35 @@ func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
 	// Session it belongs to has recorded it, so a read that did not wait could
 	// answer with the state from before the Event and stay wrong until the next.
 	d.writing.RLock()
-	defer d.writing.RUnlock()
 
 	// The Cursor is read first. One read behind the data replays what the answer
 	// already carried, which costs a redrawn row; one read ahead of it drops what
 	// landed in between, which is the loss this Cursor exists to prevent.
 	at := d.events.Cursor()
+	history, err := d.events.Sessions()
+	if err != nil {
+		d.writing.RUnlock()
+		http.Error(w, "the Event log could not be read", http.StatusInternalServerError)
+		return
+	}
+	views := make([]SessionView, 0, len(history))
+	for _, record := range history {
+		state := session.Ended
+		if record.EndReason == "" {
+			_, _, state = d.sessions.find(record.ID)
+		}
+		views = append(views, SessionView{
+			ID: record.ID, Harness: record.Started.Harness, Model: record.Started.Model,
+			Vendor: record.Started.Vendor, Cwd: record.Started.Cwd,
+			State: state, EndReason: record.EndReason, StartedAt: record.At,
+		})
+	}
+	d.writing.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(struct {
 		Sessions []SessionView   `json:"sessions"`
 		Cursor   protocol.Cursor `json:"cursor"`
-	}{d.sessions.views(), at})
+	}{views, at})
 }
 
 // The page GET /v1/sessions/{session}/events serves when the request asks for no
@@ -432,9 +452,7 @@ func blockingNames(ids []event.SessionID) []string {
 	return out
 }
 
-// Session is one Session on this Host, as the Daemon holds it. There is no state
-// field: State is folded from the Events below, because ADR 0008 has every
-// transition caused by an Event and none held internally.
+// Session owns one live Harness. Its view is derived only from committed Events.
 type Session struct {
 	id      event.SessionID
 	harness string
@@ -460,6 +478,9 @@ type Session struct {
 	// Harness is up, and stays nil for a launch that failed.
 	run harness.Run
 
+	// sent closes when the current Prompt send returns. Protected by commanding.
+	sent <-chan struct{}
+
 	// proc is the Harness process, which the Daemon owns and the Adapter never
 	// sees. It is nil for a Harness that spawns none, and passthrough is one.
 	proc *harnessProcess
@@ -468,9 +489,8 @@ type Session struct {
 	// transcript, because a transcript records what a Harness said.
 	raw *transcript
 
-	// events is this Session's own Events, in Seq order, which is what the fold
-	// reads. Deltas are not Events and never land here.
-	events []event.Event
+	// view applies each committed Event once and retains no transcript payloads.
+	view session.View
 
 	// ending is set by whoever writes SessionEnded, so a stop and a launch that
 	// failed cannot both write one and leave the end reason to a race.
@@ -482,15 +502,11 @@ type Session struct {
 	asking map[string]chan event.Decision
 }
 
-// sessions is this Host's Session registry: every Session the Daemon started, in
-// start order, live or ended. An ended Session stays, because a stopped Session is
-// not deleted and its history stays readable.
+// sessions holds Sessions until their cleanup finishes. History lives in the log.
+// One Host runs one Session at a time, so lookup needs only a short scan.
 //
-// It is a slice and not a map keyed by id. One Host runs one Session at a time, so
-// the list is short and a scan reads more plainly than a second index would.
-//
-// The mutex guards the slice and every mutable field of every Session in it, so
-// the registry is the one place a Session is written to.
+// The mutex guards the slice and the live fold, Run, process and held answers.
+// sent belongs to the command lock; the Sink has its own lock.
 type sessions struct {
 	mu  sync.Mutex
 	all []*Session
@@ -500,6 +516,12 @@ func (r *sessions) add(s *Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.all = append(r.all, s)
+}
+
+func (r *sessions) remove(s *Session) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.all = slices.DeleteFunc(r.all, func(other *Session) bool { return other == s })
 }
 
 // find is one Session as a command needs it, with the Run to act on and the State
@@ -513,7 +535,7 @@ func (r *sessions) find(id event.SessionID) (*Session, harness.Run, session.Stat
 	if s == nil {
 		return nil, nil, 0
 	}
-	state, _ := session.Fold(s.events)
+	state, _ := s.view.State()
 	return s, s.run, state
 }
 
@@ -558,15 +580,8 @@ func (r *sessions) tell(s *Session, id string, decision event.Decision) {
 func (r *sessions) kindOf(s *Session, id string) (event.ToolKind, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, e := range s.events {
-		if e.Kind != event.KindToolCallRequested {
-			continue
-		}
-		if p, ok := e.Payload.(*event.ToolCallRequested); ok && p.ToolCallID == id {
-			return p.ToolKind, true
-		}
-	}
-	return 0, false
+	kind, _, ok := s.view.Call(id)
+	return kind, ok
 }
 
 // ruleFor is the Approval Policy slot that applied when this Tool Call was
@@ -574,37 +589,28 @@ func (r *sessions) kindOf(s *Session, id string) (event.ToolKind, bool) {
 func (r *sessions) ruleFor(s *Session, id string) (event.Rule, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for i, e := range s.events {
-		if e.Kind != event.KindToolCallRequested {
-			continue
-		}
-		p, ok := e.Payload.(*event.ToolCallRequested)
-		if !ok || p.ToolCallID != id {
-			continue
-		}
-		return session.Policy(s.events[:i+1])[p.ToolKind], true
-	}
-	return "", false
+	_, rule, ok := s.view.Call(id)
+	return rule, ok
 }
 
 // policy is the Approval Policy this Session holds now, folded from its own Events.
 func (r *sessions) policy(s *Session) event.Policy {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return session.Policy(s.events)
+	return s.view.Policy()
 }
 
 // held is the Tool Calls this Session is waiting on a decision for.
 func (r *sessions) held(s *Session) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return session.Held(s.events)
+	return s.view.Held()
 }
 
 func (r *sessions) openCalls(s *Session) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return session.OpenCalls(s.events)
+	return s.view.OpenCalls()
 }
 
 // ending reports whether someone has already taken on writing SessionEnded.
@@ -635,7 +641,7 @@ func (r *sessions) stillServing(s *Session) bool {
 		if other == s || other.vendor != s.vendor || other.model != s.model {
 			continue
 		}
-		if state, _ := session.Fold(other.events); state != session.Ended {
+		if state, _ := other.view.State(); state != session.Ended {
 			return true
 		}
 	}
@@ -670,12 +676,11 @@ func (r *sessions) process(s *Session) (*harnessProcess, *transcript) {
 	return s.proc, s.raw
 }
 
-// record keeps one Event against the Session it belongs to, so the fold has
-// something to read without going back to the log.
+// record applies one committed Event to the live fold.
 func (r *sessions) record(s *Session, e event.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s.events = append(s.events, e)
+	s.view.Apply(e)
 }
 
 // live is every Session that has not ended, which is what admission is asked
@@ -686,7 +691,7 @@ func (r *sessions) live() []admission.Live {
 
 	var out []admission.Live
 	for _, s := range r.all {
-		if state, _ := session.Fold(s.events); state == session.Ended {
+		if state, _ := s.view.State(); state == session.Ended {
 			continue
 		}
 		out = append(out, admission.Live{
@@ -696,38 +701,14 @@ func (r *sessions) live() []admission.Live {
 	return out
 }
 
-func (r *sessions) views() []SessionView {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	out := make([]SessionView, len(r.all))
-	for i, s := range r.all {
-		state, reason := session.Fold(s.events)
-		out[i] = SessionView{
-			ID: s.id, Harness: s.harness, Model: s.model, Vendor: s.vendor, Cwd: s.dir,
-			State: state, EndReason: reason, StartedAt: s.started.UnixMicro(),
-		}
-	}
-	return out
+// Session ids use 128 random bits because history outlives this process.
+func newSessionID() event.SessionID {
+	var b [16]byte
+	rand.Read(b[:])
+	return event.SessionID("s-" + hex.EncodeToString(b[:]))
 }
 
-// newID makes a Session id this registry does not already hold. Three random
-// bytes collide rarely and the check costs one scan, so the id stays short enough
-// to type into a curl.
-func (r *sessions) newID() event.SessionID {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for {
-		var b [3]byte
-		rand.Read(b[:])
-		id := event.SessionID("s-" + hex.EncodeToString(b[:]))
-		if r.lookup(id) == nil {
-			return id
-		}
-	}
-}
-
-// lookup is newID's scan. The caller holds the mutex.
+// lookup scans the live registry. The caller holds the mutex.
 func (r *sessions) lookup(id event.SessionID) *Session {
 	for _, s := range r.all {
 		if s.id == id {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub"
@@ -103,6 +104,26 @@ func TestTheRailHoldsEverySessionOnEveryHost(t *testing.T) {
 	// And the one being drawn is marked as the one being drawn.
 	if !strings.Contains(body, `class="rrow on"`) {
 		t.Error("nothing in the rail is marked as the Session on screen")
+	}
+}
+
+func TestARailRefreshReadsOnlyTheChangedHost(t *testing.T) {
+	var desk, attic atomic.Int32
+	count := func(reads *atomic.Int32, next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reads.Add(1)
+			next.ServeHTTP(w, r)
+		})
+	}
+	body := railPage(t, map[hostset.HostID]http.Handler{
+		"desk":  count(&desk, railHost("s-1 Working")),
+		"attic": count(&attic, railHost("s-9 Asking")),
+	}, "/rail/desk/s-1?changed=attic")
+	if desk.Load() != 0 || attic.Load() != 1 {
+		t.Fatalf("rail read desk %d times and attic %d times", desk.Load(), attic.Load())
+	}
+	if !strings.Contains(body, "s-9") || strings.Contains(body, "s-1") {
+		t.Fatalf("scoped rail = %s", body)
 	}
 }
 
