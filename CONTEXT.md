@@ -81,15 +81,19 @@ A Harness Adapter's ability to hold one Tool Call of a given `toolKind` until th
 _Avoid_: hook, interceptor, permission, guard
 
 **Session**:
-One run of one Harness against one Model on one Host. The unit whose lifecycle a Daemon manages, and the unit an Event belongs to. One Session is one Harness process, and a Session never survives the Daemon that supervised it.
+The work of one Harness with one Model on one Host, kept as one history across every Run that serves it. The unit whose lifecycle a Daemon manages, and the unit an Event belongs to. A Session is served by one Run at a time and outlives each of them, so it survives a Daemon restart. It ends forever only when the Harness no longer holds its history.
 _Avoid_: conversation, chat, instance, job
 
+**Run**:
+One Harness process that serves one Session, from its launch to its exit. A Closed Session reopens when the user sends it a Prompt, and that starts a new Run which loads the Harness's own history of the Session.
+_Avoid_: resume (a Cursor resumes an Event stream), restart, attempt
+
 **Session State**:
-What a Session is doing now. One of `Starting`, `Idle`, `Working`, `Asking`, or `Ended` carrying a reason of `stopped`, `failed` or `lost`. Derived by folding the Session's own Events, never stored, so every transition is caused by an Event and none is internal.
+What a Session is doing now. One of `Starting`, `Idle`, `Working`, `Asking`, or `Closed` carrying a reason of `stopped`, `failed` or `lost`. `Closed` means the Session has no Run, and it is not terminal. Derived by folding the Session's own Events, never stored, so every transition is caused by an Event and none is internal.
 _Avoid_: status, phase, lifecycle stage, running
 
 **Admission**:
-The Daemon's decision on whether one more Session may start on its Host. Runs before the Session exists, so a refusal writes no Event and produces no Session. Per Host, because a Daemon never learns about its peers. A refused start is an error naming the Session that holds the slot, never a queue position.
+The Daemon's decision on whether one more Run may start on its Host. Runs before the Run exists, so a refusal writes no Event and starts no Run. Per Host, because a Daemon never learns about its peers. A refused start is an error naming the Session that holds the slot, never a queue position.
 _Avoid_: scheduling, throttling, rate limit, capacity check
 
 **Event**:
@@ -129,7 +133,7 @@ One submission from the user and all the work a Session does because of it. Boun
 _Avoid_: turn, request, query, exchange
 
 **Tool Call**:
-One attempt by a Harness to run one tool, identified by a tool call id that correlates a `ToolCallRequested` Event with its `ToolCallEnded`. Every Tool Call ends: when a Harness reports no result, the Daemon writes `ToolCallEnded` with outcome `unknown` as the Prompt completes or as the Session ends, whichever comes first. `toolKind` is one of `read`, `edit`, `execute`, `fetch`, `other`.
+One attempt by a Harness to run one tool, identified by a tool call id that correlates a `ToolCallRequested` Event with its `ToolCallEnded`. Every Tool Call ends: when a Harness reports no result, the Daemon writes `ToolCallEnded` with outcome `unknown` as the Prompt completes or as the Run ends, whichever comes first. `toolKind` is one of `read`, `edit`, `execute`, `fetch`, `other`.
 _Avoid_: tool use, function call, action, invocation
 
 ### Containment
