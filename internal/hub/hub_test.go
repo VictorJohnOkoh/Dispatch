@@ -77,8 +77,9 @@ func TestTheMergedStreamCarriesEveryHostAndSplitsAReconnectCursor(t *testing.T) 
 	}
 
 	// The Hello named both logs, so this one resumes and each Daemon reads its own
-	// Cursor and its own log identity.
-	merged(t, srv.URL+"/v1/events", "desk=1,pi=7", "id: desk=1,pi=7", `"host":"pi"`)
+	// Cursor and its own log identity. It waits for both Hellos, because one Host's
+	// Event alone can satisfy the Cursor line before the other Host has dialed.
+	merged(t, srv.URL+"/v1/events", "desk=1,pi=7", "id: desk=1,pi=7", `"logId":"desk-log"`, `"logId":"pi-log"`)
 	desk, _ = seen.Load(hostset.HostID("desk"))
 	pi, _ = seen.Load(hostset.HostID("pi"))
 	if desk != "1|desk-log" || pi != "7|pi-log" {
