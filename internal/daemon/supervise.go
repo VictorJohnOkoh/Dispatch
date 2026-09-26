@@ -52,7 +52,7 @@ func (d *Daemon) spawner(s *Session, h *Harness) harness.Spawner {
 		// stdout through the transcript as well, so what it drops as output no Event
 		// Kind covers is still written down somewhere.
 		kept := &stderrTail{}
-		p, pipes, err := spawn(h.Exe, s.dir, l, io.MultiWriter(kept, raw), raw)
+		p, pipes, err := spawn(h.Exe, s.dir, l, io.MultiWriter(kept, &raw.stderr), &raw.stdout)
 		if err != nil {
 			raw.Close()
 			return harness.Pipes{}, err
