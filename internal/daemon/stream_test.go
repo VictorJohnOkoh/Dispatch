@@ -203,9 +203,8 @@ func TestAnOpenMessageHoldsTheCursorUntilItsFinalDelta(t *testing.T) {
 	h := newHost(t)
 	_, r := h.stream(t)
 
-	s := &Session{id: "s-open", cancel: func() {}}
-	h.sessions.add(s)
-	k := &sink{d: h.Daemon, s: s}
+	s := h.bare("s-open")
+	k := s.sink
 	k.Message("half a", false)
 	k.Message(" message", false)
 	k.Message(" that ended", true)
