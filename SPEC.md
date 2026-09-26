@@ -34,7 +34,9 @@ ADRs that contradict or under-specify something. Everything original to this doc
 **Sessions**
 
 - One Session at a time per Host, enforced by `admission.SingleSession`.
-- Five Session states, folded from the Event log, with `Ended` carrying `stopped`, `failed` or `lost`.
+- Five Session states, folded from the Event log, with `Closed` carrying `stopped`, `failed` or `lost`.
+  A `Closed` Session reopens on its next Prompt, as a new Run that loads the Harness's own history
+  ([ADR 0014](docs/adr/0014-a-session-outlives-its-harness-process.md)).
 - Three Harnesses: passthrough, OpenCode and Pi. **Decided here**, argued below.
 - Three Vendors: Ollama, LM Studio and llama-swap. **Decided here**, argued below.
 - Per-Session Model choice, made before the Session starts.
@@ -80,7 +82,6 @@ Each of these has a reason recorded somewhere. Nothing here is out because it wa
 | Tailscale reach | deferred in charting. It is a `HostDialer` swap, which is why it stays cheap |
 | Retention, log rotation, deletion of anything | [ADR 0009](docs/adr/0009-wire-protocol-and-event-log.md). Removing it shrank the design |
 | Metrics and tracing | **Decided here**. The Event log already is a Session's trace |
-| Resuming a Session across a Daemon restart | [ADR 0005](docs/adr/0005-the-event-model.md). The process does not fold, so live Sessions become `lost` |
 | A `raw` field or a `HarnessSpecific` Event Kind | [ADR 0005](docs/adr/0005-the-event-model.md). Raw bytes go to the transcript file |
 | Streaming tool output | [ADR 0005](docs/adr/0005-the-event-model.md). Pi sends it, nothing else does, and losing it hurts on long `bash` commands |
 | A Vendor Health method, or an idle/loading/busy ladder | [ADR 0007](docs/adr/0007-the-vendor-adapter-interface.md). No two Vendors expose the same one |
@@ -365,10 +366,10 @@ from two questions: does a Session exist yet, and is the Host answering.
 | Hub and Daemon disagree on protocol version | Host State `Incompatible` | the Host stays listed, and the Hub dials it again only when the user presses Retry on its card. It is the only state the Hub stops working on |
 | Admission refuses a start | HTTP `409` carrying a `Refusal` | the wizard names the blocking Session and offers to stop it and start this one. No Event is written, because no Session exists, so the refusal goes to the operational log |
 | A malformed or impossible command | HTTP `422` | the Client's own bug, or a stale form. Not drawn as a system failure |
-| The Harness will not launch, or its Gate fails to announce | `SessionEnded{failed}` | the Session exists, is `Ended`, and its transcript holds the process's stderr |
+| The Harness will not launch, or its Gate fails to announce | `SessionEnded{failed}` | the Session exists, is `Closed`, and its transcript holds the process's stderr |
 | The Vendor stops answering mid-Session | an `Error` Event, then whatever the Harness does next | `Error` is never terminal, so the Session stays usable if the Harness recovers |
 | The Model will not load | an `Error` Event, or a failed start if it happens before `SessionReady` | the same two shapes, and which one depends only on when it happened |
-| The Daemon restarts under a live Session | `SessionEnded{lost}` from the boot sweep | the Session is ended with its transcript intact. The Client offers to start a new Session here, never to resume |
+| The Daemon restarts under a live Session | `SessionEnded{lost}` from the boot sweep | the Session is `Closed` with its transcript intact. The user's next Prompt reopens it as a new Run, and the Harness loads its own history |
 | A Vendor is unreachable | neither a Host State nor an Event | the `vendors` frame carries reachability beside the resident list, so the Host card's Vendor row empties rather than going stale |
 
 Precedence when more than one applies: Host State, then the HTTP status, then an Event, then the
@@ -498,8 +499,9 @@ hold.
    goes back, and the Tool Call ends with an outcome that says a human decided it.
 4. **The refusal is honest.** Set `execute` to `refuse`, ask the Session to run a command, and see
    `ToolCallEnded{refused}` written from the Daemon's own `ApprovalDecided`, never from the Harness.
-5. **Kill the Daemon under a live Session and restart it.** The boot sweep ends that Session `lost`,
-   its transcript is intact and readable, and the Client offers a new Session rather than a resume.
+5. **Kill the Daemon under a live Session and restart it.** The boot sweep closes that Session `lost`
+   with its transcript intact. The next Prompt reopens it, and the answer shows that the Model still
+   has the earlier conversation in context.
 6. **Kill a Harness that will not die.** Stop runs the ladder and the whole process tree is gone,
    checked from a shell on the Host rather than from the Client. On Windows this means checking that
    the Harness's own children went with it, which is the part a naive kill gets wrong.
