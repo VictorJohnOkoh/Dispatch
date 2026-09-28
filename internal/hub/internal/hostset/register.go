@@ -109,11 +109,18 @@ func install(ctx context.Context, login *ssh.Client, req Registration, hostKey s
 // prove is everything after the Host has been changed: the key-only login, the
 // Handshake on it, the trusted Host key and the commit.
 func prove(ctx context.Context, req Registration, signer ssh.Signer, hostKey ssh.PublicKey, daemon string, commit func(Registered) error) error {
+	check := ssh.FixedHostKey(hostKey)
 	client, err := connect(ctx, req.Address, &ssh.ClientConfig{
-		User:            req.User,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.FixedHostKey(hostKey),
-		Timeout:         connectTimeout,
+		User: req.User,
+		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: func(address string, remote net.Addr, key ssh.PublicKey) error {
+			if err := check(address, remote, key); err != nil {
+				return fmt.Errorf("%w: %w", ErrHostKey, err)
+			}
+			return nil
+		},
+		HostKeyAlgorithms: hostKeyAlgorithms(hostKey),
+		Timeout:           connectTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("the key-only login: %w", err)

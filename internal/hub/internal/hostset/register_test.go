@@ -1,7 +1,9 @@
 package hostset_test
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
@@ -31,6 +34,7 @@ const hostPassword = "correct horse"
 type testHost struct {
 	req      hostset.Registration
 	key      ssh.PublicKey
+	ecdsaKey ssh.PublicKey
 	keys     string // the file OpenSSH reads for this account
 	userKeys string
 
@@ -96,6 +100,17 @@ func newTestHost(t *testing.T, opt hostOptions) *testHost {
 		},
 	}
 	config.AddHostKey(hostSigner)
+	// OpenSSH offers several Host keys; registration must keep using the trusted one.
+	ecdsaPrivate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecdsaSigner, err := ssh.NewSignerFromKey(ecdsaPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.AddHostKey(ecdsaSigner)
+	h.ecdsaKey = ecdsaSigner.PublicKey()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -307,6 +322,24 @@ func TestACodeAndPasswordInstallTheRestrictedHubKey(t *testing.T) {
 	if err := check(h.req.Address, address, h.key); err != nil {
 		t.Fatal("the Host was not trusted", err)
 	}
+	connectRegisteredHost(t, saved)
+}
+
+func connectRegisteredHost(t *testing.T, saved hostset.Registered) {
+	t.Helper()
+	dialer, err := hostset.NewSSHDialer([]hostset.SSHProfile{{
+		ID: saved.ID, Address: saved.Address, User: saved.User,
+		KeyPath: saved.KeyPath, KnownHosts: saved.KnownHosts, DaemonPort: saved.DaemonPort,
+	}}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dialer.Close()
+	conn, err := dialer.Dial(t.Context(), saved.ID)
+	if err != nil {
+		t.Fatalf("connecting after registration: %v", err)
+	}
+	conn.Close()
 }
 
 func TestAWrongFingerprintSendsNoPassword(t *testing.T) {
@@ -461,5 +494,31 @@ func TestAnExistingLoginInstallsTheRestrictedHubKey(t *testing.T) {
 	}
 	if got := readHostFile(t, h.keys); got != restrictedLine(hubKey(t, saved), h.req.DaemonPort)+"\n" {
 		t.Fatalf("administrators_authorized_keys = %q", got)
+	}
+	connectRegisteredHost(t, saved)
+}
+
+func TestAnExistingLoginKeepsTheTrustedKeyType(t *testing.T) {
+	for _, keyType := range []string{"ed25519", "ecdsa"} {
+		t.Run(keyType, func(t *testing.T) {
+			h := newTestHost(t, hostOptions{})
+			trusted, unrelated := h.key, h.ecdsaKey
+			if keyType == "ecdsa" {
+				trusted, unrelated = h.ecdsaKey, h.key
+			}
+			known := filepath.Join(t.TempDir(), "known_hosts")
+			address := knownhosts.HashHostname(knownhosts.Normalize(h.req.Address))
+			writeHostFile(t, known, knownhosts.Line([]string{"another-host"}, unrelated)+"\n"+
+				address+" "+strings.TrimSpace(string(ssh.MarshalAuthorizedKey(trusted)))+"\n")
+			login := hostset.Login{Auth: []ssh.AuthMethod{ssh.Password(hostPassword)}, Known: []string{known}}
+			var saved hostset.Registered
+			if err := hostset.RegisterLogin(t.Context(), h.req, login, func(host hostset.Registered) error {
+				saved = host
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			connectRegisteredHost(t, saved)
+		})
 	}
 }
