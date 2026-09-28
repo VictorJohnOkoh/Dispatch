@@ -32,9 +32,6 @@ instructions do not exist.
 The run on a real Windows Host is #83, with a standard account and an administrator account. v1 is
 not done until that run holds with the rest.
 
-**Number 2 has a hole in it.** `HubDetached` and `HubAttached` are declared and nothing writes either,
-which is issue #109. The sheet says what not to look for. The rest of that behaviour is checkable now.
-
 ## What you need for the whole walk
 
 Two Hosts and a Client machine. One Host with all three Vendors on it, and both OpenCode and Pi in its
