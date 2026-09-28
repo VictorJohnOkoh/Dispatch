@@ -14,7 +14,6 @@ import (
 // Cursor came from when one is given.
 func (h *host) resume(t *testing.T, from protocol.Cursor, logID string) *reader {
 	t.Helper()
-	h.keepalive = 20 * time.Millisecond
 	srv := httptest.NewServer(h.handler())
 	t.Cleanup(srv.Close)
 
