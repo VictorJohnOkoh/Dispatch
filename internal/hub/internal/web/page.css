@@ -392,6 +392,62 @@ button {
 }
 button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 
+/* The password box for Host Registration. It is one step darker than a card, so
+   it reads as above the page and not as another card on it. */
+.secret {
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 22px 24px 18px;
+  color: #ede9f4;
+  background: #0b0910;
+  border: 1px solid var(--rule);
+  border-radius: var(--squircle);
+  corner-shape: squircle;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+}
+.secret::backdrop { background: rgba(7, 6, 10, 0.7); backdrop-filter: blur(2px); }
+.secret h2 { margin-bottom: 0.4rem; }
+.secret .who { margin: 0 0 1rem; font: 400 12px/1.4 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
+.secret input { width: 100%; }
+.secret .fine { margin: 0.6rem 0 1.1rem; font-size: 11px; line-height: 1.45; color: var(--mist-dim); }
+.secret-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin: 0; }
+.secret .cancel { background: none; color: var(--mist); border: 1px solid var(--rule); }
+.secret .cancel:hover { border-color: var(--orchid); color: #ede9f4; box-shadow: none; }
+
+/* Notices pin to the top and let every click through except on themselves, so
+   one left open never stops the human using the page. */
+.notices {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(34rem, calc(100vw - 2rem));
+  z-index: 20;
+  pointer-events: none;
+}
+.notice {
+  pointer-events: auto;
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  padding: 13px 14px 13px 18px;
+  background: #2a0f17;
+  border: 1px solid var(--red);
+  border-radius: 18px;
+  corner-shape: squircle;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+}
+.notice p { flex: 1; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.notice b { display: block; margin-bottom: 0.35rem; font: 700 10px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--red); }
+.notice button { padding: 4px 9px; border-radius: 99px; background: none; color: #ede9f4; border: 1px solid rgba(212, 83, 107, 0.5); font: 400 13px/1 var(--mono); }
+.notice button:hover { border-color: var(--red); box-shadow: none; }
+.notice.ok { background: #0f2a1d; border-color: var(--green); }
+.notice.ok b { color: var(--green); }
+.notice.ok button { border-color: rgba(79, 190, 135, 0.5); }
+.notice.ok button:hover { border-color: var(--green); }
+
 /* The Host saying no. It names the Session holding the slot and offers to stop
    it, and it never shows a queue position, because there is no queue. */
 .refusal {
