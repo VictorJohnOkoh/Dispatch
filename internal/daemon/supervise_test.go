@@ -45,7 +45,7 @@ func TestTheStopWaitsForTheAdapterToFinishReadingStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTranscript: %v", err)
 	}
-	p, pipes := spawnStubTeed(t, w, "parting", nil, tr)
+	p, pipes := spawnStubTeed(t, w, "parting", nil, &tr.stdout)
 
 	// A byte at a time with a pause between, which is a slow Adapter and not a
 	// broken one. A stop that does not wait returns while this is still going.
