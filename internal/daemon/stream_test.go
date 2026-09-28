@@ -31,11 +31,9 @@ type reader struct {
 	close func()
 }
 
-// stream opens GET /v1/events against a live server and reads Frames off it. The
-// keepalive beat is shortened, because a test may not wait ten seconds for one.
+// stream opens GET /v1/events against a live server and reads Frames off it.
 func (h *host) stream(t *testing.T) (*httptest.Server, *reader) {
 	t.Helper()
-	h.keepalive = 20 * time.Millisecond
 	srv := httptest.NewServer(h.handler())
 	t.Cleanup(srv.Close)
 
@@ -203,9 +201,8 @@ func TestAnOpenMessageHoldsTheCursorUntilItsFinalDelta(t *testing.T) {
 	h := newHost(t)
 	_, r := h.stream(t)
 
-	s := &Session{id: "s-open", cancel: func() {}}
-	h.sessions.add(s)
-	k := &sink{d: h.Daemon, s: s}
+	s := h.bare("s-open")
+	k := s.sink
 	k.Message("half a", false)
 	k.Message(" message", false)
 	k.Message(" that ended", true)

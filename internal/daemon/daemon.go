@@ -95,6 +95,12 @@ type Daemon struct {
 	// would otherwise be told a state the Event has already moved on from.
 	writing sync.RWMutex
 
+	// readers is how many Event streams are open now, and attaching guards it and
+	// the HubDetached or HubAttached a change to it writes. The Daemon cannot see
+	// the Hub, only its streams, so the Hub is detached when this falls to zero.
+	readers   int
+	attaching sync.Mutex
+
 	// base is the context every Session hangs off, which is Serve's. A handler
 	// exercised without Serve gets the background one this starts as.
 	base context.Context

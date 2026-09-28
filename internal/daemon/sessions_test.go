@@ -56,6 +56,8 @@ func newHost(t *testing.T, extra ...Harness) *host {
 	// The Host config's default is ADR 0008's: auto for read, wait for the rest.
 	policy := event.Policy{event.RuleAuto, event.RuleWait, event.RuleWait, event.RuleWait, event.RuleWait}
 	d := New(slog.New(slog.NewTextHandler(written, nil)), events, dir, root, []vendors.Adapter{f}, harnesses, policy)
+	// Set the short test beat before any Event stream can read it.
+	d.keepalive = 20 * time.Millisecond
 	d.vendors.pollAll(t.Context())
 
 	return &host{Daemon: d, root: dir, logPath: path, vendor: f, chat: chat, lines: written}

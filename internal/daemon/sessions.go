@@ -696,6 +696,33 @@ func (r *sessions) live() []admission.Live {
 	return out
 }
 
+// hubDetached is every live Session whose last HubDetached or HubAttached matches
+// detached. A Session with neither has never been detached.
+func (r *sessions) hubDetached(detached bool) []*Session {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var out []*Session
+	for _, s := range r.all {
+		if state, _ := session.Fold(s.events); state != session.Ended && lastDetached(s.events) == detached {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func lastDetached(events []event.Event) bool {
+	for i := len(events) - 1; i >= 0; i-- {
+		switch events[i].Kind {
+		case event.KindHubDetached:
+			return true
+		case event.KindHubAttached:
+			return false
+		}
+	}
+	return false
+}
+
 func (r *sessions) views() []SessionView {
 	r.mu.Lock()
 	defer r.mu.Unlock()
