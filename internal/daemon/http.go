@@ -2,15 +2,22 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"slices"
+	"strconv"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
-// handler is the Daemon's mux, and it serves every endpoint on the Daemon's leg.
-func (d *Daemon) handler() http.Handler {
+// handler serves every endpoint on the Daemon's leg, each one behind the version
+// check.
+func (d *Daemon) handler() http.Handler { return d.speaks(d.routes()) }
+
+// routes is the Daemon's mux.
+func (d *Daemon) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc(protocol.ListModels, d.listModels)
 	mux.HandleFunc(protocol.ListHarnesses, d.listHarnesses)
@@ -33,6 +40,32 @@ func (d *Daemon) handler() http.Handler {
 	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 	return mux
+}
+
+// speaks runs the version check on every request, because ADR 0009 puts the
+// version on every request and not only on the stream. A caller that names a
+// version this Daemon cannot serve is refused, and one that names none is served,
+// because curl names none.
+func (d *Daemon) speaks(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked := r.Header.Get(protocol.VersionHeader)
+		if asked == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if n, err := strconv.Atoi(asked); err == nil && slices.Contains(protocol.ServedVersions[:], n) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// A Hub that meets this on the stream marks the Host Incompatible and never
+		// dials it again, so this line is the only evidence the check ran.
+		d.log.Info("the Handshake was refused", "path", r.URL.Path, "asked", asked, "speaks", protocol.ServedVersions)
+		refuse(w, protocol.StatusUpgradeRequired, protocol.Refusal{
+			Reason: protocol.ReasonProtocol,
+			Detail: fmt.Sprintf("this Daemon does not speak protocol %q", asked),
+			Speaks: protocol.ServedVersions[:],
+		})
+	})
 }
 
 // Handler is the Daemon's Control Plane without a listener. The Hub's tier-three

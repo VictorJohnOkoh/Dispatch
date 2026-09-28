@@ -150,6 +150,9 @@ type hostReader struct {
 	// before the third, and dimming a Host for a blink costs the user more than
 	// holding the last display for seven seconds does.
 	failures int
+
+	// retry is what this reader waits on while its Host is Incompatible.
+	retry <-chan struct{}
 }
 
 // downAfter is how many attempts in a row must fail before a Host is Down. ADR
@@ -162,7 +165,8 @@ const downAfter = 3
 const refusalLimit = 4096
 
 // run reads this Host until the Client leaves. It retries forever, so a Host the
-// user switches on comes back without being told to.
+// user switches on comes back without being told to. An Incompatible Host is the
+// exception, and only the user retries it.
 func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 	delay := r.hub.backoff
 	for ctx.Err() == nil {
@@ -177,11 +181,18 @@ func (r *hostReader) run(ctx context.Context, out chan<- daemonFrame) {
 		if steady := r.once(ctx, out); steady >= r.hub.steady {
 			delay = r.hub.backoff
 		}
-		// Incompatible is the one state the Hub stops working on. This reader ends,
-		// so the Host takes no more dials and makes no more backoff traffic, and it
-		// keeps its place in the merged stream and on the page.
+		// Incompatible is the one state the Hub stops working on. This reader waits,
+		// so the Host takes no more dials and makes no more backoff traffic until the
+		// user retries it, and it keeps its place in the merged stream and on the
+		// page. A retry dials at once and starts the curve over.
 		if r.state == protocol.Incompatible {
-			return
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.retry:
+			}
+			delay, r.failures = r.hub.backoff, 0
+			continue
 		}
 		if !sleep(ctx, jitter(delay)) {
 			return
@@ -271,6 +282,9 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 		// A refusal this Hub cannot read leaves Speaks empty, and the card names the
 		// half it does know. The status is the answer; the versions are the detail.
 		_ = json.NewDecoder(io.LimitReader(resp.Body, refusalLimit)).Decode(&refusal)
+		// The reader starts waiting before the Client hears Incompatible, so a retry
+		// the user sends on that frame cannot arrive before anything waits for it.
+		r.retry = r.hub.retries.wait(r.id)
 		r.says(ctx, protocol.HostStateFrame{State: protocol.Incompatible, Speaks: refusal.Speaks}, out)
 		return 0
 	}

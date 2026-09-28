@@ -89,3 +89,40 @@ func TestTheVersionThisBuildSpeaksIsServed(t *testing.T) {
 		srv.Close()
 	}
 }
+
+// ADR 0009 puts the version on every request, not only on the stream, so every
+// endpoint refuses a version it cannot serve and answers with the stream's body.
+func TestEveryEndpointRefusesAVersionItCannotServe(t *testing.T) {
+	h := newHost(t)
+	for _, route := range protocol.Routes {
+		method, path, _ := strings.Cut(route, " ")
+		r := httptest.NewRequest(method, strings.Replace(path, "{session}", "s-1", 1), strings.NewReader("{}"))
+		r.Header.Set(protocol.VersionHeader, "2")
+		w := httptest.NewRecorder()
+		h.handler().ServeHTTP(w, r)
+
+		if w.Code != protocol.StatusUpgradeRequired {
+			t.Errorf("%s answered %d, want %d", route, w.Code, protocol.StatusUpgradeRequired)
+			continue
+		}
+		var refusal protocol.Refusal
+		if err := json.Unmarshal(w.Body.Bytes(), &refusal); err != nil {
+			t.Errorf("%s: the refusal body: %v", route, err)
+			continue
+		}
+		if refusal.Reason != protocol.ReasonProtocol || len(refusal.Speaks) != 1 || refusal.Speaks[0] != protocol.Version {
+			t.Errorf("%s refused with %+v", route, refusal)
+		}
+	}
+}
+
+// A command that names no version is served, because curl names none.
+func TestACommandThatNamesNoVersionIsServed(t *testing.T) {
+	h := newHost(t)
+	r := httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
+	w := httptest.NewRecorder()
+	h.handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("a caller that named no version got %d", w.Code)
+	}
+}

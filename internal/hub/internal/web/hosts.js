@@ -7,12 +7,13 @@
 // same frame carries whether the Vendor answered, so a Vendor that stops
 // answering empties its row rather than leaving a remembered list behind.
 
-// The page's cards and their Vendor rows, read once from the page by the two
-// selectors this file holds. Neither is built from a Host id: a selector made
-// from data is a selector an id can break, and one that throws stops every frame
-// after it.
+// The page's cards, their Vendor rows and their retry buttons, read once from
+// the page by the selectors this file holds. None is built from a Host id: a
+// selector made from data is a selector an id can break, and one that throws
+// stops every frame after it.
 const rows = byHost("[data-vendors]", (el) => el.dataset.vendors);
 const cards = byHost("[data-host]", (el) => el.dataset.host);
+const retries = byHost("[data-retry]", (el) => el.dataset.retry);
 
 function byHost(selector, id) {
   const found = new Map();
@@ -43,15 +44,20 @@ for (const [host, card] of cards) {
   if (card.dataset.hostState === "Ready" && drawnPage) trueAt.set(host, stamped("drawn"));
 }
 
+// A retry is the user asking the Hub to dial an Incompatible Host once more. The
+// answer is on the stream, as a host frame, so nothing here waits for one.
+for (const [host, button] of retries) {
+  button.onclick = () => fetch(`/v1/hosts/${encodeURIComponent(host)}/retry`, { method: "POST" });
+}
+
 stream.addEventListener("vendors", (frame) => {
   const f = JSON.parse(frame.data);
   const row = rows.get(f.host);
   if (!row) return;
   // Precedence: Host State, then the HTTP status, then an Event, then the
-  // operational log. A user looking at a Down Host is not also told that its
-  // Vendor stopped answering, because the Vendor not answering is what a Host
-  // that is not there looks like from here.
-  if (down(f.host)) return;
+  // operational log. A user looking at a Host that is not Ready is not also told
+  // about its Vendor, because what its Host State says comes first.
+  if (cards.get(f.host)?.dataset.hostState !== "Ready") return;
 
   const drawn = [];
   for (const v of f.vendors ?? []) {
@@ -97,6 +103,11 @@ stream.addEventListener("host", (frame) => {
   if (row && down(f.host)) {
     row.replaceChildren(node("li", "meta", "this Host is not answering, so what it serves is not known"));
   }
+  if (row && f.state === "Incompatible") {
+    row.replaceChildren(node("li", "meta", "this Host speaks another protocol, so what it serves is not known"));
+  }
+  const retry = retries.get(f.host);
+  if (retry) retry.hidden = f.state !== "Incompatible";
   if (f.since) trueAt.set(f.host, f.since);
   if (f.state !== "Down") unstamp(card);
   else if (trueAt.has(f.host)) stamp(card, trueAt.get(f.host));

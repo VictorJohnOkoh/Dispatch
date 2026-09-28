@@ -71,9 +71,9 @@ func oldDaemon(seen *refusals) dialFn {
 	}
 }
 
-// A Daemon that refuses the version makes its Host Incompatible, and the Hub never
-// retries one: a version mismatch cannot fix itself, so retrying would hammer a
-// Host that can never come Ready.
+// A Daemon that refuses the version makes its Host Incompatible, and the Hub does
+// not retry one on its own: a version mismatch cannot fix itself, so retrying
+// would hammer a Host that can never come Ready.
 func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.T) {
 	var seen refusals
 	h := quick([]Host{{ID: "desk"}}, oldDaemon(&seen))
@@ -104,7 +104,7 @@ func TestARefusedHandshakeMakesTheHostIncompatibleAndStopsTheRetries(t *testing.
 	after, _ := seen.seen()
 	time.Sleep(200 * time.Millisecond)
 	if now, _ := seen.seen(); now != after {
-		t.Errorf("an Incompatible Host was dialled %d more times, and the Hub never retries one", now-after)
+		t.Errorf("an Incompatible Host was dialled %d more times, and only the user retries one", now-after)
 	}
 }
 
@@ -209,4 +209,64 @@ func liveDaemon(context.Context, hostset.HostID) (net.Conn, error) {
 		}
 	}()
 	return client, nil
+}
+
+// ADR 0009 puts the version on every request the Hub sends, not only on the
+// stream. A Client that names a version of its own is overruled, because the
+// version is the Hub's to require.
+func TestEveryRequestTheHubSendsCarriesTheVersion(t *testing.T) {
+	var seen refusals
+	h := quick([]Host{{ID: "desk"}}, oldDaemon(&seen))
+
+	resp, _ := h.Get(context.Background(), "desk", "/v1/models")
+	resp.Body.Close()
+	resp, _ = h.Post(context.Background(), "desk", "/v1/sessions", []byte("{}"))
+	resp.Body.Close()
+	r := httptest.NewRequest(http.MethodPost, "/v1/hosts/desk/sessions/s-1/stop", nil)
+	r.Header.Set(protocol.VersionHeader, "2")
+	w := httptest.NewRecorder()
+	h.Handler().ServeHTTP(w, r)
+
+	// The forwarded refusal is the Daemon's own, so one reader reads it and the
+	// stream's.
+	if w.Code != protocol.StatusUpgradeRequired || !strings.Contains(w.Body.String(), `"speaks":[2]`) {
+		t.Errorf("the Client was told %d %q", w.Code, w.Body.String())
+	}
+
+	_, requests := seen.seen()
+	want := fmt.Sprintf("%s: %d", protocol.VersionHeader, protocol.Version)
+	if len(requests) != 3 {
+		t.Fatalf("the Hub asked this Host %v", requests)
+	}
+	for _, request := range requests {
+		if !strings.HasSuffix(request, want) {
+			t.Errorf("%q does not carry %q", request, want)
+		}
+	}
+}
+
+// The first paint reads every Host before any Host State exists. A Host that
+// refuses that read speaks another version, so it is drawn Incompatible and not
+// Down, and it names both versions, because the user fixes it by updating one of
+// the two machines.
+func TestTheFirstPaintDrawsAnIncompatibleHostAsIncompatible(t *testing.T) {
+	h := quick([]Host{{ID: "desk"}}, oldDaemon(&refusals{}))
+	w := httptest.NewRecorder()
+	h.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/hosts", nil))
+
+	_, card, _ := strings.Cut(w.Body.String(), `data-host="desk"`)
+	card, _, _ = strings.Cut(card, "</section>")
+	if !strings.Contains(card, `data-host-state="Incompatible"`) {
+		t.Errorf("the Host that refused the version is drawn as %q", card)
+	}
+	if !strings.Contains(card, "this Hub speaks 1, this Host speaks 2") {
+		t.Errorf("the card does not name both versions: %s", card)
+	}
+	if !strings.Contains(card, `data-retry="desk">Retry`) {
+		t.Errorf("the card does not offer a retry: %s", card)
+	}
+	// The machine answered, so the card does not say it did not.
+	if strings.Contains(card, "did not answer") || strings.Contains(card, "not answering") {
+		t.Errorf("an Incompatible Host is drawn as one that is not answering: %s", card)
+	}
 }

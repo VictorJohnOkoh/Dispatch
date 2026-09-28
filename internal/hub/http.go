@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
@@ -31,6 +32,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("POST /registration", h.registerHost)
 	mux.HandleFunc(protocol.ListHosts, h.listHosts)
 	mux.HandleFunc(protocol.StreamEvents, h.stream)
+	mux.HandleFunc(protocol.RetryHost, h.retryHost)
 	for _, route := range protocol.Routes {
 		mux.HandleFunc(protocol.OnHost(route), h.forward)
 	}
@@ -140,7 +142,8 @@ func (h *Hub) forward(w http.ResponseWriter, r *http.Request) {
 
 // roundTrip writes one request to a Host's Daemon and reads its answer. The
 // request is rewritten for a connection that is already this Host's, so it carries
-// no scheme and no address.
+// no scheme and no address, and it names the version this Hub requires whatever
+// the Client named.
 func (h *Hub) roundTrip(ctx context.Context, id hostset.HostID, req *http.Request) (*http.Response, error) {
 	if _, ok := h.hosts.Find(id); !ok {
 		return nil, errNoHost
@@ -159,6 +162,7 @@ func (h *Hub) roundTrip(ctx context.Context, id hostset.HostID, req *http.Reques
 	req.URL.Scheme = ""
 	req.URL.Host = ""
 	req.Host = "daemon"
+	req.Header.Set(protocol.VersionHeader, strconv.Itoa(protocol.Version))
 	if err := req.Write(conn); err != nil {
 		release()
 		return nil, fmt.Errorf("%w: %w", errSendFail, err)

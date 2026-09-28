@@ -65,7 +65,8 @@ const (
 	// Down is a Host that is not answering, and it always carries a cause.
 	Down HostState = "Down"
 
-	// Incompatible is a Host that failed the Handshake. The Hub never retries one.
+	// Incompatible is a Host that failed the Handshake. The Hub dials one again only
+	// when the user commands a retry.
 	Incompatible HostState = "Incompatible"
 )
 

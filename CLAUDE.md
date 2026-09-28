@@ -55,9 +55,10 @@ in the last column when you do.
 | 0011 | One binary runs both roles, and the Hub is the only place a second Host can be named | the role split, one binary against two, deployment | 6 KB |
 | 0012 | A Harness reaches only its own Host's Vendor, and no type on the wire can say otherwise | cross-Host Sessions, the Data Plane, Vendor addresses | 4 KB |
 | 0013 | Host Registration uses a code that names the Host and a password that installs a restricted Hub key | Host Registration, SSH trust bootstrap, managed Hub keys | 8 KB |
+| 0014 | A Session outlives its Harness process, and a Closed Session reopens on its next Prompt (it corrects 0008's "a lost Session is not resumable") | Runs, the Closed state, reopening, Harness history | 7 KB |
 
-Everything after 0004 is long. The thirteen together are about 70,000 tokens, which is why
-they are indexed here and not read by default. 0011, 0012 and 0013 are the exceptions and
+Everything after 0004 is long. The fourteen together are about 72,000 tokens, which is why
+they are indexed here and not read by default. 0011 to 0014 are the exceptions and
 are short enough to open on a hunch.
 
 ### The build spec

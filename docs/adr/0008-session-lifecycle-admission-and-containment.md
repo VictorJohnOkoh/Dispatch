@@ -279,6 +279,12 @@ that resumes on one Harness and not the other is a property the Client cannot de
 If it is ever wanted, the Harness's native session id lands on `SessionReady` beside the Model, and
 nothing else here changes.
 
+> **Corrected by ADR 0014: a Session outlives its Harness process.** Both premises above are false.
+> Pi writes each session to a file and loads it again with `--session`, and OpenCode stores its
+> sessions too. So a Session is now served by one Run at a time, `Ended` is renamed `Closed` and is
+> not terminal, and the user's next Prompt reopens a Closed Session with the Harness's own history.
+> The boot sweep and the rule that the Daemon never restarts a Harness by itself do not change.
+
 ## Stopping
 
 **The user stops a Session, and so does the Daemon. Nothing else does.**

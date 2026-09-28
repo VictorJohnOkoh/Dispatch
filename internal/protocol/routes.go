@@ -35,6 +35,11 @@ const (
 // the Hub serves it itself.
 const ListHosts = "GET /v1/hosts"
 
+// RetryHost is the user asking the Hub to dial an Incompatible Host once more. It
+// is the Hub's for the same reason: Host State lives in the Hub, and no Daemon
+// holds one.
+const RetryHost = "POST /v1/hosts/{host}/retry"
+
 // Routes is all of them, so a server registers them in one loop.
 var Routes = [11]string{
 	StreamEvents, ListSessions, ListModels, SessionEvents, ListHarnesses,

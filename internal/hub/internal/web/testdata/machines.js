@@ -15,6 +15,10 @@ function makeCard(host) {
   pill.dataset.hostState = "Ready";
   pill.textContent = "Ready";
   who.append(pill);
+  const retry = new El("button");
+  retry.dataset.retry = host;
+  retry.hidden = true;
+  who.append(retry);
   section.append(who);
 
   const row = new El("ul");
@@ -23,7 +27,7 @@ function makeCard(host) {
   row.append(part("li", "meta waiting", "waiting for this Host's Vendors"));
   section.append(row);
 
-  drawn.set(host, { section, who, pill, row });
+  drawn.set(host, { section, who, pill, retry, row });
   return section;
 }
 
@@ -37,7 +41,7 @@ function part(tag, className, text) {
 makeCard("desk");
 makeCard("attic");
 
-// querySelectorAll answers the two constant selectors hosts.js reads its page
+// querySelectorAll answers the constant selectors hosts.js reads its page
 // with. Neither is built from data, so neither can be broken by an id.
 // The body, which carries the Cursor the page was drawn at and the time it was
 // drawn. Both are the Hub's, and a stamp made on this page is made from them.
@@ -50,6 +54,7 @@ globalThis.document = {
   querySelectorAll: (selector) => {
     if (selector === "[data-vendors]") return [...drawn.values()].map((c) => c.row);
     if (selector === "[data-host]") return [...drawn.values()].map((c) => c.section);
+    if (selector === "[data-retry]") return [...drawn.values()].map((c) => c.retry);
     if (selector === "[data-cursor]") return [sheet];
     return [];
   },
@@ -71,6 +76,13 @@ class EventSource {
   }
 }
 globalThis.EventSource = EventSource;
+
+// fetch records what the page posted and answers as the Hub does to a retry.
+globalThis.posted = [];
+globalThis.fetch = async (url, options) => {
+  posted.push({ url, method: options?.method });
+  return { ok: true, status: 202 };
+};
 // The test reads the page through this. It is not called cards, because hosts.js
 // declares one of its own and the two would shadow.
 globalThis.page = drawn;
