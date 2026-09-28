@@ -169,9 +169,9 @@ for (const question of JSON.parse(document.getElementById("approvals").textConte
   raise(question);
 }
 
-// answerButton is one answer, sent to the Host that asked. The toast stays up
-// until that Daemon's own Event comes back on the stream: a command is an
-// intention, and what it changed arrives as an Event.
+// answerButton is one answer, sent to the Host that asked. The toast, or the row
+// on screen, keeps it until that Daemon's own Event comes back on the stream: a
+// command is an intention, and what it changed arrives as an Event.
 function answerButton(host, session, id, decision, label) {
   const button = document.createElement("button");
   button.dataset.decision = decision;
@@ -480,7 +480,37 @@ function refold() {
   stateLine.dataset.sessionState = view.state;
   stateLine.textContent = view.reason ? `${view.state} ${view.reason}` : view.state;
   offer(view.state);
+  answers(view);
 }
+
+// answers puts Allow and Refuse on each question of this Session that is still
+// open, and takes them off each one that is not. A question is open while the fold
+// holds it and its Tool Call both, which is the rule a toast comes down on: a
+// decision, the Tool Call ending, or the Session ending.
+function answers(view) {
+  const open = view.held.filter((id) => view.calls.includes(id));
+  for (const seq of order) {
+    const e = events.get(seq);
+    if (e?.kind !== "ApprovalRequested") continue;
+    const id = e.payload?.toolCallId;
+    const row = rows.get(seq);
+    const drawn = row.querySelector(".answer");
+    if (!open.includes(id)) {
+      drawn?.remove();
+    } else if (!drawn) {
+      const line = node("p", "answer", "");
+      line.append(
+        answerButton(host, session, id, "allowed", "Allow"),
+        answerButton(host, session, id, "refused", "Refuse"),
+      );
+      row.append(line);
+    }
+  }
+}
+
+// The first paint drew the rows and not the controls, so a question that was open
+// when the page loaded gets them here.
+answers(foldSession(order.map((seq) => events.get(seq))));
 
 // load reads this Session whole and applies it. Only a resync calls it: the first
 // paint carries its own Events, so nothing is fetched to draw a page that is
