@@ -1,0 +1,248 @@
+<!doctype html>
+<!-- PROTOTYPE, throw away. Not in web.go's embed list, so it never ships.
+     Three variants of the password popup on the Hosts page, switchable via ?variant=A|B|C.
+     Errors are the same red top toasts in every variant.
+     Run: python -m http.server 8099 (from this folder), then open /prototype-registration.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: Host Registration password</title>
+<link rel="stylesheet" href="/page.css">
+<style>
+  /* The popup: one step darker than a card, same squircle. */
+  .secret {
+    background: #0b0910;
+    border: 1px solid var(--rule);
+    border-radius: var(--squircle);
+    corner-shape: squircle;
+    padding: 22px 24px 18px;
+    color: #ede9f4;
+    width: min(26rem, calc(100vw - 2rem));
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  }
+  .secret h2 { margin-bottom: 0.4rem; }
+  .secret .who { margin: 0 0 1rem; font: 400 12px/1.4 var(--mono); letter-spacing: -0.04em; color: var(--mist); }
+  .secret input { width: 100%; }
+  .secret .fine { margin: 0.6rem 0 1.1rem; font-size: 11px; line-height: 1.45; color: var(--mist-dim); }
+  .secret .row-buttons { display: flex; gap: 0.6rem; justify-content: flex-end; }
+  .secret .row-buttons .cancel { background: none; color: var(--mist); border: 1px solid var(--rule); }
+  .secret .row-buttons .cancel:hover { border-color: var(--orchid); color: #ede9f4; box-shadow: none; }
+
+  /* A: centred dialog over a dimmed page. */
+  dialog.shade { margin: auto; padding: 0; border: 0; background: none; overflow: visible; }
+  dialog.shade::backdrop { background: rgba(7, 6, 10, 0.7); backdrop-filter: blur(2px); }
+
+  /* B: popover that rises from the Register button. No dim. */
+  .anchor { position: relative; display: inline-block; }
+  .anchor .secret { position: absolute; left: 0; bottom: calc(100% + 12px); z-index: 5; }
+  .anchor .secret::after {
+    content: ""; position: absolute; left: 32px; bottom: -7px; width: 12px; height: 12px;
+    background: #0b0910; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); transform: rotate(45deg);
+  }
+
+  /* C: covers only the registration card; the rest of the page stays usable. */
+  .card.holding { position: relative; }
+  .card.holding > form { filter: blur(3px); opacity: 0.35; pointer-events: none; }
+  .card .cover { position: absolute; inset: 0; display: grid; place-items: center; border-radius: var(--squircle); }
+
+  /* Errors: pinned to the top, never block the page, each one closes on its own. */
+  .errors {
+    position: fixed; top: 1rem; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 0.5rem;
+    width: min(34rem, calc(100vw - 2rem)); z-index: 20; pointer-events: none;
+  }
+  .error {
+    pointer-events: auto;
+    display: flex; gap: 0.8rem; align-items: flex-start;
+    padding: 13px 14px 13px 18px;
+    background: #2a0f17; border: 1px solid var(--red);
+    border-radius: 18px; corner-shape: squircle;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+    animation: drop 0.18s ease-out;
+  }
+  .error p { flex: 1; margin: 0; font-size: 14px; }
+  .error b { display: block; font: 700 10px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--red); margin-bottom: 0.35rem; }
+  .error button { padding: 4px 9px; border-radius: 99px; background: none; color: #ede9f4; border: 1px solid rgba(212, 83, 107, 0.5); font: 400 13px/1 var(--mono); }
+  .error button:hover { border-color: var(--red); box-shadow: none; }
+  .error.ok { background: #0f2a1d; border-color: var(--green); }
+  .error.ok b { color: var(--green); }
+  .error.ok button { border-color: rgba(79, 190, 135, 0.5); }
+  .error.ok button:hover { border-color: var(--green); }
+  @keyframes drop { from { transform: translateY(-8px); opacity: 0; } }
+
+  /* The prototype switcher. Not part of the design. */
+  .proto {
+    position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 30;
+    display: flex; gap: 0.5rem; align-items: center;
+    padding: 6px 8px; background: #fff; color: #000; border-radius: 99px;
+    font: 700 12px/1 var(--display); box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  }
+  .proto button { padding: 7px 11px; border-radius: 99px; background: #000; color: #fff; font-size: 12px; }
+  .proto label { display: inline-flex; gap: 0.3rem; align-items: center; padding: 0 0.4rem; }
+</style>
+</head>
+<body>
+<main class="machines">
+<header>
+  <h1>Hosts</h1>
+  <p class="meta">This view shows machines. Starting a Session is the wizard's.</p>
+  <p class="actions"><a class="button" href="#">New Session</a></p>
+</header>
+
+<section class="card" id="registration-card">
+  <h2>Register a Host</h2>
+  <form id="host-registration" autocomplete="off">
+    <fieldset class="registration-methods">
+      <legend>How this Client reaches the Host for the first time</legend>
+      <label><input type="radio" name="method" value="code" checked> Registration code and password</label>
+      <label><input type="radio" name="method" value="existing"> An SSH login I already have</label>
+    </fieldset>
+    <div class="registration-field">
+      <label for="registration-host-id">Host ID</label>
+      <input id="registration-host-id" name="id" value="gpu-box">
+    </div>
+    <div class="registration-field">
+      <label for="registration-address">SSH port or address (optional; the code carries one)</label>
+      <input id="registration-address" name="address" placeholder="2222 or 192.168.1.10:2222">
+    </div>
+    <div class="registration-panel" data-method="code">
+      <p class="meta">Start the Daemon on the Host with <code>-host-reg</code>, then scan or paste the code it prints.</p>
+      <div class="registration-field">
+        <label for="registration-code">Registration code</label>
+        <div class="box"><textarea id="registration-code" name="code" rows="3" spellcheck="false">dispatch1:victor@192.168.1.10:22:SHA256:q3Xh…</textarea></div>
+      </div>
+    </div>
+    <div class="registration-field">
+      <label for="registration-user">Account on the Host (optional; the code carries one)</label>
+      <input id="registration-user" name="user">
+    </div>
+    <span class="anchor" id="anchor"><button type="submit">Register Host</button></span>
+    <p id="registration-result" class="meta" role="status" aria-live="polite"></p>
+  </form>
+</section>
+
+<section class="card" data-host="workstation" data-host-state="Ready">
+  <header class="who"><b>workstation</b><span class="pill host" data-host-state="Ready">Ready</span></header>
+  <ul class="gauges">
+    <li><span class="kind">RAM</span><span class="track"></span><span class="meta">not measured yet</span></li>
+    <li><span class="kind">VRAM</span><span class="track"></span><span class="meta">not measured yet</span></li>
+  </ul>
+  <ul class="sessions"><li><a href="#">refactor the parser</a><span class="pill" data-session-state="Idle">Idle</span></li></ul>
+</section>
+</main>
+
+<div class="errors" id="errors" aria-live="assertive"></div>
+
+<template id="secret">
+  <form class="secret" method="dialog">
+    <h2>Password</h2>
+    <p class="who">for <span data-account>victor@192.168.1.10</span></p>
+    <input type="password" name="password" autocomplete="off" aria-label="Password" required>
+    <p class="fine">Dispatch does not save this password. The Hub uses it once to install its own key, then deletes it.</p>
+    <div class="row-buttons">
+      <button type="button" class="cancel">Cancel</button>
+      <button type="submit">Confirm</button>
+    </div>
+  </form>
+</template>
+
+<div class="proto">
+  <button type="button" id="prev">←</button>
+  <span id="label"></span>
+  <button type="button" id="next">→</button>
+  <label><input type="checkbox" id="fail" checked> fail</label>
+</div>
+
+<script>
+const variants = { A: "Centred dialog, dim page", B: "Popover from the button", C: "Covers the card only" };
+const keys = Object.keys(variants);
+const variant = new URLSearchParams(location.search).get("variant") || "A";
+document.getElementById("label").textContent = `${variant} — ${variants[variant]}`;
+const go = (step) => {
+  const next = keys[(keys.indexOf(variant) + step + keys.length) % keys.length];
+  location.search = `?variant=${next}`;
+};
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest("input, textarea, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+});
+
+const errors = document.getElementById("errors");
+const notice = (ok, title, text) => {
+  const box = document.createElement("div");
+  box.className = ok ? "error ok" : "error";
+  box.setAttribute("role", ok ? "status" : "alert");
+  box.innerHTML = `<p><b></b><span></span></p><button type="button" aria-label="Close">×</button>`;
+  box.querySelector("b").textContent = title;
+  box.querySelector("span").textContent = text;
+  box.querySelector("button").onclick = () => box.remove();
+  errors.prepend(box);
+};
+const refusals = [
+  ["Registration failed", "The Host refused the password for victor. Check it and try again."],
+  ["Registration failed", "The Host's SSH key does not match the code. The Hub did not send the password."],
+  ["Registration failed", "No Daemon answered on the Host. Start it with -host-reg and try again."],
+];
+
+const form = document.getElementById("host-registration");
+const result = document.getElementById("registration-result");
+const card = document.getElementById("registration-card");
+
+// Every variant builds the same popup; only where it is mounted differs.
+const ask = () => new Promise((done) => {
+  const popup = document.getElementById("secret").content.firstElementChild.cloneNode(true);
+  let holder = popup;
+  const close = (password) => {
+    popup.password.value = "";
+    if (variant === "A") holder.close();
+    if (variant === "C") card.classList.remove("holding");
+    holder.remove();
+    done(password);
+  };
+  popup.querySelector(".cancel").onclick = () => close(null);
+  popup.addEventListener("submit", (e) => { e.preventDefault(); close(popup.password.value); });
+  popup.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close(null); } });
+
+  if (variant === "A") {
+    holder = document.createElement("dialog");
+    holder.className = "shade";
+    holder.append(popup);
+    holder.addEventListener("cancel", (e) => { e.preventDefault(); close(null); });
+    document.body.append(holder);
+    holder.showModal();
+  }
+  if (variant === "B") document.getElementById("anchor").append(popup);
+  if (variant === "C") {
+    holder = document.createElement("div");
+    holder.className = "cover";
+    holder.append(popup);
+    card.classList.add("holding");
+    card.append(holder);
+  }
+  popup.password.focus();
+});
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const button = form.querySelector("button[type=submit]");
+  if (button.disabled || document.querySelector(".secret")) return;
+  const password = await ask();
+  if (password === null) return;
+  button.disabled = true;
+  result.textContent = "Checking SSH trust, key access and the Daemon. This can take up to 90 seconds.";
+  await new Promise((r) => setTimeout(r, 1200));
+  button.disabled = false;
+  result.textContent = "";
+  if (document.getElementById("fail").checked) {
+    notice(false, ...refusals[Math.floor(Math.random() * refusals.length)]);
+    return;
+  }
+  notice(true, "Done", "Host Registered!");
+});
+</script>
+</body>
+</html>
