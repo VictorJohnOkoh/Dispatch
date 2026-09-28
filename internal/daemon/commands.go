@@ -53,13 +53,20 @@ func (d *Daemon) submitPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sent := make(chan struct{})
+	s.sent = sent
+	d.commanding.Unlock()
+	defer close(sent)
+
 	if err := run.Prompt(r.Context(), req.Text); err != nil {
-		d.boundFailed(s, err)
+		d.commanding.Lock()
+		if !d.sessions.ending(s) {
+			d.boundFailed(s, err)
+		}
 		d.commanding.Unlock()
 		http.Error(w, "the Harness would not take the Prompt", http.StatusInternalServerError)
 		return
 	}
-	d.commanding.Unlock()
 	w.WriteHeader(protocol.StatusAccepted)
 }
 
@@ -84,11 +91,26 @@ func (d *Daemon) boundFailed(s *Session, err error) {
 func (d *Daemon) interrupt(w http.ResponseWriter, r *http.Request) {
 	d.commanding.Lock()
 	s, run, ok := d.allow(w, r, session.Working, session.Asking)
+	var sent <-chan struct{}
 	if ok {
+		sent = s.sent
 		d.refuseHeld(s, event.ByUser)
 	}
 	d.commanding.Unlock()
 	if !ok {
+		return
+	}
+	// Interrupt must follow Prompt registration. Stop never waits for this send:
+	// closing the Harness's stdin is how it releases a blocked writer.
+	if sent != nil {
+		select {
+		case <-sent:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	if d.sessions.ending(s) {
+		w.WriteHeader(protocol.StatusAccepted)
 		return
 	}
 
@@ -282,6 +304,17 @@ func (d *Daemon) allow(w http.ResponseWriter, r *http.Request, states ...session
 	id := event.SessionID(r.PathValue("session"))
 	s, run, state := d.sessions.find(id)
 	if s == nil {
+		exists, err := d.events.HasSession(id)
+		if err != nil {
+			http.Error(w, "the Event log could not be read", http.StatusInternalServerError)
+			return nil, nil, false
+		}
+		if exists {
+			refuse(w, protocol.StatusConflict, protocol.Refusal{
+				Reason: protocol.ReasonState, Detail: "the Session is Ended",
+			})
+			return nil, nil, false
+		}
 		refuse(w, protocol.StatusNoSession, protocol.Refusal{
 			Reason: protocol.ReasonUnknownSession,
 			Detail: fmt.Sprintf("this Host has no Session %q", id),

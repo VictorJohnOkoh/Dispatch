@@ -35,9 +35,11 @@ func (d *Daemon) approve(ctx context.Context, s *Session, id, title, detail stri
 
 	switch rule {
 	case event.RuleAuto:
-		d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
+		if _, err := d.write(s, event.KindApprovalDecided, &event.ApprovalDecided{
 			ToolCallID: id, Decision: event.DecisionAllowed, By: event.ByPolicy,
-		})
+		}); err != nil {
+			return event.DecisionRefused, err
+		}
 		return event.DecisionAllowed, nil
 
 	case event.RuleRefuse:

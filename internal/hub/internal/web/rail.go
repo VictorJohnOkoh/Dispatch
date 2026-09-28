@@ -88,12 +88,11 @@ type sessionRow struct {
 //
 // A Host that stops answering keeps its Sessions, drawn as the last read left
 // them and stamped with when that read happened, which is CONTEXT.md's Stale.
-//
-// One thing this owes and does not yet have: a Daemon answers the Session list
-// from its registry, which is memory, so a Daemon that restarted lists none of the
-// Sessions its log still holds. That waits on the Hub's four Host States.
 func (c *client) rail(ctx context.Context, host, id string) []entry {
-	hosts := c.hosts.All()
+	return c.railOn(ctx, host, id, c.hosts.All())
+}
+
+func (c *client) railOn(ctx context.Context, host, id string, hosts []string) []entry {
 	found := make([][]entry, len(hosts))
 
 	var reading sync.WaitGroup

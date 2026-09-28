@@ -32,6 +32,9 @@ const events = new Map();
 // and the page draws rows in it, so the order is kept as they arrive rather than
 // sorted again on every Event.
 const order = [];
+let sessionFold = newSessionFold();
+let foldDirty = true;
+let answersDirty = true;
 
 // generation counts the times this page has thrown away what it held. A load that
 // started before a resync belongs to a page that no longer exists, so it stops
@@ -87,13 +90,13 @@ stream.addEventListener("event", (frame) => {
   // gets from an Event is that it has changed.
   if (f.host !== host || f.session !== session) {
     ask(f);
-    redrawRail();
+    if (railChanges(f.kind)) redrawRail(f.host);
     return;
   }
   if (reload) reload.frames.push({ name: "event", frame: f });
   apply(f);
   refold();
-  redrawRail();
+  if (railChanges(f.kind)) redrawRail(f.host);
 });
 
 // The toast, and it is load-bearing. This layout hides every Session but the one
@@ -323,37 +326,42 @@ function takeDown(at) {
 // holds no history for a Session it is not drawing, and a fold over the tail of
 // one would be a guess.
 const rail = document.getElementById("rail");
-let redrawing = false;
-let again = false;
+const railReading = new Set();
+const railPending = new Set();
 
-async function redrawRail() {
-  // One redraw at a time, and one more if the stream spoke while it ran. A busy
-  // Host would otherwise put a read in flight for every Delta of every message.
-  if (redrawing) {
-    again = true;
-    return;
-  }
-  redrawing = true;
+function railChanges(kind) {
+  return ["SessionStarted", "SessionReady", "PromptSubmitted", "PromptCompleted",
+    "ApprovalRequested", "ApprovalDecided", "SessionEnded"].includes(kind);
+}
+
+async function redrawRail(changed) {
+  railPending.add(changed);
+  if (railReading.has(changed)) return;
+  railReading.add(changed);
   try {
-    const resp = await fetch(`/rail/${encodeURIComponent(host)}/${encodeURIComponent(session)}`);
-    if (resp.ok) drawRail((await resp.json()).rail ?? []);
-  } finally {
-    redrawing = false;
-    if (again) {
-      again = false;
-      redrawRail();
+    while (railPending.delete(changed)) {
+      try {
+        const resp = await fetch(`/rail/${encodeURIComponent(host)}/${encodeURIComponent(session)}?changed=${encodeURIComponent(changed)}`);
+        if (resp.ok) drawRail((await resp.json()).rail ?? [], changed);
+      } catch {
+        // Keep the rows already shown. A later Event can retry this Host.
+      }
     }
+  } finally {
+    railReading.delete(changed);
   }
 }
 
 // drawRail replaces the rail's rows, matching page.html's shape element for
 // element, the way render() matches its rows.
-function drawRail(entries) {
-  const drawn = [];
+function drawRail(entries, changed) {
+  const drawn = changed ? [...rail.children].filter((row) => row.dataset.host !== changed) : [];
   for (const e of entries) {
     const row = document.createElement(e.Session ? "a" : "p");
     row.className = "rrow" + (e.On ? " on" : "") + (e.Answering ? "" : " stale") + (e.Session ? "" : " empty");
     row.dataset.host = e.Host;
+    row.dataset.answering = String(e.Answering);
+    row.dataset.state = e.SessionState ?? "";
     if (e.Session) {
       row.dataset.sessionRow = e.Session;
       row.href = `/hosts/${encodeURIComponent(e.Host)}/sessions/${encodeURIComponent(e.Session)}`;
@@ -370,7 +378,14 @@ function drawRail(entries) {
     row.append(answering);
     drawn.push(row);
   }
+  if (changed) drawn.sort((a, b) => railUrgency(a) - railUrgency(b));
   rail.replaceChildren(...drawn);
+}
+
+function railUrgency(row) {
+  const states = ["Asking", "Working", "Starting", "Idle", "Ended"];
+  const at = states.indexOf((row.dataset.state ?? "").split(" ")[0]);
+  return (row.dataset.answering === "true" ? 0 : states.length + 1) + (at < 0 ? states.length : at);
 }
 
 // named is the rail's label for one Session: the name typed in this browser, or
@@ -433,6 +448,16 @@ function keepUp(was) {
 // put where its Sequence Number belongs, because a refetch that lands behind a
 // live Event would otherwise draw the transcript out of order.
 function apply(f) {
+  const previous = events.get(f.seq);
+  const answerKinds = ["ApprovalRequested", "ApprovalDecided", "ToolCallRequested", "ToolCallEnded", "SessionEnded"];
+  if (answerKinds.includes(f.kind) || answerKinds.includes(previous?.kind)) answersDirty = true;
+  if (FOLD_RULES[f.kind] || FOLD_RULES[previous?.kind]) {
+    if (!previous && (order.length === 0 || f.seq > order[order.length - 1])) {
+      if (!foldDirty) sessionFold.apply(f);
+    } else if (!previous || previous.kind !== f.kind || JSON.stringify(previous.payload) !== JSON.stringify(f.payload)) {
+      foldDirty = true;
+    }
+  }
   const end = atTheEnd();
   const el = render(f.seq, f.kind, draw(f.kind, f.payload));
   const old = rows.get(f.seq);
@@ -476,11 +501,19 @@ function at(seq) {
 // Client folding rather than asking the Hub what the Session is doing.
 
 function refold() {
-  const view = foldSession(order.map((seq) => events.get(seq)));
+  if (foldDirty) {
+    sessionFold = newSessionFold();
+    for (const seq of order) sessionFold.apply(events.get(seq));
+    foldDirty = false;
+  }
+  const view = sessionFold.result();
   stateLine.dataset.sessionState = view.state;
   stateLine.textContent = view.reason ? `${view.state} ${view.reason}` : view.state;
   offer(view.state);
-  answers(view);
+  if (answersDirty) {
+    answers(view);
+    answersDirty = false;
+  }
 }
 
 // answers puts Allow and Refuse on each question of this Session that is still
@@ -511,6 +544,7 @@ function answers(view) {
 // The first paint drew the rows and not the controls, so a question that was open
 // when the page loaded gets them here.
 answers(foldSession(order.map((seq) => events.get(seq))));
+answersDirty = false;
 
 // load reads this Session whole and applies it. Only a resync calls it: the first
 // paint carries its own Events, so nothing is fetched to draw a page that is
@@ -557,6 +591,9 @@ function commitReload(mine, fresh) {
 // replaceTranscript commits a completed resync. Until every page has arrived,
 // the person keeps the transcript they already had.
 function replaceTranscript(fresh) {
+  sessionFold = newSessionFold();
+  foldDirty = false;
+  answersDirty = true;
   rows.clear();
   held.clear();
   events.clear();
@@ -599,6 +636,7 @@ stream.addEventListener("resync", (frame) => {
   // A Resync invalidates only one Host's log. Questions from every other Host
   // still describe facts that remain valid.
   const changed = f.host ?? host;
+  redrawRail(changed);
   for (const [at, toast] of asking) {
     if (toast.dataset.host === changed) takeDown(at);
   }

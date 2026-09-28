@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
+	"github.com/VictorJohnOkoh/Dispatch/internal/harness"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
 )
 
@@ -92,6 +93,62 @@ data: {"choices":[{"delta":{"content":"llo"}}]}
 `
 
 const promptBody = `{"text":"hello"}`
+
+type blockedPrompt struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (a *blockedPrompt) Capabilities() harness.Capabilities { return harness.Capabilities{} }
+func (a *blockedPrompt) Start(context.Context, harness.SessionSpec, harness.Sink) (harness.Run, error) {
+	return a, nil
+}
+func (a *blockedPrompt) Prompt(context.Context, string) error {
+	close(a.entered)
+	<-a.release
+	return errors.New("stdin closed")
+}
+func (a *blockedPrompt) Interrupt(context.Context) error { return nil }
+func (a *blockedPrompt) Close() error {
+	a.once.Do(func() { close(a.release) })
+	return nil
+}
+
+func TestStopCanReleaseABlockedPromptWrite(t *testing.T) {
+	a := &blockedPrompt{entered: make(chan struct{}), release: make(chan struct{})}
+	defer a.Close()
+	h := newHost(t, Harness{Name: "blocked", Adapter: a})
+	id := h.started(t, h.post(t, "/v1/sessions", `{"harness":"blocked","model":"qwen3:8b"}`)).Session
+	h.waitState(t, id, "Idle")
+	path := "/v1/sessions/" + string(id)
+	promptDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { promptDone <- h.post(t, path+"/prompts", promptBody) }()
+	<-a.entered
+	stopDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { stopDone <- h.post(t, path+"/stop", "") }()
+	select {
+	case w := <-stopDone:
+		if w.Code != protocol.StatusAccepted {
+			t.Fatalf("stop: %d: %s", w.Code, w.Body.String())
+		}
+	case <-time.After(time.Second):
+		a.Close()
+		<-promptDone
+		<-stopDone
+		t.Fatal("Stop waited for the blocked Prompt instead of releasing it")
+	}
+	<-promptDone
+	events := h.page(t, path+"/events")
+	for _, e := range events {
+		if e.Kind == "PromptCompleted" || e.Kind == "Error" {
+			t.Errorf("stopping a blocked Prompt wrote %s", e.Kind)
+		}
+	}
+	if events[len(events)-1].Kind != "SessionEnded" {
+		t.Fatal("SessionEnded was not the last Event")
+	}
+}
 
 // idle starts a Session and waits for it to be ready to take a Prompt.
 func (h *host) idle(t *testing.T) event.SessionID {
