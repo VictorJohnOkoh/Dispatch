@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"unicode/utf16"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
@@ -69,12 +70,23 @@ type Frame struct {
 }
 
 // openMessage is one appendable Event whose text is still arriving. The text is
-// held here, and stored is how much of it the row holds.
+// held here, and stored is how much of it the row holds. units is the text's
+// length as a Delta's N counts it, kept here so no Delta counts the whole text.
 type openMessage struct {
 	session event.SessionID
 	kind    event.Kind
 	text    []byte
 	stored  int
+	units   int
+}
+
+// utf16Len is how many UTF-16 code units s is.
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
 }
 
 // payload builds the row's payload from the text held so far. Only the two Kinds
@@ -214,7 +226,7 @@ func (l *Log) Append(e event.Event) (event.Event, error) {
 
 	text, isOpen := openingText(e)
 	if isOpen {
-		l.open[e.Seq] = &openMessage{session: e.Session, kind: e.Kind, text: []byte(text), stored: len(text)}
+		l.open[e.Seq] = &openMessage{session: e.Session, kind: e.Kind, text: []byte(text), stored: len(text), units: utf16Len(text)}
 	}
 	l.publish(Frame{Event: &e, Open: isOpen})
 
@@ -242,18 +254,19 @@ func (l *Log) AppendText(seq uint64, text string, final bool) (protocol.Delta, e
 		return protocol.Delta{}, fmt.Errorf("eventlog: append text: no open message at %d", seq)
 	}
 
-	before := len(message.text)
-	delta := protocol.Delta{Seq: seq, N: before, Text: text, Final: final}
+	before, unitsBefore := len(message.text), message.units
+	delta := protocol.Delta{Seq: seq, N: unitsBefore, Text: text, Final: final}
 	message.text = append(message.text, text...)
+	message.units += utf16Len(text)
 	if final {
-		delta.N, delta.Text = len(message.text), string(message.text)
+		delta.N, delta.Text = message.units, string(message.text)
 	}
 
 	if final || len(message.text)-message.stored >= FlushThreshold {
 		if err := l.store(seq, message, final); err != nil {
 			// The message stays open, and stays as long as it was, so the
 			// caller may send this text again.
-			message.text = message.text[:before]
+			message.text, message.units = message.text[:before], unitsBefore
 			return protocol.Delta{}, err
 		}
 	}
