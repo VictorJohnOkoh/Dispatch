@@ -48,11 +48,6 @@
           <p id="registration-scan-result" role="status" aria-live="polite"></p>
         </div>
       </div>
-      <div class="registration-field">
-        <label for="registration-password">Password of the account the code names</label>
-        <input id="registration-password" name="password" type="password" autocomplete="off">
-      </div>
-      <p class="meta">The Hub checks the Host's SSH key against the code before it sends the password. It uses the password once to install its own key, and it does not save it.</p>
     </div>
 
     <div class="registration-panel" data-method="account">
@@ -74,6 +69,20 @@
     <p id="registration-result" role="status" aria-live="polite"></p>
   </form>
 </section>
+
+<dialog id="registration-secret" class="secret" aria-labelledby="registration-secret-title">
+  <form method="dialog" autocomplete="off">
+    <h2 id="registration-secret-title">Password</h2>
+    <p class="who" id="registration-secret-who"></p>
+    <input id="registration-password" name="password" type="password" required autocomplete="off" aria-label="Password">
+    <p class="fine">Dispatch does not save this password. The Hub uses it once to install its own key, then deletes it.</p>
+    <p class="secret-actions">
+      <button type="button" class="cancel" id="registration-secret-cancel">Cancel</button>
+      <button type="submit">Confirm</button>
+    </p>
+  </form>
+</dialog>
+<div class="notices" id="notices"></div>
 <script src="/registration.js" defer></script>
 
 {{- range .Cards}}

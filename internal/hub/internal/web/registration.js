@@ -1,9 +1,33 @@
+// Notices sit at the top of the page and never block it. Each one stays until
+// the human closes it, so a failure that took 90 seconds is not missed.
+const notices = document.getElementById("notices");
+const notify = (ok, title, text) => {
+  const notice = document.createElement("div");
+  notice.className = ok ? "notice ok" : "notice";
+  notice.setAttribute("role", ok ? "status" : "alert");
+  notice.innerHTML = `<p><b></b><span></span></p><button type="button" aria-label="Close">×</button>`;
+  notice.querySelector("b").textContent = title;
+  notice.querySelector("span").textContent = text;
+  notice.querySelector("button").addEventListener("click", () => notice.remove());
+  notices.prepend(notice);
+};
+
+// A success reloads the page to draw the new Host's card, and the reload would
+// wipe a notice shown before it, so the notice is carried across in the tab.
+if (sessionStorage.getItem("registered")) {
+  sessionStorage.removeItem("registered");
+  notify(true, "Done", "Host Registered!");
+}
+
 const registrationForm = document.getElementById("host-registration");
 if (registrationForm) {
   const result = document.getElementById("registration-result");
   const fields = registrationForm.elements;
   const panels = registrationForm.querySelectorAll(".registration-panel");
   const addressLabel = document.getElementById("registration-address-label");
+  const secret = document.getElementById("registration-secret");
+  const password = document.getElementById("registration-password");
+  const who = document.getElementById("registration-secret-who");
 
   const userLabel = document.getElementById("registration-user-label");
 
@@ -15,10 +39,10 @@ if (registrationForm) {
     existing: ["account", "existing"],
   };
   const needed = {
-    code: ["code", "password"],
+    code: ["code"],
     existing: ["address", "user", "daemonPort"],
   };
-  const every = ["code", "address", "user", "daemonPort", "password"];
+  const every = ["code", "address", "user", "daemonPort"];
 
   const chosen = () => fields.method.value;
 
@@ -34,14 +58,33 @@ if (registrationForm) {
       : "Account on the Host";
   };
 
-  const body = () => {
+  const body = (typed) => {
     const method = chosen();
     const shared = { id: fields.id.value.trim(), address: fields.address.value.trim(), user: fields.user.value.trim() };
-    if (method === "code") return { ...shared, code: fields.code.value.trim(), password: fields.password.value };
+    if (method === "code") return { ...shared, code: fields.code.value.trim(), password: typed };
     return { ...shared, method, daemonPort: Number(fields.daemonPort.value) };
   };
 
-  const forget = () => { fields.code.value = ""; fields.password.value = ""; };
+  const forget = () => { fields.code.value = ""; password.value = ""; };
+
+  // Resolves with the typed password, or null when the human cancels. The box
+  // is emptied before the dialog closes, so the password lives only in the
+  // request that carries it.
+  const ask = () => new Promise((done) => {
+    const user = fields.user.value.trim();
+    who.textContent = user ? `for ${user}` : "for the account the code names";
+    const finish = (typed) => {
+      password.value = "";
+      secret.close();
+      done(typed);
+    };
+    const confirm = (event) => { event.preventDefault(); finish(password.value); };
+    const cancel = (event) => { event.preventDefault(); finish(null); };
+    secret.querySelector("form").onsubmit = confirm;
+    document.getElementById("registration-secret-cancel").onclick = cancel;
+    secret.oncancel = cancel;
+    secret.showModal();
+  });
 
   registrationForm.querySelectorAll("input[name=method]").forEach((radio) => radio.addEventListener("change", show));
   show();
@@ -50,7 +93,9 @@ if (registrationForm) {
     event.preventDefault();
     const button = registrationForm.querySelector("button[type=submit]");
     if (button.disabled) return;
-    const input = body();
+    const typed = chosen() === "code" ? await ask() : "";
+    if (typed === null) return;
+    const input = body(typed);
     forget();
     button.disabled = true;
     result.textContent = "Checking SSH trust, key access and the Daemon. This can take up to 90 seconds.";
@@ -64,16 +109,17 @@ if (registrationForm) {
       input.code = "";
       input.password = "";
       if (!response.ok) {
-        result.textContent = await response.text();
+        notify(false, "Registration failed", await response.text());
         return;
       }
-      result.textContent = "Host registered.";
+      sessionStorage.setItem("registered", "1");
       window.location.reload();
     } catch {
-      result.textContent = "The Hub reply was lost. Check the Hosts list before trying again.";
+      notify(false, "Registration failed", "The Hub reply was lost. Check the Hosts list before trying again.");
     } finally {
       input.code = "";
       input.password = "";
+      result.textContent = "";
       button.disabled = false;
     }
   });
