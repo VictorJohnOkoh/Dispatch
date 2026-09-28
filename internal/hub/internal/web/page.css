@@ -449,6 +449,8 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 .row[data-tone="bad"] { border-left-color: var(--red); }
 .row[data-tone="unknown"] { border-left-color: var(--mist-dim); }
 .row[data-tone="asking"] { border-left-color: var(--amber); }
+.row .answer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.5rem 0 0; }
+.row .answer button { padding: 9px 13px; font-size: 12px; border-radius: 13px; }
 
 /* The composer. It is the only way to say anything to a Session, so it sticks to
    the bottom of the window rather than sitting under the last row: a long
