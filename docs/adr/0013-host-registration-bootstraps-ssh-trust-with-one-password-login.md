@@ -41,12 +41,16 @@ address.
    checks the Hub's managed trust file, the user's known_hosts and every configured trust file for
    a conflicting line. It runs before authentication, so a wrong Host never receives the password.
    The Hub offers password and keyboard-interactive authentication with the same password.
-3. Over that login the Hub asks which file OpenSSH reads. Only Windows answers `whoami /groups`.
-   Output that holds `S-1-5-32-544` is an administrator, and the file is
+3. Over that login the Hub runs Windows `whoami.exe /groups` through PowerShell. The command uses
+   the full Windows executable path and `-EncodedCommand` so it also works when SSH starts Git Bash.
+   Output that holds `S-1-5-32-544`
+   identifies an administrator, and the file is
    `C:\ProgramData\ssh\administrators_authorized_keys`. Every other login uses the account's own
    `~/.ssh/authorized_keys`, and the Hub makes `.ssh` when it is not there.
 4. The Hub writes its line over SFTP. For an administrator it then sets the ACL that OpenSSH
    requires, SYSTEM and Administrators only, by SID so that a translated group name does not matter.
+   This command also runs through encoded PowerShell, which preserves Windows arguments and reports
+   the exit code from `icacls`.
 5. The Hub opens a second connection with its own key, and runs the normal Handshake through the
    tunnel to the Daemon.
 6. The Hub trusts the Host key in its known_hosts, saves `hub.json`, and attaches the Host to the
@@ -95,8 +99,8 @@ elevation does not have those rights and gets no warning. A standard account is 
 install guide says so. Domain and Entra ID accounts are not supported.
 
 The file the Hub writes depends on group membership, not on elevation, because that is how
-OpenSSH's default `Match Group administrators` rule decides. `whoami /groups` lists the group for a
-filtered token too, marked as used for deny only.
+OpenSSH's default `Match Group administrators` rule decides. Windows `whoami.exe /groups` includes
+the group for a filtered token too, even when it is used for deny only.
 
 ## The existing-login way
 

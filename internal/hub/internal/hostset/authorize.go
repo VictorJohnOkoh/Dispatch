@@ -2,6 +2,8 @@ package hostset
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -18,13 +21,14 @@ import (
 // Administrators. It ignores the account's own authorized_keys for them.
 var adminKeys = "/C:/ProgramData/ssh/administrators_authorized_keys"
 
-// administratorsSID is the built-in Administrators group. whoami prints the SID
-// in every Windows language, and the group name is translated.
+// administratorsSID is the built-in Administrators group in every Windows language.
 const administratorsSID = "S-1-5-32-544"
+
+const accountGroups = `& "$env:SystemRoot\System32\whoami.exe" /groups; exit $LASTEXITCODE`
 
 // adminACL is the ACL OpenSSH requires on adminKeys: SYSTEM and Administrators
 // only, named by SID for the same reason.
-const adminACL = `icacls "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant *S-1-5-18:F /grant *S-1-5-32-544:F`
+const adminACL = `icacls "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant *S-1-5-18:F /grant *S-1-5-32-544:F; exit $LASTEXITCODE`
 
 // authorizedKeysLimit bounds the file this reads back. authorized_keys holds a
 // handful of lines, and a Host is not trusted to send a small one.
@@ -69,7 +73,7 @@ func authorize(ctx context.Context, client *ssh.Client, remote *sftp.Client, key
 		return writeRemote(remote, name, before)
 	}
 	if admin {
-		if err := run(ctx, client, adminACL); err != nil {
+		if err := run(ctx, client, powershellCommand(adminACL)); err != nil {
 			return nil, errors.Join(fmt.Errorf("setting the ACL on %s: %w", name, err), undo())
 		}
 	}
@@ -104,10 +108,10 @@ func sameKey(line string, key ssh.PublicKey) bool {
 	return err == nil && string(have.Marshal()) == string(key.Marshal())
 }
 
-// keysFile asks the Host which file OpenSSH reads for this login. Only Windows
-// answers whoami /groups, and only an administrator lists the group's SID.
+// keysFile checks Windows group membership even when SSH starts Git Bash.
+// A filtered administrator token still lists the group's SID.
 func keysFile(ctx context.Context, client *ssh.Client, remote *sftp.Client) (string, bool, error) {
-	if groups, err := output(ctx, client, "whoami /groups"); err == nil && strings.Contains(groups, administratorsSID) {
+	if groups, err := output(ctx, client, powershellCommand(accountGroups)); err == nil && strings.Contains(groups, administratorsSID) {
 		return adminKeys, true, nil
 	}
 	home, err := remote.Getwd()
@@ -122,6 +126,15 @@ func keysFile(ctx context.Context, client *ssh.Client, remote *sftp.Client) (str
 	// directory inherits, so a refusal here is not a failure.
 	_ = remote.Chmod(dir, 0o700)
 	return path.Join(dir, "authorized_keys"), false, nil
+}
+
+// Encoding keeps the SSH shell from changing Windows arguments or quoting.
+func powershellCommand(script string) string {
+	var encoded []byte
+	for _, unit := range utf16.Encode([]rune(script)) {
+		encoded = binary.LittleEndian.AppendUint16(encoded, unit)
+	}
+	return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(encoded)
 }
 
 func readRemote(remote *sftp.Client, name string) (string, error) {

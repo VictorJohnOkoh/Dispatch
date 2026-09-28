@@ -44,9 +44,10 @@ type testHost struct {
 }
 
 type hostOptions struct {
-	admin    bool // whoami /groups lists Administrators
+	admin    bool // Windows group membership includes Administrators
 	upgrade  bool // the Daemon answers 426
-	unixHost bool // whoami /groups fails, as it does off Windows
+	unixHost bool // Windows PowerShell is unavailable
+	gitBash  bool // Windows SSH starts Git Bash instead of cmd.exe
 }
 
 func newTestHost(t *testing.T, opt hostOptions) *testHost {
@@ -201,14 +202,22 @@ func (h *testHost) session(next ssh.NewChannel, home string, opt hostOptions) {
 			h.commands = append(h.commands, payload.Text)
 			h.mu.Unlock()
 			status := uint32(0)
+			command := payload.Text
+			powershell := strings.HasPrefix(command, "powershell.exe ")
+			if powershell {
+				command = decodeCommand(command)
+			}
 			switch {
-			case payload.Text == "whoami /groups" && opt.admin:
-				io.WriteString(channel, "BUILTIN\\Administrators  Alias  S-1-5-32-544  Mandatory group, Enabled group\r\n")
-			case payload.Text == "whoami /groups" && opt.unixHost:
+			case powershell && opt.unixHost:
+				status = 127
+			case payload.Text == "whoami /groups" && opt.gitBash:
+				io.WriteString(channel.Stderr(), "whoami: extra operand '/groups'\n")
 				status = 1
-			case payload.Text == "whoami /groups":
+			case command == `& "$env:SystemRoot\System32\whoami.exe" /groups; exit $LASTEXITCODE` && opt.admin:
+				io.WriteString(channel, "BUILTIN\\Administrators  Alias  S-1-5-32-544  Mandatory group, Enabled group\r\n")
+			case command == `& "$env:SystemRoot\System32\whoami.exe" /groups; exit $LASTEXITCODE`:
 				io.WriteString(channel, "BUILTIN\\Users  Alias  S-1-5-32-545  Mandatory group, Enabled group\r\n")
-			case strings.HasPrefix(payload.Text, "icacls "):
+			case strings.HasPrefix(command, "icacls ") && (!opt.gitBash || powershell):
 			default:
 				status = 127
 			}
@@ -427,11 +436,24 @@ func TestAnAdministratorGetsTheAdministratorsFileAndItsACL(t *testing.T) {
 	}
 	acl := false
 	for _, command := range h.commands {
+		command = decodeCommand(command)
 		acl = acl || (strings.HasPrefix(command, "icacls ") && strings.Contains(command, "*S-1-5-18:F") && strings.Contains(command, "*S-1-5-32-544:F") && strings.Contains(command, "/inheritance:r"))
 	}
 	if !acl {
 		t.Fatalf("no ACL for SYSTEM and Administrators was set; commands: %q", h.commands)
 	}
+}
+
+func TestAnAdministratorUsingGitBashCanRegister(t *testing.T) {
+	h := newTestHost(t, hostOptions{admin: true, gitBash: true})
+	saved, err := register(t, h, hostPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readHostFile(t, h.userKeys); got != "" {
+		t.Fatalf("the account's own authorized_keys was written: %q", got)
+	}
+	connectRegisteredHost(t, saved)
 }
 
 func TestAHostOffWindowsUsesTheAccountsOwnFile(t *testing.T) {
