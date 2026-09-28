@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,5 +256,34 @@ func TestCloseFlushesAnOpenMessage(t *testing.T) {
 	text, complete := storedMessage(t, path, opened.Seq)
 	if text != "half a " || complete {
 		t.Errorf("row after Close = %q, complete %v, want %q and open", text, complete, "half a ")
+	}
+}
+
+// N counts UTF-16 code units, which is what the Client's string counts. "é" is
+// one unit and two bytes, and "😀" is two units and four bytes, so a byte count
+// would put every N after the first past where the Client's text ends.
+func TestDeltaNCountsUTF16CodeUnits(t *testing.T) {
+	log := openLog(t, tempPath(t))
+
+	opened, err := log.Append(openMessageEvent(event.KindAssistantMessage))
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	var got []int
+	for _, piece := range []string{"héllo ", "😀 ", "wörld"} {
+		d, err := log.AppendText(opened.Seq, piece, false)
+		if err != nil {
+			t.Fatalf("AppendText: %v", err)
+		}
+		got = append(got, d.N)
+	}
+	final, err := log.AppendText(opened.Seq, "", true)
+	if err != nil {
+		t.Fatalf("AppendText final: %v", err)
+	}
+	got = append(got, final.N)
+
+	if want := []int{0, 6, 9, 14}; !slices.Equal(got, want) {
+		t.Errorf("Delta N = %v, want %v", got, want)
 	}
 }
