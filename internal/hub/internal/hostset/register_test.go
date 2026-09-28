@@ -1,7 +1,9 @@
 package hostset_test
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/hub/internal/hostset"
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
@@ -31,6 +34,7 @@ const hostPassword = "correct horse"
 type testHost struct {
 	req      hostset.Registration
 	key      ssh.PublicKey
+	ecdsaKey ssh.PublicKey
 	keys     string // the file OpenSSH reads for this account
 	userKeys string
 
@@ -40,9 +44,10 @@ type testHost struct {
 }
 
 type hostOptions struct {
-	admin    bool // whoami /groups lists Administrators
+	admin    bool // Windows group membership includes Administrators
 	upgrade  bool // the Daemon answers 426
-	unixHost bool // whoami /groups fails, as it does off Windows
+	unixHost bool // Windows PowerShell is unavailable
+	gitBash  bool // Windows SSH starts Git Bash instead of cmd.exe
 }
 
 func newTestHost(t *testing.T, opt hostOptions) *testHost {
@@ -96,6 +101,17 @@ func newTestHost(t *testing.T, opt hostOptions) *testHost {
 		},
 	}
 	config.AddHostKey(hostSigner)
+	// OpenSSH offers several Host keys; registration must keep using the trusted one.
+	ecdsaPrivate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecdsaSigner, err := ssh.NewSignerFromKey(ecdsaPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.AddHostKey(ecdsaSigner)
+	h.ecdsaKey = ecdsaSigner.PublicKey()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -186,14 +202,22 @@ func (h *testHost) session(next ssh.NewChannel, home string, opt hostOptions) {
 			h.commands = append(h.commands, payload.Text)
 			h.mu.Unlock()
 			status := uint32(0)
+			command := payload.Text
+			powershell := strings.HasPrefix(command, "powershell.exe ")
+			if powershell {
+				command = decodeCommand(command)
+			}
 			switch {
-			case payload.Text == "whoami /groups" && opt.admin:
-				io.WriteString(channel, "BUILTIN\\Administrators  Alias  S-1-5-32-544  Mandatory group, Enabled group\r\n")
-			case payload.Text == "whoami /groups" && opt.unixHost:
+			case powershell && opt.unixHost:
+				status = 127
+			case payload.Text == "whoami /groups" && opt.gitBash:
+				io.WriteString(channel.Stderr(), "whoami: extra operand '/groups'\n")
 				status = 1
-			case payload.Text == "whoami /groups":
+			case command == `& "$env:SystemRoot\System32\whoami.exe" /groups; exit $LASTEXITCODE` && opt.admin:
+				io.WriteString(channel, "BUILTIN\\Administrators  Alias  S-1-5-32-544  Mandatory group, Enabled group\r\n")
+			case command == `& "$env:SystemRoot\System32\whoami.exe" /groups; exit $LASTEXITCODE`:
 				io.WriteString(channel, "BUILTIN\\Users  Alias  S-1-5-32-545  Mandatory group, Enabled group\r\n")
-			case strings.HasPrefix(payload.Text, "icacls "):
+			case strings.HasPrefix(command, "icacls ") && (!opt.gitBash || powershell):
 			default:
 				status = 127
 			}
@@ -307,6 +331,24 @@ func TestACodeAndPasswordInstallTheRestrictedHubKey(t *testing.T) {
 	if err := check(h.req.Address, address, h.key); err != nil {
 		t.Fatal("the Host was not trusted", err)
 	}
+	connectRegisteredHost(t, saved)
+}
+
+func connectRegisteredHost(t *testing.T, saved hostset.Registered) {
+	t.Helper()
+	dialer, err := hostset.NewSSHDialer([]hostset.SSHProfile{{
+		ID: saved.ID, Address: saved.Address, User: saved.User,
+		KeyPath: saved.KeyPath, KnownHosts: saved.KnownHosts, DaemonPort: saved.DaemonPort,
+	}}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dialer.Close()
+	conn, err := dialer.Dial(t.Context(), saved.ID)
+	if err != nil {
+		t.Fatalf("connecting after registration: %v", err)
+	}
+	conn.Close()
 }
 
 func TestAWrongFingerprintSendsNoPassword(t *testing.T) {
@@ -394,11 +436,24 @@ func TestAnAdministratorGetsTheAdministratorsFileAndItsACL(t *testing.T) {
 	}
 	acl := false
 	for _, command := range h.commands {
+		command = decodeCommand(command)
 		acl = acl || (strings.HasPrefix(command, "icacls ") && strings.Contains(command, "*S-1-5-18:F") && strings.Contains(command, "*S-1-5-32-544:F") && strings.Contains(command, "/inheritance:r"))
 	}
 	if !acl {
 		t.Fatalf("no ACL for SYSTEM and Administrators was set; commands: %q", h.commands)
 	}
+}
+
+func TestAnAdministratorUsingGitBashCanRegister(t *testing.T) {
+	h := newTestHost(t, hostOptions{admin: true, gitBash: true})
+	saved, err := register(t, h, hostPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readHostFile(t, h.userKeys); got != "" {
+		t.Fatalf("the account's own authorized_keys was written: %q", got)
+	}
+	connectRegisteredHost(t, saved)
 }
 
 func TestAHostOffWindowsUsesTheAccountsOwnFile(t *testing.T) {
@@ -461,5 +516,31 @@ func TestAnExistingLoginInstallsTheRestrictedHubKey(t *testing.T) {
 	}
 	if got := readHostFile(t, h.keys); got != restrictedLine(hubKey(t, saved), h.req.DaemonPort)+"\n" {
 		t.Fatalf("administrators_authorized_keys = %q", got)
+	}
+	connectRegisteredHost(t, saved)
+}
+
+func TestAnExistingLoginKeepsTheTrustedKeyType(t *testing.T) {
+	for _, keyType := range []string{"ed25519", "ecdsa"} {
+		t.Run(keyType, func(t *testing.T) {
+			h := newTestHost(t, hostOptions{})
+			trusted, unrelated := h.key, h.ecdsaKey
+			if keyType == "ecdsa" {
+				trusted, unrelated = h.ecdsaKey, h.key
+			}
+			known := filepath.Join(t.TempDir(), "known_hosts")
+			address := knownhosts.HashHostname(knownhosts.Normalize(h.req.Address))
+			writeHostFile(t, known, knownhosts.Line([]string{"another-host"}, unrelated)+"\n"+
+				address+" "+strings.TrimSpace(string(ssh.MarshalAuthorizedKey(trusted)))+"\n")
+			login := hostset.Login{Auth: []ssh.AuthMethod{ssh.Password(hostPassword)}, Known: []string{known}}
+			var saved hostset.Registered
+			if err := hostset.RegisterLogin(t.Context(), h.req, login, func(host hostset.Registered) error {
+				saved = host
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			connectRegisteredHost(t, saved)
+		})
 	}
 }

@@ -45,7 +45,14 @@ func RegisterLogin(ctx context.Context, req Registration, in Login, commit func(
 		hostKey = key
 		return nil
 	}
-	client, err := connect(ctx, req.Address, &ssh.ClientConfig{User: req.User, Auth: in.Auth, HostKeyCallback: check, Timeout: connectTimeout})
+	algorithms, err := knownHostKeyAlgorithms(in.Known, req.Address)
+	if err != nil {
+		return err
+	}
+	client, err := connect(ctx, req.Address, &ssh.ClientConfig{
+		User: req.User, Auth: in.Auth, HostKeyCallback: check,
+		HostKeyAlgorithms: algorithms, Timeout: connectTimeout,
+	})
 	if err != nil {
 		return fmt.Errorf("the SSH login: %w", err)
 	}

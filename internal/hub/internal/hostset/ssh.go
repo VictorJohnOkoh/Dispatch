@@ -92,14 +92,19 @@ func NewSSHDialer(hosts []SSHProfile, timeout time.Duration) (*SSHDialer, error)
 		if err != nil {
 			return nil, fmt.Errorf("Host %s: %w", host.ID, err)
 		}
+		algorithms, err := knownHostKeyAlgorithms([]string{host.KnownHosts}, host.Address)
+		if err != nil {
+			return nil, fmt.Errorf("Host %s: %w", host.ID, err)
+		}
 		dialer.targets[host.ID] = &sshTarget{
 			address: host.Address,
 			daemon:  net.JoinHostPort("127.0.0.1", fmt.Sprint(host.DaemonPort)),
 			config: &ssh.ClientConfig{
-				User:            host.User,
-				Auth:            []ssh.AuthMethod{ssh.PublicKeys(key)},
-				HostKeyCallback: check,
-				Timeout:         timeout,
+				User:              host.User,
+				Auth:              []ssh.AuthMethod{ssh.PublicKeys(key)},
+				HostKeyCallback:   check,
+				HostKeyAlgorithms: algorithms,
+				Timeout:           timeout,
 			},
 		}
 	}
