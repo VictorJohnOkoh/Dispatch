@@ -147,7 +147,7 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
   width: 18rem;
   overflow: auto;
   padding: 0.9rem;
-  background: #0b0910;
+  background: rgba(11, 9, 16, 0.55);
   border-right: 1px solid var(--rule);
 }
 
