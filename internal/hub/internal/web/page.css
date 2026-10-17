@@ -28,7 +28,7 @@
 :root {
   color-scheme: dark;
   --ink: #07060a;
-  --wash: linear-gradient(180deg, #2a1146, #07060a 75%) fixed;
+  --wash: linear-gradient(180deg, #2a1146, #07060a 85%) fixed;
   --slab: #120e1a;
   --slab-2: #191225;
   --rule: rgba(177, 92, 255, 0.18);
