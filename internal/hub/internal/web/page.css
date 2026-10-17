@@ -28,6 +28,7 @@
 :root {
   color-scheme: dark;
   --ink: #07060a;
+  --wash: linear-gradient(180deg, #2a1146, #07060a 85%) fixed;
   --slab: #120e1a;
   --slab-2: #191225;
   --rule: rgba(177, 92, 255, 0.18);
@@ -48,7 +49,7 @@
 body {
   margin: 0;
   padding: 0;
-  background: var(--ink);
+  background: var(--ink) var(--wash);
   color: #ede9f4;
   font: 16px/1.55 var(--body);
 }
@@ -146,7 +147,7 @@ body[data-host-state="Connecting"] { box-shadow: inset 3px 0 0 var(--amber); }
   width: 18rem;
   overflow: auto;
   padding: 0.9rem;
-  background: #0b0910;
+  background: rgba(11, 9, 16, 0.55);
   border-right: 1px solid var(--rule);
 }
 
@@ -511,14 +512,15 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 /* The composer. It is the only way to say anything to a Session, so it sticks to
    the bottom of the window rather than sitting under the last row: a long
    transcript would otherwise scroll it off the screen, and a page with no visible
-   box reads as a page you can only watch. */
+   box reads as a page you can only watch. It carries the page's own fixed
+   gradient, so it hides the rows under it and still matches the page behind. */
 .composer {
   position: sticky;
   bottom: 0;
   padding: 0.8rem 0 1.4rem;
   max-width: 72ch;
   margin: 1.2rem auto 0;
-  background: var(--ink);
+  background: var(--ink) var(--wash);
 }
 
 /* The box holds the words and the one button, and it is the box that carries the
