@@ -49,7 +49,10 @@ func TestClientCommandsReachTwoDaemonsAndBothReturnFrames(t *testing.T) {
 		host *host
 	}{{"desk", desk}, {"pi", pi}} {
 		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/hosts/"+item.id+"/sessions", strings.NewReader(startBody)))
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:7700/v1/hosts/"+item.id+"/sessions", strings.NewReader(startBody))
+		local := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7700}
+		r = r.WithContext(context.WithValue(r.Context(), http.LocalAddrContextKey, local))
+		handler.ServeHTTP(w, r)
 		answer := item.host.started(t, w)
 		item.host.waitState(t, answer.Session, "Idle")
 	}

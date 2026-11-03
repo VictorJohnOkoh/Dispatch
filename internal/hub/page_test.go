@@ -185,7 +185,7 @@ func hostWithATranscript(t *testing.T) (http.Handler, uint64) {
 func get(t *testing.T, h http.Handler, path string) (string, *httptest.ResponseRecorder) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	h.ServeHTTP(w, clientRequest(http.MethodGet, path, nil))
 	return w.Body.String(), w
 }
 

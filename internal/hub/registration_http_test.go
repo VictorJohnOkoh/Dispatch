@@ -14,7 +14,7 @@ func TestEmptyHubServesRegistrationAndRejectsOtherOrigins(t *testing.T) {
 	calls := 0
 	h.WithRegistration(func(context.Context, RegistrationInput) error { calls++; return nil })
 	page := httptest.NewRecorder()
-	h.Handler().ServeHTTP(page, httptest.NewRequest("GET", "http://127.0.0.1:7700/hosts", nil))
+	h.Handler().ServeHTTP(page, clientRequest("GET", "http://127.0.0.1:7700/hosts", nil))
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "host-registration") {
 		t.Fatal("empty Hub did not serve registration", page.Code)
 	}
@@ -23,6 +23,8 @@ func TestEmptyHubServesRegistrationAndRejectsOtherOrigins(t *testing.T) {
 		want                      int
 	}{
 		{"http://127.0.0.1:7700", "127.0.0.1:7700", "application/json", `{"id":"desk","code":"test","password":"secret"}`, 204},
+		{"http://localhost:7700", "localhost:7700", "application/json", `{"id":"desk","code":"test","password":"secret"}`, 204},
+		{"", "127.0.0.1:7700", "application/json", `{"id":"desk","code":"test","password":"secret"}`, 204},
 		{"https://evil.example", "127.0.0.1:7700", "application/json", `{"id":"desk"}`, 403},
 		{"null", "127.0.0.1:7700", "application/json", `{"id":"desk"}`, 403},
 		{"http://evil.example:7700", "evil.example:7700", "application/json", `{"id":"desk"}`, 403},
@@ -30,9 +32,11 @@ func TestEmptyHubServesRegistrationAndRejectsOtherOrigins(t *testing.T) {
 		{"http://127.0.0.1:7700", "127.0.0.1:7700", "application/json", `{"id":"desk"} {}`, 400},
 		{"http://127.0.0.1:7700", "127.0.0.1:7700", "application/json", `{"id":"desk","code":"` + strings.Repeat("x", 6000) + `"}`, 400},
 	} {
-		r := httptest.NewRequest("POST", "http://"+test.host+"/registration", strings.NewReader(test.body))
+		r := clientRequest("POST", "http://"+test.host+"/registration", strings.NewReader(test.body))
 		r.RemoteAddr = "127.0.0.1:32123"
-		r.Header.Set("Origin", test.origin)
+		if test.origin != "" {
+			r.Header.Set("Origin", test.origin)
+		}
 		r.Header.Set("Content-Type", test.media)
 		w := httptest.NewRecorder()
 		h.Handler().ServeHTTP(w, r)
@@ -40,8 +44,8 @@ func TestEmptyHubServesRegistrationAndRejectsOtherOrigins(t *testing.T) {
 			t.Errorf("%s %s: got %d want %d", test.origin, test.media, w.Code, test.want)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("%d registration callbacks, want 1", calls)
+	if calls != 3 {
+		t.Fatalf("%d registration callbacks, want 3", calls)
 	}
 }
 

@@ -99,6 +99,7 @@ type Reason string
 
 const (
 	ReasonAdmission      Reason = "admission"       // one more Session may not start on this Host
+	ReasonForbidden      Reason = "forbidden"       // the request is outside the Client's trust boundary
 	ReasonProtocol       Reason = "protocol"        // the Handshake failed
 	ReasonMalformed      Reason = "malformed"       // the request body could not be read
 	ReasonUnknownHarness Reason = "unknown_harness" // this Host serves no Harness by that name

@@ -8,7 +8,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/protocol"
@@ -61,11 +60,8 @@ func (h *Hub) Attach(host Registered) error {
 func (h *Hub) registerHost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
-	host, _, err := net.SplitHostPort(r.Host)
-	ip := net.ParseIP(host)
-	origin, originErr := url.Parse(r.Header.Get("Origin"))
 	media, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || ip == nil || !ip.IsLoopback() || net.ParseIP(peer) == nil || !net.ParseIP(peer).IsLoopback() || originErr != nil || origin.Scheme != "http" || origin.Host != r.Host || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || origin.User != nil || media != "application/json" {
+	if net.ParseIP(peer) == nil || !net.ParseIP(peer).IsLoopback() || media != "application/json" {
 		http.Error(w, "open the Client using the Hub's loopback address", http.StatusForbidden)
 		return
 	}

@@ -97,8 +97,9 @@ func wizardOn(t *testing.T, host startingHost) http.Handler {
 
 func post(t *testing.T, h http.Handler, path, form string) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form))
+	r := clientRequest(http.MethodPost, path, strings.NewReader(form))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "http://127.0.0.1:7700")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
@@ -358,7 +359,7 @@ func TestAStartFromSomebodyElsesPageIsRefused(t *testing.T) {
 	host := newStartingHost(t, started)
 	h := wizardOn(t, host)
 
-	r := httptest.NewRequest(http.MethodPost, "/start", strings.NewReader("host=desk&model=m&harness=opencode"))
+	r := clientRequest(http.MethodPost, "/start", strings.NewReader("host=desk&model=m&harness=opencode"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Set("Origin", "http://somewhere.else")
 	w := httptest.NewRecorder()

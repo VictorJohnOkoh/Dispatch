@@ -222,7 +222,7 @@ func TestEveryRequestTheHubSendsCarriesTheVersion(t *testing.T) {
 	resp.Body.Close()
 	resp, _ = h.Post(context.Background(), "desk", "/v1/sessions", []byte("{}"))
 	resp.Body.Close()
-	r := httptest.NewRequest(http.MethodPost, "/v1/hosts/desk/sessions/s-1/stop", nil)
+	r := clientRequest(http.MethodPost, "/v1/hosts/desk/sessions/s-1/stop", nil)
 	r.Header.Set(protocol.VersionHeader, "2")
 	w := httptest.NewRecorder()
 	h.Handler().ServeHTTP(w, r)
@@ -252,7 +252,7 @@ func TestEveryRequestTheHubSendsCarriesTheVersion(t *testing.T) {
 func TestTheFirstPaintDrawsAnIncompatibleHostAsIncompatible(t *testing.T) {
 	h := quick([]Host{{ID: "desk"}}, oldDaemon(&refusals{}))
 	w := httptest.NewRecorder()
-	h.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/hosts", nil))
+	h.Handler().ServeHTTP(w, clientRequest(http.MethodGet, "/hosts", nil))
 
 	_, card, _ := strings.Cut(w.Body.String(), `data-host="desk"`)
 	card, _, _ = strings.Cut(card, "</section>")

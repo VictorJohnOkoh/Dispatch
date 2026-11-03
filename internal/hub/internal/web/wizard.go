@@ -296,13 +296,6 @@ func path(route string) string {
 // refused draws the wizard again with the refusal on it, and one that is accepted
 // leaves the browser on the Session it made.
 func (c *client) startSession(w http.ResponseWriter, r *http.Request) {
-	// A start changes a machine in another room, so it is taken only from this
-	// Client's own pages. A browser sends Origin on every cross-site form post, and
-	// one that does not match is a page somebody else wrote.
-	if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r.Host) {
-		http.Error(w, "a start comes from this Client's own page", http.StatusForbidden)
-		return
-	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "that form could not be read", http.StatusBadRequest)
 		return
@@ -399,14 +392,6 @@ func (c *client) stop(ctx context.Context, host, id string) string {
 		refusal.Detail = string(refusal.Reason)
 	}
 	return id + " was not stopped: " + refusal.Detail
-}
-
-// sameOrigin says whether an Origin header names the host this request came in
-// on. It compares the host and not the scheme, because a Hub reached over an SSH
-// tunnel is http on one side and may be anything on the other.
-func sameOrigin(origin, host string) bool {
-	at, err := url.Parse(origin)
-	return err == nil && at.Host == host
 }
 
 // chosenPolicy is the five slots the form carried. A Session whose Harness runs no
