@@ -101,7 +101,7 @@ func TestAnEndedSessionRecordsNoHub(t *testing.T) {
 	_, r := h.stream(t)
 	id := h.idle(t)
 	h.command(t, id, "stop", "")
-	h.waitState(t, id, "Ended")
+	h.waitState(t, id, "Closed")
 
 	r.close()
 	h.waitReaders(t, 0)

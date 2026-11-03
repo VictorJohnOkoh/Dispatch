@@ -9,6 +9,13 @@
 // can be read off it: a test asks Object.keys for them, and a Kind that is named
 // but does nothing cannot hide in it.
 const FOLD_RULES = {
+  SessionStarted: (v) => {
+    v.ready = false;
+    v.prompting = false;
+    v.ended = null;
+    v.held = [];
+    v.calls = [];
+  },
   SessionReady: (v) => {
     v.ready = true;
   },
@@ -26,8 +33,7 @@ const FOLD_RULES = {
   ToolCallEnded: (v, p) => {
     v.calls = v.calls.filter((id) => id !== p.toolCallId);
   },
-  // SessionEnded is terminal and last, so it stops the fold rather than changing
-  // it. Nothing after it is read and nothing is left open.
+  // Only a new Run can leave Closed.
   SessionEnded: (v, p) => {
     v.ended = p.reason ?? "";
   },
@@ -37,7 +43,6 @@ const FOLD_RULES = {
 // implied, because a Kind that changes nothing is a decision somebody made, and a
 // Kind in neither list is one nobody has looked at.
 const FOLD_IGNORES = [
-  "SessionStarted",
   "ApprovalPolicySet",
   "Reasoning",
   "AssistantMessage",
@@ -48,7 +53,7 @@ const FOLD_IGNORES = [
 ];
 
 // foldSession derives a Session's State from that Session's own Events, in Seq
-// order. It answers the end reason with Ended and nothing with any other state.
+// order. It answers the end reason with Closed and nothing with any other state.
 //
 // A list with no SessionStarted folds to Starting, which is what the Session will
 // be the moment its first Event lands.
@@ -64,12 +69,12 @@ function newSessionFold() {
   const view = { ready: false, prompting: false, held: [], calls: [], ended: null };
   return {
     apply(e) {
-      if (view.ended !== null) return;
+      if (view.ended !== null && e.kind !== "SessionStarted") return;
       const rule = FOLD_RULES[e.kind];
       if (rule) rule(view, e.payload ?? {});
     },
     result() {
-      if (view.ended !== null) return { state: "Ended", reason: view.ended, held: [], calls: [] };
+      if (view.ended !== null) return { state: "Closed", reason: view.ended, held: [], calls: [] };
       let state = "Starting";
       if (view.held.length > 0) state = "Asking";
       else if (view.prompting) state = "Working";

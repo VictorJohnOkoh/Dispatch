@@ -26,10 +26,14 @@ type call struct {
 
 // Apply accepts each Event once, in order. Replay callers deduplicate by Seq.
 func (v *View) Apply(e event.Event) {
-	if v.ended {
+	if v.ended && e.Kind != event.KindSessionStarted {
 		return
 	}
 	switch e.Kind {
+	case event.KindSessionStarted:
+		v.ready, v.prompting, v.ended = false, false, false
+		v.reason = ""
+		v.held, v.calls = nil, nil
 	case event.KindHubDetached:
 		v.detached = true
 	case event.KindHubAttached:
@@ -72,7 +76,7 @@ func (v *View) Apply(e event.Event) {
 func (v *View) State() (State, event.EndReason) {
 	switch {
 	case v.ended:
-		return Ended, v.reason
+		return Closed, v.reason
 	case len(v.held) > 0:
 		return Asking, ""
 	case v.prompting:

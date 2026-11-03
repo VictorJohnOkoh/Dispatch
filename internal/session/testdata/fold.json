@@ -1,5 +1,5 @@
 {
-  "about": "The fold's specification, shared by session.Fold and the Client's JS twin so that the two stay honest with each other. Each case is one Session's own Events in Seq order and the State they fold to. reason is present only on Ended.",
+  "about": "The fold's specification, shared by session.Fold and the Client's JS twin so that the two stay honest with each other. Each case is one Session's own Events in Seq order and the State they fold to. reason is present only on Closed.",
   "cases": [
     {
       "name": "no Events at all is Starting",
@@ -112,27 +112,27 @@
       "state": "Starting"
     },
     {
-      "name": "a stopped Session is Ended stopped",
+      "name": "a stopped Session is Closed stopped",
       "events": [
         {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
         {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
         {"seq": 3, "session": "s-7f3a2c", "at": 1756412120000000, "kind": "SessionEnded", "payload": {"reason": "stopped"}}
       ],
-      "state": "Ended",
+      "state": "Closed",
       "reason": "stopped"
     },
     {
-      "name": "a launch that never reached Idle is Ended failed",
+      "name": "a launch that never reached Idle is Closed failed",
       "events": [
         {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
         {"seq": 2, "session": "s-7f3a2c", "at": 1756412091000000, "kind": "Error", "payload": {"code": "harness_failed", "message": "opencode exited with 1"}},
         {"seq": 3, "session": "s-7f3a2c", "at": 1756412091100000, "kind": "SessionEnded", "payload": {"reason": "failed"}}
       ],
-      "state": "Ended",
+      "state": "Closed",
       "reason": "failed"
     },
     {
-      "name": "the boot sweep leaves Ended lost, and it closes the open question first",
+      "name": "the boot sweep leaves Closed lost, and it closes the open question first",
       "events": [
         {"seq": 1, "session": "s-7f3a2c", "at": 1756412090000000, "kind": "SessionStarted", "payload": {"harness": "opencode", "model": "qwen3.5-9b", "vendor": "ollama", "cwd": "/home/victor/work"}},
         {"seq": 2, "session": "s-7f3a2c", "at": 1756412092000000, "kind": "SessionReady", "payload": {"model": "capstone/qwen3.5-9b"}},
@@ -142,8 +142,107 @@
         {"seq": 6, "session": "s-7f3a2c", "at": 1756412300100000, "kind": "ToolCallEnded", "payload": {"toolCallId": "tc-1", "outcome": "refused", "content": ""}},
         {"seq": 7, "session": "s-7f3a2c", "at": 1756412300200000, "kind": "SessionEnded", "payload": {"reason": "lost"}}
       ],
-      "state": "Ended",
+      "state": "Closed",
       "reason": "lost"
+    },
+    {
+      "name": "stopped reopens to Starting",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "stopped"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Starting"
+    },
+    {
+      "name": "stopped reopens to Idle",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "stopped"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionReady", "payload": {}, "seq": 5, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Idle"
+    },
+    {
+      "name": "stopped reopens to Working",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "stopped"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionReady", "payload": {}, "seq": 5, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "remember"}, "seq": 6, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Working"
+    },
+    {
+      "name": "failed reopens to Starting",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "failed"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Starting"
+    },
+    {
+      "name": "failed reopens to Idle",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "failed"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionReady", "payload": {}, "seq": 5, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Idle"
+    },
+    {
+      "name": "failed reopens to Working",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "failed"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionReady", "payload": {}, "seq": 5, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "remember"}, "seq": 6, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Working"
+    },
+    {
+      "name": "lost reopens to Starting",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "lost"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Starting"
+    },
+    {
+      "name": "lost reopens to Idle",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "lost"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionReady", "payload": {}, "seq": 5, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Idle"
+    },
+    {
+      "name": "lost reopens to Working",
+      "events": [
+        {"kind": "SessionReady", "payload": {}, "seq": 1, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "old"}, "seq": 2, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionEnded", "payload": {"reason": "lost"}, "seq": 3, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionStarted", "payload": {}, "seq": 4, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "SessionReady", "payload": {}, "seq": 5, "session": "s-7f3a2c", "at": 1756412090000000},
+        {"kind": "PromptSubmitted", "payload": {"text": "remember"}, "seq": 6, "session": "s-7f3a2c", "at": 1756412090000000}
+      ],
+      "state": "Working"
     }
   ]
 }

@@ -46,7 +46,7 @@ func (p *Passthrough) Start(ctx context.Context, spec SessionSpec, out Sink) (Ru
 	if out == nil {
 		return nil, errors.New("passthrough: no Sink")
 	}
-	return &ptRun{pt: p, session: ctx, spec: spec, out: out}, nil
+	return &ptRun{pt: p, session: ctx, spec: spec, out: out, history: slices.Clone(spec.History)}, nil
 }
 
 type ptRun struct {
@@ -63,10 +63,7 @@ type ptRun struct {
 	closed      bool               // the Session is ending, so the Prompt is not bounded
 }
 
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
+type chatMessage = Message
 
 // Prompt posts the whole conversation and returns once the Vendor has answered with
 // a body. Everything after that arrives on the Sink.

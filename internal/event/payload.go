@@ -15,7 +15,8 @@ type SessionStarted struct {
 // back in the Harness's own spelling. That spelling is kept verbatim so a human can
 // see a Harness that selected a Model nobody asked for.
 type SessionReady struct {
-	Model string `json:"model"`
+	Reference string `json:"reference,omitempty"`
+	Model     string `json:"model"`
 }
 
 // ApprovalPolicySet is every value the Approval Policy ever holds. The fold reads

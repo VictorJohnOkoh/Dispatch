@@ -313,7 +313,7 @@ func TestAHarnessThatLeavesOnItsOwnEndsTheSession(t *testing.T) {
 	h, _ := stubHost(t, w, "quit")
 
 	id := h.started(t, h.post(t, "/v1/sessions", stubStart)).Session
-	view := h.waitState(t, id, "Ended")
+	view := h.waitState(t, id, "Closed")
 	if view.EndReason != event.EndFailed {
 		t.Errorf("the Session ended %q, want %q", view.EndReason, event.EndFailed)
 	}
@@ -342,7 +342,7 @@ func TestAStopWhileStartingStillKillsTheHarness(t *testing.T) {
 	if got := h.post(t, "/v1/sessions/"+string(id)+"/stop", ""); got.Code != protocol.StatusAccepted {
 		t.Fatalf("stop: status %d: %s", got.Code, got.Body.String())
 	}
-	if view := h.waitState(t, id, "Ended"); view.EndReason != event.EndStopped {
+	if view := h.waitState(t, id, "Closed"); view.EndReason != event.EndStopped {
 		t.Errorf("the Session ended %q, and the user asked for it", view.EndReason)
 	}
 	if a.closes() != 0 {

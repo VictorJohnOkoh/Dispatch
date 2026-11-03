@@ -6,17 +6,8 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
 )
 
-// Sweep names every Session the last run left without a SessionEnded, oldest
-// first, and moves the mark to where the log stands now. The caller ends each
-// Session it names, which is what makes the mark's invariant true again:
-//
-//	After a sweep, no Session at or below the mark is missing a SessionEnded.
-//
-// That invariant is why the scan is bounded by one Daemon's uptime rather than by
-// the log's whole history, which matters in a log that is never pruned. Both
-// halves of the query read above the mark for the same reason: SessionEnded is
-// terminal and always last, so a Session that ended below the mark wrote nothing
-// above it.
+// Sweep names Sessions whose latest Run has not closed, scanning above the
+// previous boot mark. An older SessionEnded does not close a later Run.
 func (l *Log) Sweep() ([]event.SessionID, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -28,11 +19,10 @@ func (l *Log) Sweep() ([]event.SessionID, error) {
 
 	rows, err := l.db.Query(
 		`SELECT session FROM events
-		 WHERE seq > ?1 AND session NOT IN (
-		   SELECT session FROM events WHERE kind = ?2 AND seq > ?1
-		 )
-		 GROUP BY session ORDER BY MIN(seq)`,
-		mark, string(event.KindSessionEnded),
+         WHERE seq > ?1
+         GROUP BY session
+         HAVING MAX(seq) > MAX(CASE WHEN kind = 'SessionEnded' THEN seq ELSE 0 END)
+         ORDER BY MIN(seq)`, mark,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("eventlog: sweep: %w", err)

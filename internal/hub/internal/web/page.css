@@ -489,7 +489,7 @@ button:hover { box-shadow: 0 8px 26px rgba(177, 92, 255, 0.32); }
 }
 
 .pill[data-session-state^="Asking"] { border-color: var(--amber); color: #ede9f4; }
-.pill[data-session-state^="Ended"] { opacity: 0.6; }
+.pill[data-session-state^="Closed"] { opacity: 0.6; }
 .pill.host[data-host-state="Down"], .pill.host[data-host-state="Incompatible"] { border-color: var(--red); }
 .pill.host[data-host-answering="false"] { border-color: var(--red); }
 

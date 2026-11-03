@@ -95,6 +95,9 @@ func (a *ACP) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error
 		r.stop()
 		return nil, err
 	}
+	r.mu.Lock()
+	r.loaded = true
+	r.mu.Unlock()
 	return r, nil
 }
 
@@ -160,6 +163,7 @@ type acpRun struct {
 	out     Sink
 	in      io.Writer
 
+	loaded  bool
 	id      string // the Harness's own session id
 	stopped chan struct{}
 
@@ -215,16 +219,26 @@ func (r *acpRun) handshake(ctx context.Context) error {
 			CurrentValue string `json:"currentValue"`
 		} `json:"configOptions"`
 	}
-	if err := r.call(ctx, "session/new", map[string]any{
-		"cwd":        r.spec.Dir,
-		"mcpServers": []any{},
-	}, &opened); err != nil {
+	method := "session/new"
+	params := map[string]any{"cwd": r.spec.Dir, "mcpServers": []any{}}
+	if r.spec.Reference != "" {
+		method = "session/load"
+		params["sessionId"] = r.spec.Reference
+	}
+	if err := r.call(ctx, method, params, &opened); err != nil {
 		return err
 	}
+	if r.spec.Reference != "" {
+		opened.SessionID = r.spec.Reference
+	}
+
 	if opened.SessionID == "" {
 		return fmt.Errorf("%s: the Harness opened a session with no id", r.name)
 	}
 	r.id = opened.SessionID
+	if r.spec.Remember != nil {
+		r.spec.Remember(r.id)
+	}
 
 	// The config key works and is not authoritative. One captured run wrote
 	// capstone/qwen3.5:9b and was answered opencode/big-pickle, a hosted model on
@@ -516,6 +530,12 @@ type contentBlock struct {
 }
 
 func (r *acpRun) update(params json.RawMessage) {
+	r.mu.Lock()
+	loaded := r.loaded
+	r.mu.Unlock()
+	if !loaded {
+		return
+	}
 	var body struct {
 		Update json.RawMessage `json:"update"`
 	}

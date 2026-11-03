@@ -64,7 +64,7 @@ receive(7, "SessionEnded", {reason: "stopped"});
 receive(8, "PromptSubmitted", {text: "too late"});
 console.log(JSON.stringify(states));
 `, &got)
-	want := []string{"Idle", "Working", "Working", "Working", "Working", "Asking", "Ended stopped", "Ended stopped"}
+	want := []string{"Idle", "Working", "Working", "Working", "Working", "Asking", "Closed stopped", "Closed stopped"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("states = %v, want %v", got, want)
 	}
@@ -169,7 +169,7 @@ for (const f of frames) {
 console.log(JSON.stringify(seen));
 `, &got)
 
-	want := []string{"Starting", "Idle", "Working", "Working", "Asking", "Working", "Working", "Idle", "Ended stopped"}
+	want := []string{"Starting", "Idle", "Working", "Working", "Asking", "Working", "Working", "Idle", "Closed stopped"}
 	if len(got) != len(want) {
 		t.Fatalf("the page answered %d states and %d frames were sent: %v", len(got), len(want), got)
 	}
@@ -1041,7 +1041,7 @@ setTimeout(() => console.log(JSON.stringify({
 	}
 }
 
-// The stylesheet draws Asking and Ended off one attribute, and the live update
+// The stylesheet draws Asking and Closed off one attribute, and the live update
 // has to write that same one. An update that wrote another name would leave the
 // pill's text right and its styling stuck on whatever the first paint drew.
 func TestTheLiveStateWritesTheAttributeTheStylesheetReads(t *testing.T) {
@@ -1229,7 +1229,7 @@ const frames = [
   [{seq: 4, kind: "PromptSubmitted", payload: {text: "go"}}, "Working"],
   [{seq: 5, kind: "ToolCallRequested", payload: {toolCallId: "c1", name: "bash"}}, "Working"],
   [{seq: 6, kind: "ApprovalRequested", payload: {toolCallId: "c1", title: "run"}}, "Asking"],
-  [{seq: 7, kind: "SessionEnded", payload: {reason: "stopped"}}, "Ended"],
+  [{seq: 7, kind: "SessionEnded", payload: {reason: "stopped"}}, "Closed"],
 ];
 const seen = {};
 for (const [frame, state] of frames) {
@@ -1248,7 +1248,7 @@ console.log(JSON.stringify(seen));
 		"Idle":     {Prompt: true, Stop: true},
 		"Working":  {Interrupt: true, Stop: true},
 		"Asking":   {Interrupt: true, Stop: true},
-		"Ended":    {},
+		"Closed":   {Prompt: true},
 	}
 	for state, want := range want {
 		if got[state] != want {

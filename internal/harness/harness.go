@@ -72,6 +72,12 @@ type Capabilities struct {
 // Policy: an Adapter never learns what the user allowed, so it can never answer a
 // gate on the Daemon's behalf.
 type SessionSpec struct {
+	// History is passthrough history; Reference names the real Harness history.
+	History   []Message
+	Reference string
+	// Remember reports the reference during Start, before it returns.
+	Remember func(string)
+
 	Session event.SessionID
 	Model   string           // the Model id, spelled as the Vendor spells it
 	Vendor  vendors.Endpoint // base URL and API style, on this Host's loopback
@@ -146,7 +152,7 @@ type Sink interface {
 	Reasoning(text string, end bool)
 
 	// ToolCallRequested reports a Tool Call the Harness announced. id must match the
-	// Ended that follows, repaired by the Adapter when the Harness supplies no id.
+	// ToolCallEnded that follows, repaired by the Adapter when the Harness supplies no id.
 	ToolCallRequested(id, name string, k event.ToolKind, title string, args json.RawMessage)
 
 	// ToolCallEnded reports what the Harness said happened, so only OutcomeOK or
@@ -165,4 +171,10 @@ type Sink interface {
 	// Failed reports something the Adapter could not translate, or a Vendor failure
 	// on a passthrough Session. It is not terminal.
 	Failed(code event.ErrorCode, msg string)
+}
+
+// Message is one passthrough history entry.
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }

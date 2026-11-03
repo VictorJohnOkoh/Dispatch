@@ -54,7 +54,7 @@ func TestIncrementalFoldKeepsTheRuleAtRequestAndForgetsClosedCalls(t *testing.T)
 	}
 	view.Apply(ended(event.EndStopped))
 	view.Apply(submitted())
-	if state, reason := view.State(); state != Ended || reason != event.EndStopped {
+	if state, reason := view.State(); state != Closed || reason != event.EndStopped {
 		t.Fatalf("a terminal fold changed: %s %s", state, reason)
 	}
 }

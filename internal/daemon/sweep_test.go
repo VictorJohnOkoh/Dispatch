@@ -65,7 +65,7 @@ func TestSessionListKeepsStoppedAndLostHistoryAcrossRestart(t *testing.T) {
 		{stopped, event.EndStopped}, {lost, event.EndLost},
 	} {
 		got := body.Sessions[i]
-		if got.ID != want.id || got.State != session.Ended || got.EndReason != want.reason || got.Model != "qwen3:8b" || got.Cwd != h.root {
+		if got.ID != want.id || got.State != session.Closed || got.EndReason != want.reason || got.Model != "qwen3:8b" || got.Cwd != h.root {
 			t.Errorf("Session %d = %+v", i, got)
 		}
 	}
@@ -83,8 +83,8 @@ func TestADaemonKilledUnderALiveSessionEndsItLostOnTheNextBoot(t *testing.T) {
 	d := killed(t, h)
 
 	state, reason := folded(t, d, id)
-	if state != session.Ended || reason != event.EndLost {
-		t.Fatalf("Session %s folds to %s{%s}, want Ended{lost}", id, state, reason)
+	if state != session.Closed || reason != event.EndLost {
+		t.Fatalf("Session %s folds to %s{%s}, want Closed{lost}", id, state, reason)
 	}
 
 	// The restarted Daemon has no registry, and the Events are all still readable
