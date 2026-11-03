@@ -2,6 +2,10 @@ package daemon
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/VictorJohnOkoh/Dispatch/internal/event"
@@ -45,6 +49,31 @@ func TestClosedSessionReopensOnPrompt(t *testing.T) {
 			h.command(t, id, "stop", "")
 		})
 	}
+}
+
+// A reopen can take as long as a Model load. A caller that gave up before the
+// load finished saw the Prompt fail, so the Prompt is not sent after it.
+func TestAReopenPromptNobodyWaitsForIsNotSent(t *testing.T) {
+	h := newHost(t)
+	id := h.idle(t)
+	h.command(t, id, "stop", "")
+	h.vendor.gate = make(chan struct{})
+	h.vendor.loading = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	r := httptest.NewRequest(http.MethodPost, "/v1/sessions/"+string(id)+"/prompts", strings.NewReader(promptBody)).WithContext(ctx)
+	done := make(chan struct{})
+	go func() { h.handler().ServeHTTP(httptest.NewRecorder(), r); close(done) }()
+	<-h.vendor.loading
+	cancel()
+	close(h.vendor.gate)
+	<-done
+
+	h.waitState(t, id, "Idle")
+	if slices.Contains(h.kinds(t), string(event.KindPromptSubmitted)) {
+		t.Error("a Prompt was sent after its caller gave up")
+	}
+	h.command(t, id, "stop", "")
 }
 
 func TestAdmissionRefusesReopenWithoutEvents(t *testing.T) {

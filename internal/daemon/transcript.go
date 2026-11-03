@@ -70,8 +70,10 @@ func newTranscript(dir string, id event.SessionID) (*transcript, error) {
 		f.Close()
 		return nil, err
 	}
+	// A file over the limit has its mark already. One exactly at the limit is
+	// marked by the next write, as it would have been in the earlier Run.
 	t := &transcript{limit: transcriptLimit, path: path, file: f, written: info.Size()}
-	if t.written >= t.limit {
+	if t.written > t.limit {
 		t.close()
 	}
 	t.stdout = stream{t: t, tag: "stdout "}

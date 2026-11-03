@@ -50,6 +50,11 @@ func (d *Daemon) submitPrompt(w http.ResponseWriter, r *http.Request) {
 		d.commanding.Unlock()
 		return
 	}
+	// A reopen can outlast the caller. A Prompt nobody waits for is not sent.
+	if r.Context().Err() != nil {
+		d.commanding.Unlock()
+		return
+	}
 	_, err := d.write(s, event.KindPromptSubmitted, &event.PromptSubmitted{Text: req.Text})
 	if err != nil {
 		d.commanding.Unlock()

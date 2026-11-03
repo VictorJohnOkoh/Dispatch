@@ -294,11 +294,13 @@ func TestTranscriptAppendsAcrossRunsAndKeepsItsCap(t *testing.T) {
 	}
 	tr.stdout.Write([]byte("must not append\n"))
 	tr.Close()
-	info, err := os.Stat(transcriptPath(dir, "s-runs"))
+	raw, err = os.ReadFile(transcriptPath(dir, "s-runs"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() != transcriptLimit {
-		t.Fatalf("cap grew: %d", info.Size())
+	// The earlier Run filled the file exactly, so this Run is the one cut short.
+	said := string(raw[transcriptLimit:])
+	if !strings.Contains(said, "this transcript stopped") || strings.Contains(said, "must not append") {
+		t.Fatalf("after the cap: %q", said)
 	}
 }
