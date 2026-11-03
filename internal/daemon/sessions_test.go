@@ -239,7 +239,7 @@ func TestAModelThatWillNotLoadEndsTheSession(t *testing.T) {
 	h.vendor.loadErr = errNoModel
 
 	answer := h.started(t, h.post(t, "/v1/sessions", startBody))
-	view := h.waitState(t, answer.Session, "Ended")
+	view := h.waitState(t, answer.Session, "Closed")
 
 	if view.EndReason != event.EndFailed {
 		t.Errorf("end reason = %q", view.EndReason)
@@ -317,7 +317,7 @@ func TestAStartIsAdmittedOnceTheSessionBeforeItEnded(t *testing.T) {
 	h := newHost(t)
 	h.vendor.loadErr = errNoModel
 	first := h.started(t, h.post(t, "/v1/sessions", startBody))
-	h.waitState(t, first.Session, "Ended")
+	h.waitState(t, first.Session, "Closed")
 
 	h.vendor.loadErr = nil
 	second := h.started(t, h.post(t, "/v1/sessions", startBody))

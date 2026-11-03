@@ -23,7 +23,9 @@ func (l *Log) Sessions() ([]SessionRecord, error) {
 		       CASE WHEN e.kind = 'SessionEnded' THEN e.payload ELSE '' END
 		FROM events s JOIN events e ON e.seq = (
 		    SELECT seq FROM events WHERE session = s.session ORDER BY seq DESC LIMIT 1)
-		WHERE s.kind = 'SessionStarted' ORDER BY s.seq`)
+		WHERE s.kind = 'SessionStarted' AND s.seq = (
+            SELECT MIN(seq) FROM events WHERE session = s.session AND kind = 'SessionStarted')
+        ORDER BY s.seq`)
 	if err != nil {
 		return nil, fmt.Errorf("eventlog: list Sessions: %w", err)
 	}

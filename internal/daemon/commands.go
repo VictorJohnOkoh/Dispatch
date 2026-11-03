@@ -41,6 +41,10 @@ func (d *Daemon) submitPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.commanding.Lock()
+	if !d.reopen(w, r) {
+		d.commanding.Unlock()
+		return
+	}
 	s, run, ok := d.allow(w, r, session.Idle)
 	if !ok {
 		d.commanding.Unlock()
@@ -311,7 +315,7 @@ func (d *Daemon) allow(w http.ResponseWriter, r *http.Request, states ...session
 		}
 		if exists {
 			refuse(w, protocol.StatusConflict, protocol.Refusal{
-				Reason: protocol.ReasonState, Detail: "the Session is Ended",
+				Reason: protocol.ReasonState, Detail: "the Session is Closed",
 			})
 			return nil, nil, false
 		}

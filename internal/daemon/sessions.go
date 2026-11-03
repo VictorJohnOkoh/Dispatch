@@ -171,31 +171,49 @@ func (d *Daemon) startSession(w http.ResponseWriter, r *http.Request) {
 // that costs twenty seconds. release() is the other half: the Session's life ends
 // somewhere, and the Model has to come back with it.
 func (d *Daemon) launch(ctx context.Context, s *Session, h *Harness, vendor vendors.Adapter) {
+	run := d.launchRun(ctx, s, h, vendor)
+	if run == nil {
+		return
+	}
+	d.commanding.Lock()
+	defer d.commanding.Unlock()
+	d.ready(s, run)
+}
+
+func (d *Daemon) launchRun(ctx context.Context, s *Session, h *Harness, vendor vendors.Adapter) harness.Run {
 	if err := vendor.Load(ctx, s.model); err != nil {
 		d.endFailed(s, event.ErrVendor, fmt.Sprintf("the Model %s would not load: %v", s.model, err))
-		return
+		return nil
 	}
 
 	run, err := h.Adapter.Start(ctx, harness.SessionSpec{
-		Session: s.id,
-		Model:   s.model,
-		Vendor:  vendor.Endpoint(),
-		Dir:     s.dir,
-		Spawn:   d.spawner(s, h),
-		Files:   files{root: d.root, dir: s.dir},
+		History:   s.history,
+		Reference: s.reference,
+		Remember:  func(ref string) { s.reference = ref },
+		Session:   s.id,
+		Model:     s.model,
+		Vendor:    vendor.Endpoint(),
+		Dir:       s.dir,
+		Spawn:     d.spawner(s, h),
+		Files:     files{root: d.root, dir: s.dir},
 	}, s.sink)
 	if err != nil {
 		d.endFailed(s, event.ErrHarnessFailed, err.Error())
-		return
+		return nil
 	}
+	return run
+}
+
+func (d *Daemon) ready(s *Session, run harness.Run) {
 	d.sessions.setRun(s, run)
 
 	// A Harness that died during its own launch has ended the Session already, and
-	// a Session that is Ready after it Ended reads as a Session that came back.
+	// a late SessionReady must not reopen a Run that was stopped.
 	if d.sessions.ending(s) {
+		run.Close()
 		return
 	}
-	d.write(s, event.KindSessionReady, &event.SessionReady{Model: s.model})
+	d.write(s, event.KindSessionReady, &event.SessionReady{Model: s.model, Reference: s.reference})
 }
 
 // endFailed is a launch that did not finish. SessionStarted is already in the log,
@@ -331,7 +349,7 @@ func (d *Daemon) listSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]SessionView, 0, len(history))
 	for _, record := range history {
-		state := session.Ended
+		state := session.Closed
 		if record.EndReason == "" {
 			_, _, state = d.sessions.find(record.ID)
 		}
@@ -452,14 +470,16 @@ func blockingNames(ids []event.SessionID) []string {
 	return out
 }
 
-// Session owns one live Harness. Its view is derived only from committed Events.
+// Session holds one Run. Its view is derived only from committed Events.
 type Session struct {
-	id      event.SessionID
-	harness string
-	model   string
-	vendor  string
-	dir     string
-	started time.Time
+	history   []harness.Message
+	reference string
+	id        event.SessionID
+	harness   string
+	model     string
+	vendor    string
+	dir       string
+	started   time.Time
 
 	// caps is the Harness Adapter's, read once at the start. The Approval Policy is
 	// checked against it, and a Session outlives no Adapter, so it cannot go stale.
@@ -641,7 +661,7 @@ func (r *sessions) stillServing(s *Session) bool {
 		if other == s || other.vendor != s.vendor || other.model != s.model {
 			continue
 		}
-		if state, _ := other.view.State(); state != session.Ended {
+		if state, _ := other.view.State(); state != session.Closed {
 			return true
 		}
 	}
@@ -691,7 +711,7 @@ func (r *sessions) live() []admission.Live {
 
 	var out []admission.Live
 	for _, s := range r.all {
-		if state, _ := s.view.State(); state == session.Ended {
+		if state, _ := s.view.State(); state == session.Closed {
 			continue
 		}
 		out = append(out, admission.Live{
@@ -709,7 +729,7 @@ func (r *sessions) hubDetached(detached bool) []*Session {
 
 	var out []*Session
 	for _, s := range r.all {
-		if state, _ := s.view.State(); state != session.Ended && s.view.HubDetached() == detached {
+		if state, _ := s.view.State(); state != session.Closed && s.view.HubDetached() == detached {
 			out = append(out, s)
 		}
 	}

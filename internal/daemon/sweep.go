@@ -9,10 +9,7 @@ import (
 	"github.com/VictorJohnOkoh/Dispatch/internal/session"
 )
 
-// sweep is the boot sweep. A Session is one Harness process and the process does
-// not fold, so a Session that was live when the Daemon died cannot be resumed: it
-// is ended lost, with its transcript intact, and the Client offers a new Session
-// in its place rather than a resume.
+// sweep closes abandoned Runs. Only a user Prompt starts the next Run.
 //
 // It finishes before the listener answers. Otherwise a reconnecting Hub reads a
 // Session that is Working in the log and dead in reality, and the Client draws a
@@ -38,7 +35,7 @@ func (d *Daemon) sweep() error {
 
 // endLost writes ADR 0008's restart sequence for one abandoned Session:
 // DaemonStarted, then every open question refused, then every open Tool Call
-// closed, then SessionEnded{lost}. A fold over that reaches Ended{lost} with no
+// closed, then SessionEnded{lost}. A fold over that reaches Closed{lost} with no
 // Tool Call left open, which is the invariant a Session that died mid-Prompt
 // would otherwise break forever.
 func (d *Daemon) endLost(id event.SessionID) error {

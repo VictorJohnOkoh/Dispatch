@@ -186,7 +186,7 @@ func TestAFailedSessionsTranscriptHoldsTheProcessStderr(t *testing.T) {
 	h, _ := stubHost(t, w, "quit")
 
 	id := h.started(t, h.post(t, "/v1/sessions", stubStart)).Session
-	h.waitState(t, id, "Ended")
+	h.waitState(t, id, "Closed")
 
 	if said := h.transcript(t, id); !strings.Contains(said, lastWords) {
 		t.Errorf("the transcript holds %q, and the Harness said %q on its way out", said, lastWords)
@@ -252,4 +252,53 @@ func (t *transcript) said(tb *testing.T) string {
 		tb.Fatalf("read the transcript: %v", err)
 	}
 	return string(raw)
+}
+
+func TestTranscriptAppendsAcrossRunsAndKeepsItsCap(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := newTranscript(dir, "s-runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.stdout.Write([]byte("first\n"))
+	if err := tr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tr, err = newTranscript(dir, "s-runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.written != int64(len("stdout first\n")) {
+		t.Fatalf("counter reset: %d", tr.written)
+	}
+	tr.stdout.Write([]byte("second\n"))
+	tr.Close()
+	raw, err := os.ReadFile(transcriptPath(dir, "s-runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "stdout first\nstdout second\n" {
+		t.Fatalf("transcript: %q", raw)
+	}
+	f, err := os.OpenFile(transcriptPath(dir, "s-runs"), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(transcriptLimit); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	tr, err = newTranscript(dir, "s-runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.stdout.Write([]byte("must not append\n"))
+	tr.Close()
+	info, err := os.Stat(transcriptPath(dir, "s-runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != transcriptLimit {
+		t.Fatalf("cap grew: %d", info.Size())
+	}
 }

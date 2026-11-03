@@ -70,3 +70,20 @@ func TestSweepScansOnlyWhatWasWrittenSinceTheLastOne(t *testing.T) {
 		t.Fatalf("second sweep = %v, want only second", lost)
 	}
 }
+
+func TestSweepClosesTheLatestRun(t *testing.T) {
+	log := openLog(t, tempPath(t))
+	appendAll(t, log, promptIn("reopened", "first"), ended("reopened"), promptIn("reopened", "second"))
+	lost, err := log.Sweep()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lost) != 1 || lost[0] != "reopened" {
+		t.Fatalf("sweep: %v", lost)
+	}
+	appendAll(t, log, ended("reopened"))
+	lost, err = log.Sweep()
+	if err != nil || len(lost) != 0 {
+		t.Fatalf("closed latest Run: %v, %v", lost, err)
+	}
+}

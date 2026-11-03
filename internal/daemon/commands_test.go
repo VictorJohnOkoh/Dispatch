@@ -20,12 +20,13 @@ import (
 // chatFake is the Vendor's completion surface, as a passthrough Session reaches
 // it. Only /v1/chat/completions exists, because that is the only call one makes.
 type chatFake struct {
-	mu      sync.Mutex
-	stream  string // the SSE body to serve
-	halt    bool   // hold the body open after stream, until the request is cancelled
-	status  int    // the status to answer with, 0 meaning 200
-	entered chan struct{}
-	proceed chan struct{}
+	histories [][]harness.Message
+	mu        sync.Mutex
+	stream    string // the SSE body to serve
+	halt      bool   // hold the body open after stream, until the request is cancelled
+	status    int    // the status to answer with, 0 meaning 200
+	entered   chan struct{}
+	proceed   chan struct{}
 }
 
 func (c *chatFake) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -38,6 +39,14 @@ func (c *chatFake) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	var body struct {
+		Messages []harness.Message `json:"messages"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	c.histories = append(c.histories, body.Messages)
 
 	if c.status != 0 {
 		return &http.Response{StatusCode: c.status, Header: http.Header{}, Request: req,
@@ -348,7 +357,7 @@ func TestAPromptTheVendorRefusesIsStillBounded(t *testing.T) {
 }
 
 // Interrupt abandons the Prompt and keeps the Session: it goes back to Idle, not
-// Ended, and the next Prompt runs.
+// Closed, and the next Prompt runs.
 func TestInterruptAbandonsThePromptAndKeepsTheSession(t *testing.T) {
 	h := newHost(t)
 	h.chat.serve(halfStream, true)
@@ -419,7 +428,7 @@ func TestStopEndsTheSessionWithReasonStopped(t *testing.T) {
 
 	h.command(t, id, "stop", "")
 
-	view := h.waitState(t, id, "Ended")
+	view := h.waitState(t, id, "Closed")
 	if view.EndReason != event.EndStopped {
 		t.Errorf("end reason = %q, want %q", view.EndReason, event.EndStopped)
 	}
@@ -437,8 +446,8 @@ func TestStopEndsTheSessionWithReasonStopped(t *testing.T) {
 		t.Errorf("the message is %q, complete %v, want every byte it had and torn", text, complete)
 	}
 
-	// Every command on an ended Session is refused, and the slot it held is free.
-	r := h.refusal(t, h.post(t, "/v1/sessions/"+string(id)+"/prompts", promptBody), protocol.StatusConflict)
+	// Stop on a Closed Session is refused, and its slot is free.
+	r := h.refusal(t, h.post(t, "/v1/sessions/"+string(id)+"/stop", ""), protocol.StatusConflict)
 	if r.Reason != protocol.ReasonState {
 		t.Errorf("reason = %q", r.Reason)
 	}
@@ -453,7 +462,7 @@ func TestAStoppedSessionGivesItsModelBack(t *testing.T) {
 	id := h.idle(t)
 
 	h.command(t, id, "stop", "")
-	h.waitState(t, id, "Ended")
+	h.waitState(t, id, "Closed")
 
 	if got := h.vendor.unloads(); len(got) != 1 || got[0] != "qwen3:8b" {
 		t.Errorf("Unload was called with %v, want [qwen3:8b]", got)
@@ -471,7 +480,7 @@ func TestStopWhileStartingEndsTheSessionOnce(t *testing.T) {
 	h.command(t, answer.Session, "stop", "")
 	close(h.vendor.gate)
 
-	view := h.waitState(t, answer.Session, "Ended")
+	view := h.waitState(t, answer.Session, "Closed")
 	if view.EndReason != event.EndStopped {
 		t.Errorf("end reason = %q, want %q", view.EndReason, event.EndStopped)
 	}
