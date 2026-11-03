@@ -114,6 +114,18 @@ func TestHubAllowsSameOriginRetry(t *testing.T) {
 	}
 }
 
+func TestHubAllowsTheDefaultPort(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "localhost", "[::1]"} {
+		r := clientRequest("GET", "/v1/hosts", nil)
+		r.Host = host
+		w := httptest.NewRecorder()
+		hub.New(nil, nil).Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s: got %d", host, w.Code)
+		}
+	}
+}
+
 func TestHubAllowsATunnelOnAnotherPort(t *testing.T) {
 	r := clientRequest("POST", "/v1/hosts/desk/retry", nil)
 	r.Host = "localhost:8080"

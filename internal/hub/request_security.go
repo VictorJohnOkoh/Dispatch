@@ -30,12 +30,10 @@ func checkClient(next http.Handler) http.Handler {
 
 // loopbackHost refuses a Host header with any other name, which is what a DNS
 // rebinding page sends. The port is not compared, because an SSH tunnel from a
-// phone may forward a different local port to the Hub.
+// phone may forward a different local port to the Hub, and a browser leaves port
+// 80 out of the header.
 func loopbackHost(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.Host)
-	if err != nil {
-		return false
-	}
+	host := (&url.URL{Host: r.Host}).Hostname()
 	ip := net.ParseIP(host)
 	return strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
 }
