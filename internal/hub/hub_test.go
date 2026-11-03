@@ -206,13 +206,13 @@ func TestTheHubListsHostsAndForwardsACommand(t *testing.T) {
 	h := hub.New([]hostset.Host{{ID: "desk"}}, d).Handler()
 
 	list := httptest.NewRecorder()
-	h.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/hosts", nil))
+	h.ServeHTTP(list, clientRequest(http.MethodGet, "/v1/hosts", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"id":"desk"`) {
 		t.Fatalf("GET hosts: %d %s", list.Code, list.Body.String())
 	}
 
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/hosts/desk/sessions", strings.NewReader(`{}`)))
+	h.ServeHTTP(w, clientRequest(http.MethodPost, "/v1/hosts/desk/sessions", strings.NewReader(`{}`)))
 	if w.Code != http.StatusAccepted || seen != "POST /v1/sessions" {
 		t.Fatalf("forwarded %q and answered %d", seen, w.Code)
 	}
@@ -329,7 +329,7 @@ func TestAClientCommandAndFrameCrossTheHubAndDaemon(t *testing.T) {
 	}).Handler()
 
 	page := httptest.NewRecorder()
-	h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/v1/hosts/desk/sessions/s-1/events", nil))
+	h.ServeHTTP(page, clientRequest(http.MethodGet, "/v1/hosts/desk/sessions/s-1/events", nil))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `"text":"hello"`) {
 		t.Fatalf("Client command: %d %s", page.Code, page.Body.String())
 	}
@@ -384,7 +384,7 @@ func TestEveryDaemonEndpointUsesTheOneHostHandler(t *testing.T) {
 			}}
 			h := hub.New([]hostset.Host{{ID: "desk"}}, d).Handler()
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequest(c.method, c.client, nil))
+			h.ServeHTTP(w, clientRequest(c.method, c.client, nil))
 			if want := c.method + " " + c.daemon; seen != want {
 				t.Errorf("forwarded %q, want %q", seen, want)
 			}

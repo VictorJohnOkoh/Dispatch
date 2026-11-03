@@ -42,7 +42,7 @@ func (h *Hub) Handler() http.Handler {
 	// every path this Hub does not otherwise serve.
 	mux.Handle("GET /", h.page)
 	mux.Handle("POST /start", h.page)
-	return mux
+	return checkClient(mux)
 }
 
 // All is the Hosts this Hub is configured with, by id. It is what the Client
