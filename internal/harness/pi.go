@@ -87,11 +87,18 @@ func (a *Pi) Start(ctx context.Context, spec SessionSpec, out Sink) (Run, error)
 	// written once at Host setup, and what that file called this Vendor is the
 	// Host's business: the launch reads back which one answered rather than
 	// spelling a name this repo would be guessing at.
-	pipes, err := spec.Spawn(ctx, Launch{Args: []string{
-		"--mode", "rpc",
-		"--model", spec.Model,
-		"-e", a.gate,
-	}})
+	args := []string{"--mode", "rpc", "--model", spec.Model, "-e", a.gate}
+	if spec.Reference != "" {
+		info, err := os.Stat(spec.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("pi: the Session history is missing: %w", err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("pi: the Session history is a directory")
+		}
+		args = append(args, "--session", spec.Reference)
+	}
+	pipes, err := spec.Spawn(ctx, Launch{Args: args})
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +222,8 @@ func (r *piRun) accept(got piFrame) error {
 	}
 
 	var state struct {
-		Model struct {
+		SessionFile string `json:"sessionFile"`
+		Model       struct {
 			ID       string `json:"id"`
 			Provider string `json:"provider"`
 			BaseURL  string `json:"baseUrl"`
@@ -223,6 +231,9 @@ func (r *piRun) accept(got piFrame) error {
 	}
 	if err := json.Unmarshal(got.Data, &state); err != nil {
 		return fmt.Errorf("%s: the answer to the start probe could not be read: %w", r.name, err)
+	}
+	if r.spec.Remember != nil {
+		r.spec.Remember(state.SessionFile)
 	}
 	if state.Model.ID != r.spec.Model {
 		return fmt.Errorf("%s: this Session asked for %s and the Harness selected %s",
