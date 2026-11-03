@@ -66,9 +66,14 @@ func newTranscript(dir string, id event.SessionID) (*transcript, error) {
 		return nil, fmt.Errorf("daemon: no transcript for the Session %s: %w", id, err)
 	}
 	info, err := f.Stat()
- if err != nil { f.Close(); return nil, err }
- t := &transcript{limit: transcriptLimit, path: path, file: f, written: info.Size()}
- if t.written >= t.limit { t.close() }
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	t := &transcript{limit: transcriptLimit, path: path, file: f, written: info.Size()}
+	if t.written >= t.limit {
+		t.close()
+	}
 	t.stdout = stream{t: t, tag: "stdout "}
 	t.stderr = stream{t: t, tag: "stderr "}
 	return t, nil

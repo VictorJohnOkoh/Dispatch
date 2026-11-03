@@ -23,9 +23,10 @@ func (d *Daemon) reopen(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return false
 	}
+	// A Session with no Events is unknown, and allow answers that.
 	if len(history) == 0 {
 		return true
-	} // allow supplies the unknown Session refusal.
+	}
 	var first *event.SessionStarted
 	s := &Session{id: id, started: time.Now().UTC()}
 	for _, e := range history {
