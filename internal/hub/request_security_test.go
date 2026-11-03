@@ -21,8 +21,7 @@ func clientRequest(method, target string, body io.Reader) *http.Request {
 	if r.Host == "example.com" {
 		r.Host = "127.0.0.1:7700"
 	}
-	local := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7700}
-	return r.WithContext(context.WithValue(r.Context(), http.LocalAddrContextKey, local))
+	return r
 }
 
 func TestHubRefusesForeignClientRequests(t *testing.T) {
@@ -36,8 +35,8 @@ func TestHubRefusesForeignClientRequests(t *testing.T) {
 		{"GET", "/v1/hosts", "attacker.invalid:7700", ""},
 		{"GET", "/v1/hosts/desk/sessions", "attacker.invalid:7700", ""},
 		{"GET", "/v1/events", "attacker.invalid:7700", ""},
-		{"GET", "/", "localhost:7701", ""},
-		{"HEAD", "/hosts", "localhost:7701", ""},
+		{"GET", "/", "attacker.invalid", ""},
+		{"HEAD", "/hosts", "localhost.attacker.invalid:7700", ""},
 		{"POST", "/v1/hosts/desk/sessions", "localhost:7700", "https://localhost:7700"},
 		{"POST", "/v1/hosts/desk/sessions", "localhost:7700", "http://localhost:7700/path"},
 		{"DELETE", "/v1/hosts/desk/sessions/s-1", "localhost:7700", "http://attacker.invalid"},
@@ -115,11 +114,13 @@ func TestHubAllowsSameOriginRetry(t *testing.T) {
 	}
 }
 
-func TestHubRequiresListeningAddress(t *testing.T) {
-	r := httptest.NewRequest("GET", "http://127.0.0.1:7700/v1/hosts", nil)
+func TestHubAllowsATunnelOnAnotherPort(t *testing.T) {
+	r := clientRequest("POST", "/v1/hosts/desk/retry", nil)
+	r.Host = "localhost:8080"
+	r.Header.Set("Origin", "http://localhost:8080")
 	w := httptest.NewRecorder()
-	hub.New(nil, nil).Handler().ServeHTTP(w, r)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("request without listening address returned %d", w.Code)
+	hub.New([]hub.Host{{ID: "desk"}}, nil).Handler().ServeHTTP(w, r)
+	if w.Code != protocol.StatusAccepted {
+		t.Fatalf("retry through a tunnel returned %d: %s", w.Code, w.Body.String())
 	}
 }

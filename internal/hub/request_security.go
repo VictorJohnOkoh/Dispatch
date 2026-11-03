@@ -12,8 +12,8 @@ import (
 
 func checkClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !listeningHost(r) {
-			refuseClient(w, "open the Client using the Hub's loopback address and port")
+		if !loopbackHost(r) {
+			refuseClient(w, "open the Client using the Hub's loopback address")
 			return
 		}
 		// Non-browser callers can omit Origin. Host is checked for every request.
@@ -28,17 +28,12 @@ func checkClient(next http.Handler) http.Handler {
 	})
 }
 
-func listeningHost(r *http.Request) bool {
-	local, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
-	if !ok {
-		return false
-	}
-	_, port, err := net.SplitHostPort(local.String())
+// loopbackHost refuses a Host header with any other name, which is what a DNS
+// rebinding page sends. The port is not compared, because an SSH tunnel from a
+// phone may forward a different local port to the Hub.
+func loopbackHost(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.Host)
 	if err != nil {
-		return false
-	}
-	host, requestedPort, err := net.SplitHostPort(r.Host)
-	if err != nil || requestedPort != port {
 		return false
 	}
 	ip := net.ParseIP(host)
