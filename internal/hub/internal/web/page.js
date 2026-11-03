@@ -287,15 +287,15 @@ let offered = "";
 // place. The Daemon decides either way: this only spares the user a refusal.
 function offer(state) {
   const answering = state === "Working" || state === "Asking";
-  promptBox.disabled = state !== "Idle";
-  promptBox.placeholder = state === "Idle" ? "type a Prompt" : `this Session is ${state}`;
+  promptBox.disabled = (state !== "Idle" && state !== "Closed");
+  promptBox.placeholder = (state === "Idle" || state === "Closed") ? "type a Prompt" : `this Session is ${state}`;
   // The one button follows the State: it sends while the Session waits and stops
   // while it answers.
   sendButton.dataset.mode = answering ? "stop" : "send";
   sendButton.title = answering ? "Interrupt" : "Send";
   sendButton.setAttribute("aria-label", sendButton.title);
-  sendButton.disabled = answering ? false : state !== "Idle";
-  stopButton.disabled = state === "Ended";
+  sendButton.disabled = answering ? false : (state !== "Idle" && state !== "Closed");
+  stopButton.disabled = state === "Closed";
   if (state === offered) return;
   offered = state;
   for (const row of [sendRow, pair]) row.querySelector(".why")?.remove();
@@ -383,7 +383,7 @@ function drawRail(entries, changed) {
 }
 
 function railUrgency(row) {
-  const states = ["Asking", "Working", "Starting", "Idle", "Ended"];
+  const states = ["Asking", "Working", "Starting", "Idle", "Closed"];
   const at = states.indexOf((row.dataset.state ?? "").split(" ")[0]);
   return (row.dataset.answering === "true" ? 0 : states.length + 1) + (at < 0 ? states.length : at);
 }

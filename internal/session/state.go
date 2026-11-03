@@ -25,12 +25,12 @@ const (
 	Idle                  // up, nothing in flight. A Prompt may be submitted
 	Working               // a Prompt is in flight. A second Prompt is refused
 	Asking                // a Tool Call is held, waiting for the user's decision
-	Ended                 // terminal, carrying stopped, failed or lost
+	Closed                // no Run, carrying stopped, failed or lost
 )
 
 const numStates = 5
 
-var stateNames = [numStates]string{"Starting", "Idle", "Working", "Asking", "Ended"}
+var stateNames = [numStates]string{"Starting", "Idle", "Working", "Asking", "Closed"}
 
 func (s State) String() string {
 	if int(s) >= numStates {

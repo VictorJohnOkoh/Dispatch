@@ -313,7 +313,7 @@ func byUrgency(a, b entry) int {
 
 // order is the Session States, most wanting a human first. A row whose state is
 // none of them sorts after all five, which is what a Host that said nothing gets.
-var order = []string{"Asking", "Working", "Starting", "Idle", "Ended"}
+var order = []string{"Asking", "Working", "Starting", "Idle", "Closed"}
 
 func urgency(state string) int {
 	if i := slices.IndexFunc(order, func(name string) bool { return strings.HasPrefix(state, name) }); i >= 0 {

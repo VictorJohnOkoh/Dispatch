@@ -56,7 +56,7 @@ func TestFoldReachesEachOfTheFiveStates(t *testing.T) {
 		{"launched", []event.Event{started(), ready()}, Idle},
 		{"a Prompt in flight", []event.Event{started(), ready(), submitted()}, Working},
 		{"a question open", []event.Event{started(), ready(), submitted(), asked("tc-1")}, Asking},
-		{"terminal", []event.Event{started(), ready(), ended(event.EndStopped)}, Ended},
+		{"terminal", []event.Event{started(), ready(), ended(event.EndStopped)}, Closed},
 	}
 
 	for _, c := range cases {
@@ -71,8 +71,8 @@ func TestFoldReachesEachOfTheFiveStates(t *testing.T) {
 func TestEndedCarriesEachOfItsThreeReasons(t *testing.T) {
 	for _, reason := range []event.EndReason{event.EndStopped, event.EndFailed, event.EndLost} {
 		state, got := Fold([]event.Event{started(), ready(), ended(reason)})
-		if state != Ended {
-			t.Errorf("%s: got %s, want Ended", reason, state)
+		if state != Closed {
+			t.Errorf("%s: got %s, want Closed", reason, state)
 		}
 		if got != reason {
 			t.Errorf("got reason %q, want %q", got, reason)
@@ -80,7 +80,7 @@ func TestEndedCarriesEachOfItsThreeReasons(t *testing.T) {
 	}
 }
 
-// Every state but Ended answers with no reason, so a caller cannot read one off a
+// Every state but Closed answers with no reason, so a caller cannot read one off a
 // Session that is still running.
 func TestOnlyEndedCarriesAReason(t *testing.T) {
 	if _, reason := Fold([]event.Event{started(), ready(), submitted()}); reason != "" {
@@ -109,8 +109,8 @@ func TestAskingOutranksWorkingUntilTheLastQuestionIsDecided(t *testing.T) {
 func TestSessionEndedBeatsAnOpenQuestion(t *testing.T) {
 	events := []event.Event{started(), ready(), submitted(), asked("tc-1"), ended(event.EndLost)}
 	state, reason := Fold(events)
-	if state != Ended || reason != event.EndLost {
-		t.Errorf("got %s{%s}, want Ended{lost}", state, reason)
+	if state != Closed || reason != event.EndLost {
+		t.Errorf("got %s{%s}, want Closed{lost}", state, reason)
 	}
 }
 
@@ -158,7 +158,7 @@ func TestStateNames(t *testing.T) {
 		{Idle, "Idle"},
 		{Working, "Working"},
 		{Asking, "Asking"},
-		{Ended, "Ended"},
+		{Closed, "Closed"},
 	}
 
 	if len(want) != numStates {
