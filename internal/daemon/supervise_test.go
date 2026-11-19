@@ -322,8 +322,12 @@ func TestAHarnessThatLeavesOnItsOwnEndsTheSession(t *testing.T) {
 	if said := h.failure(t); !strings.Contains(said, lastWords) {
 		t.Errorf("the Error says %q, and the Harness said %q on its way out", said, lastWords)
 	}
-	if live := h.sessions.live(); len(live) != 0 {
-		t.Errorf("the registry still holds %d live Session, and its Harness is gone", len(live))
+	deadline := time.Now().Add(2 * time.Second)
+	for len(h.sessions.live()) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the Session still holds its Admission slot after the Harness exited")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

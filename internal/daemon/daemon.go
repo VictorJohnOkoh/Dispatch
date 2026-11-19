@@ -77,6 +77,7 @@ type Daemon struct {
 	sessions sessions
 
 	// starting makes admission and the registry entry it decided on one step.
+	// Acquire starting before commanding when both are needed.
 	starting sync.Mutex
 
 	// commanding makes a command's fold and the Event that changes it one step, so

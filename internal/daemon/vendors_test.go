@@ -28,12 +28,14 @@ type fake struct {
 	block  chan struct{} // Catalogue waits on this when it is not nil
 	calls  int
 
-	loadErr  error
-	mu       sync.Mutex
-	loading  chan struct{} // closed when Load starts
-	gate     chan struct{} // Load waits on this when it is not nil
-	loaded   []string
-	unloaded []string
+	loadErr      error
+	mu           sync.Mutex
+	loading      chan struct{} // closed when Load starts
+	gate         chan struct{} // Load waits on this when it is not nil
+	loaded       []string
+	unloaded     []string
+	unloading    chan struct{}
+	finishUnload chan struct{}
 }
 
 func (f *fake) Endpoint() vendors.Endpoint { return f.endpoint }
@@ -91,10 +93,20 @@ func (f *fake) loads() []string {
 	return slices.Clone(f.loaded)
 }
 
-func (f *fake) Unload(_ context.Context, modelID string) error {
+func (f *fake) Unload(ctx context.Context, modelID string) error {
 	f.mu.Lock()
 	f.unloaded = append(f.unloaded, modelID)
+	started, finish := f.unloading, f.finishUnload
+	f.unloading = nil
 	f.mu.Unlock()
+	if started != nil {
+		close(started)
+		select {
+		case <-finish:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return f.err
 }
 

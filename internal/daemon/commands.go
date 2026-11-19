@@ -164,7 +164,7 @@ func (d *Daemon) stopSession(w http.ResponseWriter, r *http.Request) {
 // policyRequest carries an Approval Policy that decodes strictly on its own. All
 // five slots, and each one a Rule.
 type policyRequest struct {
-	Policy event.Policy `json:"policy"`
+	Policy *event.Policy `json:"policy"`
 }
 
 // setPolicy sets the Approval Policy. A slot the Harness cannot gate is refused
@@ -175,6 +175,12 @@ func (d *Daemon) setPolicy(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if req.Policy == nil {
+		refuse(w, protocol.StatusUnprocessable, protocol.Refusal{
+			Reason: protocol.ReasonMalformed, Detail: "an Approval Policy is required",
+		})
+		return
+	}
 
 	d.commanding.Lock()
 	defer d.commanding.Unlock()
@@ -183,13 +189,13 @@ func (d *Daemon) setPolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if refusal := ungated(s.caps, req.Policy); refusal != nil {
+	if refusal := ungated(s.caps, *req.Policy); refusal != nil {
 		refuse(w, protocol.StatusUnprocessable, *refusal)
 		return
 	}
 
 	if _, err := d.write(s, event.KindApprovalPolicySet, &event.ApprovalPolicySet{
-		Policy: req.Policy, SetBy: event.SetByUser,
+		Policy: *req.Policy, SetBy: event.SetByUser,
 	}); err != nil {
 		logRefused(w)
 		return

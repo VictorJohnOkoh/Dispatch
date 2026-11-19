@@ -246,6 +246,10 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 		return 0
 	}
 	defer conn.Close()
+	// SSH channels do not support read deadlines. Closing the channel also
+	// bounds the wait for HTTP headers and the first Handshake Frame.
+	quiet := time.AfterFunc(r.hub.stale, func() { conn.Close() })
+	defer quiet.Stop()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://daemon/v1/events", nil)
@@ -266,7 +270,7 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 		r.failed(ctx, protocol.NoDaemon, out)
 		return 0
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	resp, err := http.ReadResponse(bufio.NewReader(beating(quiet, r.hub.stale, conn)), req)
 	if err != nil {
 		// The tunnel opened and nothing was behind it, which is a different problem
 		// for the user: the machine is there and its Daemon is not.
@@ -293,14 +297,7 @@ func (r *hostReader) once(ctx context.Context, out chan<- daemonFrame) time.Dura
 		return 0
 	}
 
-	// A live connection that says nothing is watched by a timer of its own. A read
-	// deadline is not enough: an SSH channel answers SetReadDeadline with "deadline
-	// not supported", so the only way to end a read that will never return is to
-	// close the connection under it.
-	quiet := time.AfterFunc(r.hub.stale, func() { conn.Close() })
-	defer quiet.Stop()
-
-	ready := r.read(ctx, beating(quiet, r.hub.stale, resp.Body), out)
+	ready := r.read(ctx, resp.Body, out)
 	if ready.IsZero() {
 		r.failed(ctx, protocol.NoDaemon, out)
 		return 0

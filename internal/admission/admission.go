@@ -5,11 +5,11 @@
 // produces no Session. It goes to the Daemon's own operational log instead, and to
 // the user as a 409 carrying the Refusal.
 //
-// A refused start is an error naming the Session that holds the slot, never a
-// queue position. A queue is a second lifecycle: queued Sessions have to be
-// cancellable, ordered, visible and survive a restart, which is a lot of machinery
-// for a limit of one where the only person in the queue is the person looking at
-// the Session holding the slot.
+// A refused start can name the Session the user needs to stop, and it never
+// gives a queue position. A queue is a second lifecycle: queued Sessions have to
+// be cancellable, ordered, visible and survive a restart, which is a lot of
+// machinery for a limit of one where the only person in the queue is the person
+// looking at the Session holding the slot.
 //
 // Admission is per Host. A Daemon knows only its own Host and never learns about
 // its peers, and VRAM is a per-Host resource anyway, so a global limit would bound
@@ -50,16 +50,17 @@ type Request struct {
 	// Dir is the working directory, already contained.
 	Dir string
 
-	// Live is every Session on this Host that has not ended.
+	// Live names the Sessions that still hold an Admission slot, including during cleanup.
 	Live []Live
 }
 
-// Live is one Session already running on this Host.
+// Live is one Session that holds an Admission slot on this Host.
 type Live struct {
 	Session event.SessionID
 	Harness string
 	Model   string
 	Since   time.Time
+	Closed  bool
 }
 
 // Refusal is why a Session may not start.
@@ -81,9 +82,11 @@ func (SingleSession) Admit(_ context.Context, req Request) *Refusal {
 	if len(req.Live) == 0 {
 		return nil
 	}
-	blocking := make([]event.SessionID, len(req.Live))
-	for i, live := range req.Live {
-		blocking[i] = live.Session
+	var blocking []event.SessionID
+	for _, live := range req.Live {
+		if !live.Closed {
+			blocking = append(blocking, live.Session)
+		}
 	}
 	return &Refusal{
 		Reason:   "one Session at a time on this Host",
