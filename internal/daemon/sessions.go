@@ -710,8 +710,10 @@ func (r *sessions) live() []admission.Live {
 
 	var out []admission.Live
 	for _, s := range r.all {
+		state, _ := s.view.State()
 		out = append(out, admission.Live{
 			Session: s.id, Harness: s.harness, Model: s.model, Since: s.started,
+			Closed: state == session.Closed,
 		})
 	}
 	return out

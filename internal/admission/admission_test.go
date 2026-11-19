@@ -64,6 +64,18 @@ func TestSingleSessionNamesEveryLiveSession(t *testing.T) {
 	}
 }
 
+func TestSingleSessionOmitsClosedSessionsFromBlocking(t *testing.T) {
+	req := Request{Live: []Live{{Session: "s-closed", Closed: true}, {Session: "s-idle"}}}
+
+	got := single.Admit(context.Background(), req)
+	if got == nil {
+		t.Fatal("admitted a Session on a busy Host")
+	}
+	if want := []event.SessionID{"s-idle"}; !slices.Equal(got.Blocking, want) {
+		t.Errorf("Blocking = %v, want %v", got.Blocking, want)
+	}
+}
+
 // There is no configurable count and no second condition. A Request carrying every
 // other field still admits, so nothing here has grown a hidden rule.
 func TestSingleSessionReadsOnlyLive(t *testing.T) {

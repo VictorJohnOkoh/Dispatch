@@ -589,7 +589,7 @@ func TestAdmissionWaitsForModelCleanup(t *testing.T) {
 		t.Fatalf("Stop: %d", stop.Code)
 	}
 	no := h.refusal(t, w, protocol.StatusConflict)
-	if no.Reason != protocol.ReasonAdmission || len(no.Blocking) != 1 || no.Blocking[0] != string(id) {
+	if no.Reason != protocol.ReasonAdmission || len(no.Blocking) != 0 {
 		t.Fatalf("during cleanup: %+v", no)
 	}
 	next := h.idle(t)
