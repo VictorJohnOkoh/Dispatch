@@ -200,3 +200,25 @@ func TestAFlappingHostDoesNotResetTheBackoff(t *testing.T) {
 type dialFn func(context.Context, hostset.HostID) (net.Conn, error)
 
 func (f dialFn) Dial(ctx context.Context, id hostset.HostID) (net.Conn, error) { return f(ctx, id) }
+
+func TestAHostSilentBeforeHTTPHeadersIsRetried(t *testing.T) {
+	h := quick([]Host{{ID: "desk"}}, dialFn(func(context.Context, hostset.HostID) (net.Conn, error) {
+		client, peer := net.Pipe()
+		go func() {
+			defer peer.Close()
+			reader := bufio.NewReader(peer)
+			if _, err := http.ReadRequest(reader); err == nil {
+				reader.ReadByte() // Wait for the Hub to close the channel.
+			}
+		}()
+		return client, nil
+	}))
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+	watch(t, srv.URL, func(f protocol.HostStateFrame) bool {
+		if f.State == protocol.Down && f.Cause != protocol.NoDaemon {
+			t.Fatalf("silent Handshake: %+v", f)
+		}
+		return f.State == protocol.Down
+	})
+}

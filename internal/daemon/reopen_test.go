@@ -151,3 +151,31 @@ func TestFailedReopenWritesErrorThenClosed(t *testing.T) {
 		t.Fatalf("reason: %s", got)
 	}
 }
+
+func TestConcurrentReopenStartsOneRun(t *testing.T) {
+	h := newHost(t)
+	h.chat.serve(helloStream, false)
+	id := h.idle(t)
+	h.command(t, id, "stop", "")
+
+	loading := make(chan struct{})
+	gate := make(chan struct{})
+	h.vendor.loading, h.vendor.gate = loading, gate
+	path := "/v1/sessions/" + string(id) + "/prompts"
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- h.post(t, path, promptBody) }()
+	<-loading
+	second := h.post(t, path, promptBody)
+	close(gate)
+	first := <-done
+	if first.Code != protocol.StatusAccepted {
+		t.Fatalf("first Prompt: %d", first.Code)
+	}
+	if no := h.refusal(t, second, protocol.StatusConflict); no.Reason != protocol.ReasonState {
+		t.Fatalf("second Prompt: %+v", no)
+	}
+	if got := len(h.vendor.loads()); got != 2 {
+		t.Errorf("got %d Model loads, want one start and one reopen", got)
+	}
+	h.command(t, id, "stop", "")
+}

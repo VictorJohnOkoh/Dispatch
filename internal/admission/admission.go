@@ -50,7 +50,7 @@ type Request struct {
 	// Dir is the working directory, already contained.
 	Dir string
 
-	// Live is every Session on this Host that has not ended.
+	// Live names the Sessions that still hold an Admission slot, including during cleanup.
 	Live []Live
 }
 

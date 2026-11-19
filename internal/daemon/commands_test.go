@@ -573,3 +573,39 @@ func TestTheMuxServesEveryEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmissionWaitsForModelCleanup(t *testing.T) {
+	h := newHost(t)
+	id := h.idle(t)
+	unloading, finish := make(chan struct{}), make(chan struct{})
+	h.vendor.unloading, h.vendor.finishUnload = unloading, finish
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- h.post(t, "/v1/sessions/"+string(id)+"/stop", "") }()
+	<-unloading
+	w := h.post(t, "/v1/sessions", startBody)
+	close(finish)
+	stop := <-done
+	if stop.Code != protocol.StatusAccepted {
+		t.Fatalf("Stop: %d", stop.Code)
+	}
+	no := h.refusal(t, w, protocol.StatusConflict)
+	if no.Reason != protocol.ReasonAdmission || len(no.Blocking) != 1 || no.Blocking[0] != string(id) {
+		t.Fatalf("during cleanup: %+v", no)
+	}
+	next := h.idle(t)
+	h.command(t, next, "stop", "")
+}
+
+func TestMissingPolicyLeavesTheLogUnchanged(t *testing.T) {
+	h, id, _ := gated(t, gateStart)
+	before := h.events.Latest()
+	for _, body := range []string{`{}`, `{"policy":null}`} {
+		w := h.post(t, "/v1/sessions/"+string(id)+"/policy", body)
+		if no := h.refusal(t, w, protocol.StatusUnprocessable); no.Reason != protocol.ReasonMalformed {
+			t.Fatalf("policy %s: %+v", body, no)
+		}
+		if h.events.Latest() != before {
+			t.Fatalf("policy %s wrote an Event", body)
+		}
+	}
+}

@@ -703,17 +703,13 @@ func (r *sessions) record(s *Session, e event.Event) {
 	s.view.Apply(e)
 }
 
-// live is every Session that has not ended, which is what admission is asked
-// about.
+// A Session holds its Admission slot until release finishes Model cleanup.
 func (r *sessions) live() []admission.Live {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	var out []admission.Live
 	for _, s := range r.all {
-		if state, _ := s.view.State(); state == session.Closed {
-			continue
-		}
 		out = append(out, admission.Live{
 			Session: s.id, Harness: s.harness, Model: s.model, Since: s.started,
 		})
