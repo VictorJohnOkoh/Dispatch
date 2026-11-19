@@ -5,10 +5,11 @@
 // produces no Session. It goes to the Daemon's own operational log instead, and to
 // the user as a 409 carrying the Refusal.
 //
-// A refused start can name the Session the user needs to stop. A queue is a
-// second lifecycle: queued Sessions have to be cancellable, ordered, visible and
-// survive a restart, which is a lot of machinery for a limit of one where the
-// only person in the queue is the person looking at the Session holding the slot.
+// A refused start can name the Session the user needs to stop, and it never
+// gives a queue position. A queue is a second lifecycle: queued Sessions have to
+// be cancellable, ordered, visible and survive a restart, which is a lot of
+// machinery for a limit of one where the only person in the queue is the person
+// looking at the Session holding the slot.
 //
 // Admission is per Host. A Daemon knows only its own Host and never learns about
 // its peers, and VRAM is a per-Host resource anyway, so a global limit would bound
